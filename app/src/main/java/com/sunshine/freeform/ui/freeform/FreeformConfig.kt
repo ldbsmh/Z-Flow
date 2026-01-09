@@ -25,7 +25,7 @@ data class FreeformConfig(
     var compatibleMode: Boolean = false,
     var rememberPosition: Boolean = false,
     // 挂起大小
-    var floatViewSize: Float = 0.2f,
+    var floatViewSize: Float = 0.26f,
     //
     var freeformSize: Float = 0.75f,
     var freeformSizeLand: Float = 0.9f,

@@ -41,8 +41,8 @@
     <dimen name="freeform_card_corner_radius">16dp</dimen>
     <dimen name="freeform_shadow">4dp</dimen>
     <dimen name="freeform_shadow_height">8dp</dimen>
-    <dimen name="freeform_screen_width_padding">64dp</dimen>
-    <dimen name="freeform_screen_height_padding">64dp</dimen>
+    <dimen name="freeform_screen_width_padding">20dp</dimen>
+    <dimen name="freeform_screen_height_padding">120dp</dimen>
 
     <dimen name="floating_button_height">72dp</dimen>
     <dimen name="floating_button_width">24dp</dimen>
