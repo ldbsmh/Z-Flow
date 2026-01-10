@@ -19,13 +19,13 @@ data class FreeformConfig(
     //使用shizuku/sui阻止小窗跳出到全屏
     var useSuiRefuseToFullScreen: Boolean = false,
     // 降低背景亮度
-    var dimAmount: Float = 0.3f,
+    var dimAmount: Float = 0.4f,
     //兼容模式启动
     @Deprecated("", ReplaceWith(""))
     var compatibleMode: Boolean = false,
     var rememberPosition: Boolean = false,
     // 挂起大小
-    var floatViewSize: Float = 0.26f,
+    var floatViewSize: Float = 0.25f,
     //
     var freeformSize: Float = 0.75f,
     var freeformSizeLand: Float = 0.9f,
