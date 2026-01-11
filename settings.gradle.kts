@@ -3,18 +3,20 @@ pluginManagement {
         gradlePluginPortal()
         google()
         mavenCentral()
-        maven { url 'https://jitpack.io' }
+        maven { url = uri("https://jitpack.io") }
     }
 }
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://jitpack.io' }
+        maven("https://maven.aliyun.com/repository/public")
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
-rootProject.name = "Mi-Freeform"
-include ':app'
-include ':hidden-api'
+rootProject.name = "Flyme-Freeform"
+include(":app")
+include(":hidden-api")

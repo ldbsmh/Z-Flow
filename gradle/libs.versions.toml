@@ -1,0 +1,101 @@
+[versions]
+# Plugin versions
+agp = "9.1.0-alpha03"
+kotlin = "2.3.0"
+ksp = "2.3.4"
+refine = "4.4.0"
+
+# AndroidX Core
+core-ktx = "1.17.0"
+appcompat = "1.7.1"
+lifecycle = "2.10.0"
+
+# UI
+material = "1.13.0"
+constraintlayout = "2.2.1"
+lottie = "6.7.1"
+glide = "5.0.5"
+
+# Navigation
+navigation = "2.9.6"
+
+# Room
+room = "2.8.4"
+
+# Preference
+preference = "1.2.1"
+
+# Shizuku
+shizuku = "13.1.5"
+
+# Rikka Tools
+rikkax-appcompat = "1.6.1"
+rikkax-borderview = "1.1.0"
+rikkax-recyclerview = "1.3.2"
+rikkax-preference = "1.0.3"
+rikkax-refine = "4.4.0"
+
+# Other
+tinypinyin = "2.0.3"
+hiddenapibypass = "6.1"
+annotation = "1.9.1"
+
+# Testing
+junit = "4.13.2"
+androidx-junit = "1.3.0"
+espresso = "3.7.0"
+
+[libraries]
+# Core
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
+androidx-lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
+
+# UI
+refine-gradle-plugin = { module = "dev.rikka.tools.refine:gradle-plugin", version.ref = "rikkax-refine" }
+material = { module = "com.google.android.material:material", version.ref = "material" }
+androidx-constraintlayout = { module = "androidx.constraintlayout:constraintlayout", version.ref = "constraintlayout" }
+lottie = { module = "com.airbnb.android:lottie", version.ref = "lottie" }
+glide = { module = "com.github.bumptech.glide:glide", version.ref = "glide" }
+
+# Navigation
+androidx-navigation-fragment-ktx = { module = "androidx.navigation:navigation-fragment-ktx", version.ref = "navigation" }
+androidx-navigation-ui-ktx = { module = "androidx.navigation:navigation-ui-ktx", version.ref = "navigation" }
+
+# Room
+androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
+
+# Preference
+androidx-preference-ktx = { module = "androidx.preference:preference-ktx", version.ref = "preference" }
+rikkax-preference-simplemenu = { module = "dev.rikka.rikkax.preference:simplemenu-preference", version.ref = "rikkax-preference" }
+
+# Shizuku
+shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
+shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
+
+# Rikka Tools
+rikkax-appcompat = { module = "dev.rikka.rikkax.appcompat:appcompat", version.ref = "rikkax-appcompat" }
+rikkax-borderview = { module = "dev.rikka.rikkax.widget:borderview", version.ref = "rikkax-borderview" }
+rikkax-recyclerview-ktx = { module = "dev.rikka.rikkax.recyclerview:recyclerview-ktx", version.ref = "rikkax-recyclerview" }
+rikkax-refine-runtime = { module = "dev.rikka.tools.refine:runtime", version.ref = "rikkax-refine" }
+rikkax-refine-annotation = { module = "dev.rikka.tools.refine:annotation", version.ref = "rikkax-refine" }
+rikkax-refine-annotation-processor = { module = "dev.rikka.tools.refine:annotation-processor", version.ref = "rikkax-refine" }
+
+# Other
+tinypinyin = { module = "com.github.promeg:tinypinyin", version.ref = "tinypinyin" }
+hiddenapibypass = { module = "org.lsposed.hiddenapibypass:hiddenapibypass", version.ref = "hiddenapibypass" }
+androidx-annotation = { module = "androidx.annotation:annotation", version.ref = "annotation" }
+
+# Testing
+junit = { module = "junit:junit", version.ref = "junit" }
+androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-junit" }
+androidx-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+refine = { id = "dev.rikka.tools.refine", version.ref = "refine" }
