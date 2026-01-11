@@ -1,32 +1,23 @@
 package com.sunshine.freeform.service.notification
 
 import android.annotation.SuppressLint
-import android.app.*
-import android.content.Context
-import android.content.IIntentSender
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.pm.ApplicationInfo
 import android.graphics.drawable.Icon
-import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.util.Log
-import androidx.annotation.RequiresApi
 import com.sunshine.freeform.R
 import com.sunshine.freeform.app.MiFreeform
 import com.sunshine.freeform.room.NotificationAppsEntity
 import com.sunshine.freeform.systemapi.UserHandle
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import org.lsposed.hiddenapibypass.HiddenApiBypass
-import rikka.shizuku.ShizukuBinderWrapper
-import rikka.shizuku.SystemServiceHelper
-import java.lang.reflect.Method
-import java.util.Arrays.stream
 
 
 /**
@@ -48,8 +39,8 @@ class NotificationService : NotificationListenerService(),
      */
     override fun onListenerConnected() {
         super.onListenerConnected()
-        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        sp = application.getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+        notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        sp = application.getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, MODE_PRIVATE)
         viewModel = NotificationViewModel(this)
         enable = sp.getBoolean("notify_freeform", false)
         getNotificationApps()
@@ -78,7 +69,7 @@ class NotificationService : NotificationListenerService(),
         }
     }
 
-    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String) {
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         when(key) {
             "notify_freeform" -> {
                 enable = sp.getBoolean("notify_freeform", false)
@@ -123,7 +114,7 @@ class NotificationService : NotificationListenerService(),
         )
         notificationManager.createNotificationChannel(channel)
 
-        val contentIntent: PendingIntent = if (sbn.notification.contentIntent != null) sbn.notification.contentIntent else sbn.notification.fullScreenIntent
+        val contentIntent: PendingIntent = sbn.notification.contentIntent ?: sbn.notification.fullScreenIntent
         val intent = Intent(this, NotificationIntentService::class.java)
         intent.putExtra("packageName", sbn.packageName)
         intent.putExtra("userId", UserHandle.getUserId(sbn.user))

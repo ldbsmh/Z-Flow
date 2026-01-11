@@ -5,7 +5,8 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
-import android.app.*
+import android.app.ActivityManager
+import android.app.TaskStackListener
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -18,8 +19,18 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
-import android.view.*
-import android.view.animation.*
+import android.view.Display
+import android.view.GestureDetector
+import android.view.IRotationWatcher
+import android.view.InputEvent
+import android.view.KeyEvent
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.Surface
+import android.view.TextureView
+import android.view.View
+import android.view.WindowManager
+import android.view.animation.OvershootInterpolator
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -27,22 +38,16 @@ import androidx.core.animation.addListener
 import com.sunshine.freeform.R
 import com.sunshine.freeform.app.MiFreeform
 import com.sunshine.freeform.databinding.ViewFreeformFlymeBinding
-import com.sunshine.freeform.utils.ServiceUtils.windowManager
-import com.sunshine.freeform.utils.ServiceUtils.displayManager
 import com.sunshine.freeform.utils.ServiceUtils.activityTaskManager
-import com.sunshine.freeform.utils.ServiceUtils.inputManager
+import com.sunshine.freeform.utils.ServiceUtils.displayManager
 import com.sunshine.freeform.utils.ServiceUtils.iWindowManager
-import kotlinx.android.synthetic.main.view_bar.view.*
-import kotlinx.android.synthetic.main.view_bar_flyme.view.*
-import kotlinx.android.synthetic.main.view_floating_button.view.*
-import kotlinx.android.synthetic.main.view_freeform.view.*
-import kotlinx.android.synthetic.main.view_freeform.view.root
-import kotlinx.android.synthetic.main.view_freeform_flyme.view.*
-import kotlinx.coroutines.*
+import com.sunshine.freeform.utils.ServiceUtils.inputManager
+import com.sunshine.freeform.utils.ServiceUtils.windowManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
 import java.lang.reflect.Field
 import java.lang.reflect.Method
-import java.util.*
-import kotlin.collections.ArrayList
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -1318,11 +1323,9 @@ class FreeformView(
                                     if (position != 0) {
                                         isHidden = true
                                         hiddenView = LayoutInflater.from(context).inflate(R.layout.view_floating_button, null, false)
-                                        hiddenView.root.apply {
-                                            setOnTouchListener(this@FloatViewTouchListener)
-                                        }
+                                        hiddenView.setOnTouchListener(this@FloatViewTouchListener)
                                         if (position == 1)
-                                            hiddenView.backgroundView.background = context.getDrawable(R.drawable.floating_button_bg_right)
+                                            hiddenView.findViewById<View>(R.id.backgroundView).background = context.getDrawable(R.drawable.floating_button_bg_right)
 
                                         val floatingButtonWidth = context.resources.getDimension(R.dimen.floating_button_width).toInt()
                                         val floatingButtonHeight = context.resources.getDimension(R.dimen.floating_button_height).toInt()
@@ -1487,7 +1490,7 @@ class FreeformView(
             )
             addListener(
                 onStart = {
-                    hiddenView.root.setOnTouchListener(null)
+                    hiddenView.setOnTouchListener(null)
                     windowManager.removeView(hiddenView)
                     isHidden = false
                 },

@@ -3,16 +3,15 @@ package com.sunshine.freeform.ui.main
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
+import androidx.fragment.app.Fragment
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
-import androidx.fragment.app.Fragment
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
 import com.sunshine.freeform.R
 import com.sunshine.freeform.databinding.ActivityMainBinding
-import kotlinx.android.synthetic.main.activity_main.*
-import java.util.*
+import androidx.core.view.get
 
 class MainActivity : AppCompatActivity() {
 
@@ -44,13 +43,13 @@ class MainActivity : AppCompatActivity() {
             registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
                 override fun onPageSelected(position: Int) {
                     super.onPageSelected(position)
-                    binding.navView.menu.getItem(position).isChecked = true
+                    binding.navView.menu[position].isChecked = true
                 }
             })
             isUserInputEnabled = false
             offscreenPageLimit = 2
         }
-        navView.apply {
+        binding.navView.apply {
             setOnItemSelectedListener {
                 when (it.itemId) {
                     R.id.navigation_home -> {

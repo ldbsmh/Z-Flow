@@ -2,28 +2,34 @@ package com.sunshine.freeform.service
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
-import android.app.Service
-import android.content.*
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
-import android.net.Uri
-import android.os.Build
-import android.os.IBinder
 import android.provider.Settings
-import android.util.Log
-import android.view.*
+import android.view.Display
+import android.view.GestureDetector
+import android.view.IRotationWatcher
+import android.view.IWindowManager
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.Surface
+import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
-import androidx.annotation.RequiresApi
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import com.sunshine.freeform.R
 import com.sunshine.freeform.app.MiFreeform
 import com.sunshine.freeform.broadcast.StartFreeformReceiver
 import com.sunshine.freeform.ui.floating.ChooseAppFloatingView
-import com.sunshine.freeform.ui.freeform.FreeformConfig
 import com.sunshine.freeform.ui.freeform.FreeformService
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
 import kotlin.math.max
@@ -102,16 +108,16 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        sp = getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+        sp = getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, MODE_PRIVATE)
         sp.registerOnSharedPreferenceChangeListener(this)
 
         //切换为无障碍模式
         if (sp.getInt("service_type", SERVICE_TYPE) != SERVICE_TYPE) {
-            sp.edit().putInt("service_type", SERVICE_TYPE).apply()
+            sp.edit { putInt("service_type", SERVICE_TYPE) }
         }
         stopService(Intent(this, ForegroundService::class.java))
 
-        registerReceiver(startFreeformReceiver, IntentFilter("com.sunshine.freeform.start_freeform"))
+        registerReceiver(startFreeformReceiver, IntentFilter("com.sunshine.freeform.start_freeform"), RECEIVER_EXPORTED)
 
         iWindowManager = IWindowManager.Stub.asInterface(
             ShizukuBinderWrapper(
@@ -151,11 +157,11 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
         }
         iWindowManager.watchRotation(rotationWatcher, Display.DEFAULT_DISPLAY)
 
-        displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
         displayManager.registerDisplayListener(displayListener, null)
         defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
 
-        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         windowLayoutParams = WindowManager.LayoutParams()
 
         gestureDetector = GestureDetector(this, this)
@@ -201,7 +207,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
         }
     }
 
-    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String) {
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         when(key) {
             "show_floating" -> {
                 if (getBooleanSp(key, false) && !isShowingFloating && !isShowingChooseApp) {
@@ -252,7 +258,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
     }
 
     private fun setIntSp(key: String, value: Int) {
-        sp.edit().putInt(key, value).apply()
+        sp.edit { putInt(key, value) }
     }
 
     private fun showFloating() {
@@ -287,7 +293,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
                 Toast.makeText(this, getString(R.string.request_overlay_permission), Toast.LENGTH_LONG).show()
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${packageName}")
+                    "package:${packageName}".toUri()
                 )
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(
@@ -377,7 +383,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
     }
 
     override fun onScroll(
-        e1: MotionEvent,
+        e1: MotionEvent?,
         e2: MotionEvent,
         distanceX: Float,
         distanceY: Float
@@ -391,7 +397,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
     }
 
     override fun onFling(
-        e1: MotionEvent,
+        e1: MotionEvent?,
         e2: MotionEvent,
         velocityX: Float,
         velocityY: Float

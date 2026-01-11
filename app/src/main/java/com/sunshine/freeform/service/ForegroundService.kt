@@ -1,23 +1,32 @@
 package com.sunshine.freeform.service
 
 import android.annotation.SuppressLint
-import android.app.*
-import android.content.Context
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
-import android.hardware.SensorManager
 import android.hardware.display.DisplayManager
-import android.net.Uri
 import android.os.IBinder
 import android.provider.Settings
-import android.util.DisplayMetrics
-import android.util.Log
-import android.view.*
+import android.view.Display
+import android.view.GestureDetector
+import android.view.IRotationWatcher
+import android.view.IWindowManager
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.Surface
+import android.view.View
+import android.view.WindowManager
 import android.widget.Toast
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import com.sunshine.freeform.R
 import com.sunshine.freeform.app.MiFreeform
 import com.sunshine.freeform.broadcast.StartFreeformReceiver
@@ -111,10 +120,10 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
     override fun onCreate() {
         super.onCreate()
 
-        sp = getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+        sp = getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, MODE_PRIVATE)
         sp.registerOnSharedPreferenceChangeListener(this)
         if (sp.getInt("service_type", KeepAliveService.SERVICE_TYPE) == SERVICE_TYPE) {
-            registerReceiver(startFreeformReceiver, IntentFilter("com.sunshine.freeform.start_freeform"))
+            registerReceiver(startFreeformReceiver, IntentFilter("com.sunshine.freeform.start_freeform"), RECEIVER_EXPORTED)
 
             //q221208.1 修复屏幕旋转后侧边栏不贴边的问题
             iWindowManager = IWindowManager.Stub.asInterface(
@@ -155,11 +164,11 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
             }
             iWindowManager.watchRotation(rotationWatcher, Display.DEFAULT_DISPLAY)
 
-            displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
             displayManager.registerDisplayListener(displayListener, null)
             defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
 
-            windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             windowLayoutParams = WindowManager.LayoutParams()
 
             gestureDetector = GestureDetector(this, this)
@@ -178,7 +187,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         val notificationIntent = Intent(this, FloatingActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE)
         val builder = Notification.Builder(this.applicationContext,
@@ -228,7 +237,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
         }
     }
 
-    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String) {
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         when(key) {
             "show_floating" -> {
                 if (getBooleanSp(key, false) && !isShowingFloating && !isShowingChooseApp) {
@@ -274,7 +283,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
     }
 
     private fun setIntSp(key: String, value: Int) {
-        sp.edit().putInt(key, value).apply()
+        sp.edit { putInt(key, value) }
     }
 
     private fun showFloating() {
@@ -309,7 +318,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
                 Toast.makeText(this, getString(R.string.request_overlay_permission), Toast.LENGTH_LONG).show()
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${packageName}")
+                    "package:${packageName}".toUri()
                 )
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(
@@ -399,7 +408,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
     }
 
     override fun onScroll(
-        e1: MotionEvent,
+        e1: MotionEvent?,
         e2: MotionEvent,
         distanceX: Float,
         distanceY: Float
@@ -413,7 +422,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
     }
 
     override fun onFling(
-        e1: MotionEvent,
+        e1: MotionEvent?,
         e2: MotionEvent,
         velocityX: Float,
         velocityY: Float

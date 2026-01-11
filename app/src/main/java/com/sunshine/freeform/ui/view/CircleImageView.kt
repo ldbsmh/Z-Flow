@@ -9,7 +9,6 @@ import android.util.AttributeSet
 import android.view.View
 import android.view.ViewOutlineProvider
 import androidx.appcompat.widget.AppCompatImageView
-import com.sunshine.freeform.R
 
 /**
  * @Author : jiyajie
@@ -70,17 +69,17 @@ class CircleImageView @JvmOverloads constructor(
 
     }
 
-    override fun draw(canvas: Canvas?){
+    override fun draw(canvas: Canvas){
         var clip = false
         if (mRadius > 0) {
             clip = true
-            canvas?.save()
-            path?.let { canvas?.clipPath(it) }
+            canvas.save()
+            path?.let { canvas.clipPath(it) }
 
         }
         super.draw(canvas)
         if (clip) {
-            canvas?.restore()
+            canvas.restore()
         }
     }
 }
