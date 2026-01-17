@@ -12,6 +12,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
 import android.hardware.display.VirtualDisplay
@@ -110,7 +111,6 @@ class FreeformView(
 
     //触摸监听
     private val touchListener = TouchListener()
-    private val touchListenerPreQ = TouchListenerPreQ()
 
     //屏幕宽高，不保证大小
     private var realScreenWidth = 0
@@ -392,11 +392,7 @@ class FreeformView(
         binding.bottomBar.middleView.setOnTouchListener(this@FreeformView)
         binding.bottomBar.sideView.setOnTouchListener(this@FreeformView)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            binding.textureView.setOnTouchListener(touchListener)
-        } else {
-            binding.textureView.setOnTouchListener(touchListenerPreQ)
-        }
+        binding.textureView.setOnTouchListener(touchListener)
 
         if (!FreeformHelper.screenIsPortrait(screenRotation)) {
             hangUpPosition[0] = true
@@ -1398,11 +1394,7 @@ class FreeformView(
 
     @SuppressLint("ClickableViewAccessibility")
     private fun floatViewToMiniView() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            binding.textureView.setOnTouchListener(touchListener)
-        } else {
-            binding.textureView.setOnTouchListener(touchListenerPreQ)
-        }
+        binding.textureView.setOnTouchListener(touchListener)
 
         val windowCoordinate = intArrayOf(
             windowLayoutParams.x,
@@ -1699,100 +1691,19 @@ class FreeformView(
          * 触控处理
          */
         private fun handleTouch(event: MotionEvent) {
-            val pointerCoords: Array<MotionEvent.PointerCoords?> = arrayOfNulls(event.pointerCount)
-            val pointerProperties: Array<MotionEvent.PointerProperties?> = arrayOfNulls(event.pointerCount)
-            for (i in 0 until event.pointerCount) {
-                val oldCoords = MotionEvent.PointerCoords()
-                val pointerProperty = MotionEvent.PointerProperties()
-                event.getPointerCoords(i, oldCoords)
-                event.getPointerProperties(i, pointerProperty)
-                pointerCoords[i] = oldCoords
-                pointerCoords[i]!!.apply {
-                    x = oldCoords.x / scaleX
-                    y = oldCoords.y / scaleY
-                }
-                pointerProperties[i] = pointerProperty
-            }
 
-            val newEvent = MotionEvent.obtain(
-                event.downTime,
-                event.eventTime,
-                event.action,
-                event.pointerCount,
-                pointerProperties,
-                pointerCoords,
-                event.metaState,
-                event.buttonState,
-                event.xPrecision,
-                event.yPrecision,
-                event.deviceId,
-                event.edgeFlags,
-                event.source,
-                event.flags
-            )
+            val newEvent = MotionEvent.obtain(event)
 
+            val matrix = Matrix()
+            matrix.setScale(1f/ scaleX, 1f/scaleY)
+
+            newEvent.transform(matrix)
             setDisplayIdMethod?.invoke(newEvent, virtualDisplay.display.displayId)
             inputManager.injectInputEvent(newEvent, 0)
             newEvent.recycle()
         }
     }
 
-    private inner class TouchListenerPreQ : View.OnTouchListener {
-        @SuppressLint("ClickableViewAccessibility")
-        override fun onTouch(v: View, event: MotionEvent): Boolean {
-            handleTouch(event)
-            when(event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    touchId = R.id.textureView
-                }
-                MotionEvent.ACTION_UP -> {
-                    touchId = -1
-                }
-            }
-            return true
-        }
-
-        /**
-         * 触控处理
-         */
-        private fun handleTouch(event: MotionEvent) {
-            val pointerCoords: Array<MotionEvent.PointerCoords?> = arrayOfNulls(event.pointerCount)
-            val pointerProperties: Array<MotionEvent.PointerProperties?> = arrayOfNulls(event.pointerCount)
-            for (i in 0 until event.pointerCount) {
-                val oldCoords = MotionEvent.PointerCoords()
-                val pointerProperty = MotionEvent.PointerProperties()
-                event.getPointerCoords(i, oldCoords)
-                event.getPointerProperties(i, pointerProperty)
-                pointerCoords[i] = oldCoords
-                pointerCoords[i]!!.apply {
-                    x = oldCoords.x / scaleX
-                    y = oldCoords.y / scaleY
-                }
-                pointerProperties[i] = pointerProperty
-            }
-
-            val newEvent = MotionEvent.obtain(
-                event.downTime,
-                event.eventTime,
-                event.action,
-                event.pointerCount,
-                pointerProperties,
-                pointerCoords,
-                event.metaState,
-                event.buttonState,
-                event.xPrecision,
-                event.yPrecision,
-                event.deviceId,
-                event.edgeFlags,
-                event.source,
-                event.flags
-            )
-            inputManager.injectInputEvent(newEvent, virtualDisplay.display.displayId)
-            newEvent.recycle()
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.Q)
     private inner class MTaskStackListener : TaskStackListener() {
         override fun onTaskCreated(tId: Int, componentName: ComponentName?) {
             if (config.intent !is Intent) return
