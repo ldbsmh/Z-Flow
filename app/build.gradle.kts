@@ -69,7 +69,7 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
 
-    compileOnly(files("libs/XposedBridgeAPI-89.jar"))
+    compileOnly(libs.xposed.api)
 
     implementation(libs.rikkax.appcompat)
     implementation(libs.rikkax.borderview)

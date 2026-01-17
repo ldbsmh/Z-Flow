@@ -1,6 +1,6 @@
 [versions]
 # Plugin versions
-agp = "9.1.0-alpha03"
+agp = "9.1.0-alpha05"
 kotlin = "2.3.0"
 ksp = "2.3.4"
 refine = "4.4.0"
@@ -9,6 +9,9 @@ refine = "4.4.0"
 core-ktx = "1.17.0"
 appcompat = "1.7.1"
 lifecycle = "2.10.0"
+
+# Xposed
+xposed = "82"
 
 # UI
 material = "1.13.0"
@@ -50,6 +53,9 @@ espresso = "3.7.0"
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 androidx-lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
+
+# Xposed
+xposed-api = { module = "de.robv.android.xposed:api", version.ref = "xposed" }
 
 # UI
 refine-gradle-plugin = { module = "dev.rikka.tools.refine:gradle-plugin", version.ref = "rikkax-refine" }
