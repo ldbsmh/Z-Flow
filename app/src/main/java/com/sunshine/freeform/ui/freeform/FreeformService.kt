@@ -190,7 +190,7 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
         val pendingIntentHidden = Refine.unsafeCast<PendingIntentHidden>(pendingIntent)
         val activityOptionsHidden = Refine.unsafeCast<ActivityOptionsHidden>(options).setCallerDisplayId(displayId)
         return activityManager.sendIntentSender(
-            pendingIntentHidden.target, pendingIntentHidden.whitelistToken, 0, null,
+            null, pendingIntentHidden.target, pendingIntentHidden.whitelistToken, 0, null,
             null, null, null, activityOptionsHidden.toBundle()
         )
     }

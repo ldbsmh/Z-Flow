@@ -7,6 +7,7 @@ import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.IInterface;
+import android.os.RemoteException;
 
 import java.util.List;
 
@@ -37,13 +38,13 @@ public interface IActivityManager extends IInterface {
             int userId);
 
     int sendIntentSender(
-            IIntentSender target,
-            IBinder whitelistToken,
-            int code,
-            Intent intent,
-            String resolvedType,
-            IIntentReceiver finishedReceiver,
-            String requiredPermission,
-            Bundle options);
-
+        IApplicationThread caller, 
+        IIntentSender target, 
+        IBinder whitelistToken, 
+        int code, 
+        Intent intent, 
+        String resolvedType, 
+        IIntentReceiver finishedReceiver, 
+        String requiredPermission, 
+        Bundle options) throws RemoteException;
 }
