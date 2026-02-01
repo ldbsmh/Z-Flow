@@ -49,6 +49,9 @@
     <string name="start_qq_fail">打开QQ失败</string>
     <string name="sui_start_short">Sui已激活</string>
     <string name="shizuku_start_short">Shizuku已激活</string>
+    <string name="service_start_short">服务已激活</string>
+    <string name="service_start">服务已运行</string>
+    <string name="service_no_start">点击初始化服务</string>
     <string name="xposed_start_short">Xposed存在</string>
     <string name="home_accessibility_warn_message">当前保活模式为无障碍服务，所以需要开启无障碍服务才可以正常运行。如果在你的设备上无障碍服务有问题或者你不想使用无障碍模式，可以去设置中切换保活模式</string>
     <string name="go_to_start_accessibility">开启无障碍</string>

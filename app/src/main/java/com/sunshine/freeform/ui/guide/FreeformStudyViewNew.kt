@@ -1,7 +1,10 @@
 package com.sunshine.freeform.ui.guide
 
 import android.annotation.SuppressLint
-import android.app.*
+import android.app.ActivityManager
+import android.app.IActivityManager
+import android.app.IActivityTaskManager
+import android.app.TaskStackListener
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -9,20 +12,35 @@ import android.graphics.SurfaceTexture
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.hardware.input.IInputManager
-import android.net.Uri
-import android.os.Build
+import android.os.ServiceManager
+import android.os.SystemClock
 import android.provider.Settings
-import android.view.*
+import android.view.Display
+import android.view.GestureDetector
+import android.view.IWindowManager
+import android.view.InputDevice
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.Surface
+import android.view.TextureView
+import android.view.View
+import android.view.WindowManager
 import android.widget.Toast
-import androidx.annotation.RequiresApi
+import androidx.core.net.toUri
 import com.sunshine.freeform.R
 import com.sunshine.freeform.app.MiFreeform
-import com.sunshine.freeform.bean.MotionEventBean
 import com.sunshine.freeform.databinding.ViewFreeformBinding
-import com.sunshine.freeform.ui.freeform.*
-import kotlinx.coroutines.*
-import rikka.shizuku.ShizukuBinderWrapper
-import rikka.shizuku.SystemServiceHelper
+import com.sunshine.freeform.ui.freeform.FreeformConfig
+import com.sunshine.freeform.ui.freeform.FreeformHelper
+import com.sunshine.freeform.ui.freeform.FreeformViewAbs
+import com.sunshine.freeform.ui.freeform.FreeformViewModel
+import com.sunshine.freeform.ui.freeform.ScreenListener
+import com.sunshine.freeform.utils.ServiceUtils
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import kotlin.math.abs
@@ -30,6 +48,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+@DelicateCoroutinesApi
 class FreeformStudyViewNew(
     override val config: FreeformConfig,
     private val context: Context,
@@ -159,7 +178,6 @@ class FreeformStudyViewNew(
     //挂起位置，0：是否在左，1：是否在上
     private val hangUpPosition = BooleanArray(2)
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     private val taskStackListener = object : TaskStackListener() {
         override fun onTaskRemovalStarted(taskInfo: ActivityManager.RunningTaskInfo) {
             if (taskInfo.taskId == taskId) {
@@ -172,11 +190,12 @@ class FreeformStudyViewNew(
         override fun onTaskDisplayChanged(tId: Int, newDisplayId: Int) {
             if (taskId == -1 && newDisplayId == virtualDisplay.display.displayId) taskId = tId
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 if (config.useSuiRefuseToFullScreen && !isDestroy && tId == taskId && newDisplayId == Display.DEFAULT_DISPLAY) {
-                    activityTaskManager?.moveRootTaskToDisplay(tId, virtualDisplay.display.displayId)
+                    activityTaskManager?.moveRootTaskToDisplay(
+                        tId,
+                        virtualDisplay.display.displayId
+                    )
                 }
-            }
         }
 
         override fun onTaskMovedToFront(taskInfo: ActivityManager.RunningTaskInfo) {
@@ -290,22 +309,19 @@ class FreeformStudyViewNew(
     }
 
     private fun initSystemService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             setDisplayIdMethod = MotionEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
-        }
         try {
-            activityTaskManager = IActivityTaskManager.Stub.asInterface(ShizukuBinderWrapper(SystemServiceHelper.getSystemService("activity_task")))
-            //目前仅支持Android Q及以上版本
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                activityTaskManager?.registerTaskStackListener(taskStackListener)
-            }
-            activityManager = IActivityManager.Stub.asInterface(ShizukuBinderWrapper(SystemServiceHelper.getSystemService("activity")))
-        }catch (e: Exception) {}
+            activityTaskManager =
+                IActivityTaskManager.Stub.asInterface(ServiceManager.getService("activity_task"))
+            activityTaskManager?.registerTaskStackListener(taskStackListener)
+            activityManager =
+                IActivityManager.Stub.asInterface(ServiceManager.getService("activity"))
+        } catch (e: Exception) {}
         try {
-            inputManager = IInputManager.Stub.asInterface(ShizukuBinderWrapper(SystemServiceHelper.getSystemService("input")))
-        }catch (e: Exception) {}
+            inputManager = IInputManager.Stub.asInterface(ServiceManager.getService("input"))
+        } catch (e: Exception) {}
         try {
-            iWindowManager = IWindowManager.Stub.asInterface(ShizukuBinderWrapper(SystemServiceHelper.getSystemService("window")))
+            iWindowManager = IWindowManager.Stub.asInterface(ServiceManager.getService("window"))
         } catch (e: Exception) {}
     }
 
@@ -409,7 +425,7 @@ class FreeformStudyViewNew(
                 virtualDisplay.surface = Surface(surface)
 
                 if (firstInit) {
-                    if (MiFreeform.me.controlService?.execShell("am start -n ${config.componentName!!.packageName}/${config.componentName!!.className} --user ${config.userId} --display ${virtualDisplay.display.displayId}", false) == true) {
+                    if (MiFreeform.me.execShell("am start -n ${config.componentName!!.packageName}/${config.componentName!!.className} --user ${config.userId} --display ${virtualDisplay.display.displayId}", false)) {
                         firstInit = false
                     }
                     //启动失败
@@ -446,7 +462,7 @@ class FreeformStudyViewNew(
     }
 
     fun showWindow() {
-        if (MiFreeform.me.controlService != null) {
+        if (ServiceUtils.isInitialized) {
             if (initSuccess) {
                 if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
                     windowLayoutParams.apply {
@@ -509,7 +525,7 @@ class FreeformStudyViewNew(
                             Toast.makeText(context, context.getString(R.string.request_overlay_permission), Toast.LENGTH_LONG).show()
                             val intent = Intent(
                                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                Uri.parse("package:${context.packageName}")
+                                "package:${context.packageName}".toUri()
                             )
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             context.startActivity(
@@ -658,14 +674,8 @@ class FreeformStudyViewNew(
      */
     private fun moveTaskToDefaultDisplay() {
         isDestroy = true
-//        if (activityTaskManager != null) {
-//            activityTaskManager!!.moveRootTaskToDisplay(taskId, 0)
-//        } else {
-//            MiFreeform.miFreeformViewModel.getControlService()?.moveStack(virtualDisplay.display.displayId)
-//        }
-        if (MiFreeform.me.controlService?.moveStack(virtualDisplay.display.displayId) != true) {
-            MiFreeform.me.controlService?.execShell("am start -n ${config.componentName!!.packageName}/${config.componentName!!.className} --user ${config.userId} --display 0", false)
-        }
+        // Move task to default display by restarting on display 0
+        MiFreeform.me.execShell("am start -n ${config.componentName!!.packageName}/${config.componentName!!.className} --user ${config.userId} --display 0", false)
         destroy()
     }
 
@@ -913,7 +923,8 @@ class FreeformStudyViewNew(
     private fun handleTouch(event: MotionEvent) {
         if (inputManager != null) {
             val pointerCoords: Array<MotionEvent.PointerCoords?> = arrayOfNulls(event.pointerCount)
-            val pointerProperties: Array<MotionEvent.PointerProperties?> = arrayOfNulls(event.pointerCount)
+            val pointerProperties: Array<MotionEvent.PointerProperties?> =
+                arrayOfNulls(event.pointerCount)
             for (i in 0 until event.pointerCount) {
                 val oldCoords = MotionEvent.PointerCoords()
                 val pointerProperty = MotionEvent.PointerProperties()
@@ -945,13 +956,8 @@ class FreeformStudyViewNew(
             )
 
             //Andorid Q及以上系统
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                setDisplayIdMethod?.invoke(newEvent, virtualDisplay.display.displayId)
-
-                inputManager!!.injectInputEvent(newEvent, 0)
-            } else {
-                inputManager!!.injectInputEvent(newEvent, virtualDisplay.display.displayId)
-            }
+            setDisplayIdMethod?.invoke(newEvent, virtualDisplay.display.displayId)
+            inputManager!!.injectInputEvent(newEvent, 0)
             newEvent.recycle()
         } else {
             val count = event.pointerCount
@@ -964,8 +970,41 @@ class FreeformStudyViewNew(
                 xArray[i] = coords.x / scale
                 yArray[i] = coords.y / scale
             }
-            MiFreeform.me.controlService?.touch(MotionEventBean(event.action, xArray, yArray, virtualDisplay.display.displayId))
+            // Direct touch injection for multi-touch
+            injectTouchEvent(event.action, xArray, yArray, virtualDisplay.display.displayId)
         }
+    }
+
+    private fun injectTouchEvent(action: Int, xArray: FloatArray, yArray: FloatArray, displayId: Int) {
+        val count = xArray.size
+        val pointerProperties = Array(count) { i ->
+            MotionEvent.PointerProperties().apply {
+                id = i
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+        }
+        val pointerCoords = Array(count) { i ->
+            MotionEvent.PointerCoords().apply {
+                orientation = 0f
+                pressure = 1f
+                size = 1f
+                x = xArray[i]
+                y = yArray[i]
+            }
+        }
+        val motionEvent = MotionEvent.obtain(
+            SystemClock.uptimeMillis(),
+            SystemClock.uptimeMillis(),
+            action,
+            count,
+            pointerProperties,
+            pointerCoords,
+            0, 0, 1.0f, 1.0f, -1, 0,
+            InputDevice.SOURCE_TOUCHSCREEN, 0
+        )
+        setDisplayIdMethod?.invoke(motionEvent, displayId)
+        inputManager?.injectInputEvent(motionEvent, 0)
+        motionEvent.recycle()
     }
 
     /**
@@ -1100,30 +1139,32 @@ class FreeformStudyViewNew(
         isDestroy = true
         try {
             windowManager.removeViewImmediate(binding.root)
-        }catch (e: Exception) { }
+        } catch (e: Exception) {
+        }
 
         try {
             virtualDisplay.surface.release()
             virtualDisplay.release()
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+        }
 
         try {
             //移除屏幕监听
             displayManager.unregisterDisplayListener(displayListener)
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+        }
 
 
         try {
             screenListener.unregisterListener()
-        } catch (e: Exception) {}
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            activityTaskManager?.unregisterTaskStackListener(taskStackListener)
+        } catch (e: Exception) {
         }
+
+        activityTaskManager?.unregisterTaskStackListener(taskStackListener)
     }
 
     init {
-        if (MiFreeform.me.pingServiceBinder()) {
+        if (ServiceUtils.isInitialized) {
             //尝试恢复小窗状态
             initSystemService()
             initConfig()
@@ -1131,29 +1172,17 @@ class FreeformStudyViewNew(
             initView()
         }
         else {
-            MiFreeform.me.initShizuku()
+            MiFreeform.me.initServices()
             Toast.makeText(context, context.getString(R.string.service_not_running), Toast.LENGTH_SHORT).show()
         }
     }
 
     companion object {
-        private const val TAG = "FreeformView"
 
         private const val MIN_WIDTH = 400
         private const val MIN_HEIGHT = 600
 
         private const val HANGUP_HEIGHT = 500
-
-        private const val QQ = "com.tencent.mobileqq"
-        private const val YOUTUBE = "com.google.android.youtube"
-        private const val YOUTUBE_ACTIVITY = "com.google.android.youtube.HomeActivity"
-
-        const val REMEMBER_X = "freeform_remember_x"
-        const val REMEMBER_Y = "freeform_remember_y"
-        const val REMEMBER_LAND_X = "freeform_remember_land_x"
-        const val REMEMBER_LAND_Y = "freeform_remember_land_y"
-        const val REMEMBER_HEIGHT = "freeform_remember_height"
-        const val REMEMBER_LAND_HEIGHT = "freeform_remember_land_height"
 
         private const val VIRTUAL_DISPLAY_ROTATION_PORTRAIT = 1
         private const val VIRTUAL_DISPLAY_ROTATION_LANDSCAPE = 0

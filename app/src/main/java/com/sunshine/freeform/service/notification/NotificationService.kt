@@ -143,28 +143,6 @@ class NotificationService : NotificationListenerService(),
         notificationManager.notify(2, notification)
     }
 
-//    @RequiresApi(Build.VERSION_CODES.P)
-//    @SuppressLint("DiscouragedPrivateApi")
-//    private fun getIntent(pendingIntent: PendingIntent?): Intent? {
-//        var intent: Intent? = null
-//        try {
-////            val getIntent: Method = PendingIntent::class.java.getDeclaredMethod("getIntent")
-////            getIntent.isAccessible = true
-//            val mTargetField = PendingIntent::class.java.getDeclaredField("mTarget")
-//            mTargetField.isAccessible = true
-//
-//            val mTarget = mTargetField.get(pendingIntent)
-//            Log.e(TAG, "$mTarget")
-//
-//            val iActivityManager = IActivityManager.Stub.asInterface(ShizukuBinderWrapper(SystemServiceHelper.getSystemService("activity")))
-//
-//            intent = iActivityManager?.getIntentForIntentSender(mTarget as IIntentSender)
-//        } catch (e: Exception) {
-//            Log.e(TAG, "$e")
-//        }
-//        return intent
-//    }
-
     companion object {
         const val CHANNEL_ID = "CHANNEL_ID_SUNSHINE_FREEFORM_NOTIFICATION"
         private const val TAG = "NotificationService"

@@ -8,6 +8,7 @@ import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.os.ServiceManager
 import android.provider.Settings
 import android.view.Display
 import android.view.GestureDetector
@@ -30,8 +31,6 @@ import com.sunshine.freeform.ui.freeform.FreeformService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
-import rikka.shizuku.ShizukuBinderWrapper
-import rikka.shizuku.SystemServiceHelper
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -120,8 +119,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
         registerReceiver(startFreeformReceiver, IntentFilter("com.sunshine.freeform.start_freeform"), RECEIVER_EXPORTED)
 
         iWindowManager = IWindowManager.Stub.asInterface(
-            ShizukuBinderWrapper(
-                SystemServiceHelper.getSystemService("window"))
+            ServiceManager.getService("window")
         )
         rotationWatcher = object : IRotationWatcher.Stub() {
             override fun onRotationChanged(rotation: Int) {

@@ -33,6 +33,9 @@
     <string name="start_qq_fail">Failed to open QQ</string>
     <string name="sui_start_short">Sui activated</string>
     <string name="shizuku_start_short">Shizuku is active</string>
+    <string name="service_start_short">Service active</string>
+    <string name="service_start">Service is running</string>
+    <string name="service_no_start">Click to initialize service</string>
     <string name="xposed_start_short">Xposed exists</string>
     <string name="accessibility_desc">Mi-Freeform keep alive service. This service can ensure the background survival of Mi-Freeform. Mi-Freeform does not collect any information through this service.</string>
     <string name="request_overlay_permission_fail">Unable to jump to the settings interface, please manually go to the settings to enable the \"display on top of other application interfaces\" permission of the Mi-Freeform</string>

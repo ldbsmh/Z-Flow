@@ -1,22 +1,19 @@
 package com.sunshine.freeform.ui.main
 
-import android.app.IActivityTaskManager
-import android.app.TaskStackListener
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
-import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+import androidx.fragment.app.Fragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.sunshine.freeform.R
@@ -26,7 +23,6 @@ import com.sunshine.freeform.hook.utils.HookTest
 import com.sunshine.freeform.service.KeepAliveService
 import com.sunshine.freeform.ui.guide.GuideActivity
 import com.sunshine.freeform.utils.PermissionUtils
-import rikka.sui.Sui
 
 class HomeFragment : Fragment(), View.OnClickListener {
 
@@ -84,7 +80,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
             KeepAliveService.SERVICE_TYPE -> {
                 if (!result) {
                     binding.materialCardViewAccessibilityInfo.visibility = View.VISIBLE
-                    binding.infoAccessibilityBg.setBackgroundColor(resources.getColor(R.color.warn_color))
+                    binding.infoAccessibilityBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.warn_color))
                     binding.imageViewAccessibilityService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_error_white))
                     binding.textViewAccessibilityServiceInfo.text = getString(R.string.accessibility_no_start)
                 } else {
@@ -98,15 +94,15 @@ class HomeFragment : Fragment(), View.OnClickListener {
     }
 
     private fun checkShizukuPermission(): Boolean {
-        val result = MiFreeform.me?.isRunning?.value!!
+        val result = MiFreeform.me.isRunning.value!!
         if (result) {
-            binding.infoShizukuBg.setBackgroundColor(resources.getColor(R.color.success_color))
+            binding.infoShizukuBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.success_color))
             binding.imageViewShizukuService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_done))
-            binding.textViewShizukuServiceInfo.text = if (Sui.isSui()) getString(R.string.sui_start_short) else getString(R.string.shizuku_start_short)
+            binding.textViewShizukuServiceInfo.text = getString(R.string.service_start_short)
         } else {
-            binding.infoShizukuBg.setBackgroundColor(resources.getColor(R.color.warn_color))
+            binding.infoShizukuBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.warn_color))
             binding.imageViewShizukuService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_error_white))
-            binding.textViewShizukuServiceInfo.text = getString(R.string.shizuku_no_start)
+            binding.textViewShizukuServiceInfo.text = getString(R.string.service_no_start)
         }
         return result
     }
@@ -114,7 +110,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
     private fun checkXposedPermission() {
         val isActive = HookTest.checkXposed()
         if (isActive) {
-            binding.infoXposedBg.setBackgroundColor(resources.getColor(R.color.success_color))
+            binding.infoXposedBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.success_color))
             binding.imageViewXposedService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_done))
             binding.textViewXposedServiceInfo.text = getString(R.string.xposed_start_short)
             binding.textViewXposedServiceInfo.requestFocus()
@@ -140,7 +136,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
                 }
             }
             R.id.materialCardView_shizuku_info -> {
-                MiFreeform.me?.initShizuku()
+                MiFreeform.me.initServices()
                 if (checkShizukuPermission()) {
                     Snackbar.make(binding.root, getString(R.string.shizuku_start), Snackbar.LENGTH_SHORT).show()
                 } else {
@@ -168,13 +164,13 @@ class HomeFragment : Fragment(), View.OnClickListener {
             }
 
             R.id.button_question -> {
-                val uri = Uri.parse(COMMON_QUESTION_ZH)
+                val uri = COMMON_QUESTION_ZH.toUri()
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
             }
 
             R.id.button_open_api -> {
-                val uri = Uri.parse(OPEN_API_ZH)
+                val uri = OPEN_API_ZH.toUri()
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
             }

@@ -14,6 +14,7 @@ import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.os.IBinder
+import android.os.ServiceManager
 import android.provider.Settings
 import android.view.Display
 import android.view.GestureDetector
@@ -36,8 +37,6 @@ import com.sunshine.freeform.ui.freeform.FreeformService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
-import rikka.shizuku.ShizukuBinderWrapper
-import rikka.shizuku.SystemServiceHelper
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -127,8 +126,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
 
             //q221208.1 修复屏幕旋转后侧边栏不贴边的问题
             iWindowManager = IWindowManager.Stub.asInterface(
-                ShizukuBinderWrapper(
-                    SystemServiceHelper.getSystemService("window"))
+                ServiceManager.getService("window")
             )
             rotationWatcher = object : IRotationWatcher.Stub() {
                 override fun onRotationChanged(rotation: Int) {
