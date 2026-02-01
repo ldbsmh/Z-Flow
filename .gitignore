@@ -32,4 +32,5 @@ google-services.json
 .kotlin/
 .DS_Store
 *.hprof
-CLAUDE.md
+*claude*
+*CLAUDE*

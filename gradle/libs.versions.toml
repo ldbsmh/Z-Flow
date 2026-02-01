@@ -1,8 +1,8 @@
 [versions]
 # Plugin versions
-agp = "9.1.0-alpha05"
+agp = "9.0.0"
 kotlin = "2.3.0"
-ksp = "2.3.4"
+ksp = "2.3.5"
 refine = "4.4.0"
 
 # AndroidX Core
@@ -20,7 +20,7 @@ lottie = "6.7.1"
 glide = "5.0.5"
 
 # Navigation
-navigation = "2.9.6"
+navigation = "2.9.7"
 
 # Room
 room = "2.8.4"
@@ -52,6 +52,7 @@ espresso = "3.7.0"
 # Core
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
+kotlin-gradle-plugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
 androidx-lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
 
 # Xposed
@@ -102,6 +103,5 @@ androidx-espresso-core = { module = "androidx.test.espresso:espresso-core", vers
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 refine = { id = "dev.rikka.tools.refine", version.ref = "refine" }

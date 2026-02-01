@@ -1,11 +1,13 @@
+import com.android.build.api.dsl.ApplicationExtension
+
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.refine)
 }
 
-android {
+extensions.configure<ApplicationExtension> {
+    namespace = "com.sunshine.freeform"
     compileSdk = 36
 
     defaultConfig {
@@ -49,8 +51,6 @@ android {
         buildConfig = true
         viewBinding = true
     }
-
-    namespace = "com.sunshine.freeform"
 }
 
 configurations.all {
