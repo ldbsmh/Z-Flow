@@ -1,22 +1,19 @@
 package com.sunshine.freeform.ui.main
 
-import android.app.IActivityTaskManager
-import android.app.TaskStackListener
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
-import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+import androidx.fragment.app.Fragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.sunshine.freeform.R
@@ -24,9 +21,7 @@ import com.sunshine.freeform.app.MiFreeform
 import com.sunshine.freeform.databinding.FragmentHomeBinding
 import com.sunshine.freeform.hook.utils.HookTest
 import com.sunshine.freeform.service.KeepAliveService
-import com.sunshine.freeform.ui.guide.GuideActivity
 import com.sunshine.freeform.utils.PermissionUtils
-import rikka.sui.Sui
 
 class HomeFragment : Fragment(), View.OnClickListener {
 
@@ -56,7 +51,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
         super.onViewCreated(view, savedInstanceState)
 
         sp = requireContext().getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
-        checkShizukuPermission()
+        checkFreeformManagerStatus()
         checkXposedPermission()
         checkAccessibilityPermission()
         accessibilityRFAR = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -66,7 +61,6 @@ class HomeFragment : Fragment(), View.OnClickListener {
         binding.materialCardViewXposedInfo.setOnClickListener(this)
         binding.materialCardViewShizukuInfo.setOnClickListener(this)
         binding.materialCardViewAccessibilityInfo.setOnClickListener(this)
-        binding.buttonGuide.setOnClickListener(this)
         binding.buttonQuestion.setOnClickListener(this)
         binding.buttonOpenApi.setOnClickListener(this)
     }
@@ -84,7 +78,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
             KeepAliveService.SERVICE_TYPE -> {
                 if (!result) {
                     binding.materialCardViewAccessibilityInfo.visibility = View.VISIBLE
-                    binding.infoAccessibilityBg.setBackgroundColor(resources.getColor(R.color.warn_color))
+                    binding.infoAccessibilityBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.warn_color))
                     binding.imageViewAccessibilityService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_error_white))
                     binding.textViewAccessibilityServiceInfo.text = getString(R.string.accessibility_no_start)
                 } else {
@@ -97,16 +91,16 @@ class HomeFragment : Fragment(), View.OnClickListener {
         }
     }
 
-    private fun checkShizukuPermission(): Boolean {
-        val result = MiFreeform.me?.isRunning?.value!!
+    private fun checkFreeformManagerStatus(): Boolean {
+        val result = MiFreeform.me.isRunning.value ?: false
         if (result) {
-            binding.infoShizukuBg.setBackgroundColor(resources.getColor(R.color.success_color))
+            binding.infoShizukuBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.success_color))
             binding.imageViewShizukuService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_done))
-            binding.textViewShizukuServiceInfo.text = if (Sui.isSui()) getString(R.string.sui_start_short) else getString(R.string.shizuku_start_short)
+            binding.textViewShizukuServiceInfo.text = getString(R.string.xposed_service_connected)
         } else {
-            binding.infoShizukuBg.setBackgroundColor(resources.getColor(R.color.warn_color))
+            binding.infoShizukuBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.warn_color))
             binding.imageViewShizukuService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_error_white))
-            binding.textViewShizukuServiceInfo.text = getString(R.string.shizuku_no_start)
+            binding.textViewShizukuServiceInfo.text = getString(R.string.xposed_service_not_connected)
         }
         return result
     }
@@ -114,7 +108,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
     private fun checkXposedPermission() {
         val isActive = HookTest.checkXposed()
         if (isActive) {
-            binding.infoXposedBg.setBackgroundColor(resources.getColor(R.color.success_color))
+            binding.infoXposedBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.success_color))
             binding.imageViewXposedService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_done))
             binding.textViewXposedServiceInfo.text = getString(R.string.xposed_start_short)
             binding.textViewXposedServiceInfo.requestFocus()
@@ -140,11 +134,11 @@ class HomeFragment : Fragment(), View.OnClickListener {
                 }
             }
             R.id.materialCardView_shizuku_info -> {
-                MiFreeform.me?.initShizuku()
-                if (checkShizukuPermission()) {
-                    Snackbar.make(binding.root, getString(R.string.shizuku_start), Snackbar.LENGTH_SHORT).show()
+                MiFreeform.me.recheckConnection()
+                if (checkFreeformManagerStatus()) {
+                    Snackbar.make(binding.root, getString(R.string.xposed_service_connected), Snackbar.LENGTH_SHORT).show()
                 } else {
-                    Snackbar.make(binding.root, getString(R.string.try_to_init_shizuku), Snackbar.LENGTH_SHORT).show()
+                    Snackbar.make(binding.root, getString(R.string.try_to_init_xposed_service), Snackbar.LENGTH_SHORT).show()
                 }
 
             }
@@ -163,18 +157,14 @@ class HomeFragment : Fragment(), View.OnClickListener {
                 }
             }
 
-            R.id.button_guide -> {
-                startActivity(Intent(requireContext(), GuideActivity::class.java))
-            }
-
             R.id.button_question -> {
-                val uri = Uri.parse(COMMON_QUESTION_ZH)
+                val uri = COMMON_QUESTION_ZH.toUri()
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
             }
 
             R.id.button_open_api -> {
-                val uri = Uri.parse(OPEN_API_ZH)
+                val uri = OPEN_API_ZH.toUri()
                 val intent = Intent(Intent.ACTION_VIEW, uri)
                 startActivity(intent)
             }

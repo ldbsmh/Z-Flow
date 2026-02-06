@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import com.sunshine.freeform.app.MiFreeform
+import androidx.core.content.edit
 
 class SplashViewModel(application: Application) : AndroidViewModel(application) {
     private val sp = application.getSharedPreferences(MiFreeform.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
@@ -17,6 +18,6 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun putIntSp(key: String, value: Int) {
-        sp.edit().putInt(key, value).apply()
+        sp.edit { putInt(key, value) }
     }
 }

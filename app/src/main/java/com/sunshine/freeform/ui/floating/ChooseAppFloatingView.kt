@@ -8,15 +8,19 @@ import android.content.pm.LauncherApps
 import android.graphics.PixelFormat
 import android.graphics.Point
 import android.hardware.display.DisplayManager
-import android.net.Uri
 import android.os.UserHandle
 import android.os.UserManager
 import android.provider.Settings
 import android.util.DisplayMetrics
-import android.view.*
+import android.view.Display
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.Surface
+import android.view.View
+import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.Toast
-import androidx.annotation.RequiresApi
+import androidx.core.net.toUri
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -26,11 +30,12 @@ import com.sunshine.freeform.R
 import com.sunshine.freeform.room.FreeFormAppsEntity
 import com.sunshine.freeform.ui.view.WaveSideBarView
 import com.sunshine.freeform.utils.PackageUtils
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
-import java.util.*
-import kotlin.collections.ArrayList
-import kotlin.collections.HashMap
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Collections
 import kotlin.math.max
 import kotlin.math.min
 
@@ -124,7 +129,7 @@ class ChooseAppFloatingView(
                             Toast.makeText(context, context.getString(R.string.request_overlay_permission), Toast.LENGTH_LONG).show()
                             val intent = Intent(
                                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                Uri.parse("package:${context.packageName}")
+                                "package:${context.packageName}".toUri()
                             )
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             context.startActivity(
@@ -185,7 +190,7 @@ class ChooseAppFloatingView(
             allFreeFormApps?.remove(it)
         }
 
-        Collections.sort(allFreeFormApps, AppsComparable())
+        Collections.sort(allFreeFormApps!!, AppsComparable())
 
         recyclerView.layoutManager = LinearLayoutManager(context)
         recyclerView.adapter = ChooseAppFloatingAdapter(
@@ -309,7 +314,7 @@ class ChooseAppFloatingView(
                 Toast.makeText(context, context.getString(R.string.request_overlay_permission), Toast.LENGTH_LONG).show()
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${context.packageName}")
+                    "package:${context.packageName}".toUri()
                 )
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(
@@ -333,7 +338,7 @@ class ChooseAppFloatingView(
     /**
      * 根据序号排序
      */
-    inner class AppsComparable: Comparator<FreeFormAppsEntity> {
+    class AppsComparable: Comparator<FreeFormAppsEntity> {
         override fun compare(o1: FreeFormAppsEntity?, o2: FreeFormAppsEntity?): Int {
             return o1!!.sortNum.compareTo(o2!!.sortNum)
         }

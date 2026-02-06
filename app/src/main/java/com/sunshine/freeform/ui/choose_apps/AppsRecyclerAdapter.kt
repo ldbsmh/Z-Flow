@@ -2,15 +2,10 @@ package com.sunshine.freeform.ui.choose_apps
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherActivityInfo
-import android.os.UserManager
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Filter
-import android.widget.Filterable
 import android.widget.ImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.appcompat.widget.SwitchCompat
@@ -21,9 +16,6 @@ import com.sunshine.freeform.R
 import com.sunshine.freeform.room.FreeFormAppsEntity
 import com.sunshine.freeform.room.NotificationAppsEntity
 import com.sunshine.freeform.systemapi.UserHandle
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
 
 /**
  * @author sunshine

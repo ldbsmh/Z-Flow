@@ -1,7 +1,6 @@
 package com.sunshine.freeform.ui.floating_apps_sort
 
 import android.app.Application
-import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import com.sunshine.freeform.room.DatabaseRepository

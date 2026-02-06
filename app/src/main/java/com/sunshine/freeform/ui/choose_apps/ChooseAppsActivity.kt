@@ -1,7 +1,6 @@
 package com.sunshine.freeform.ui.choose_apps
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.Intent
 import android.content.pm.LauncherActivityInfo
 import android.content.pm.LauncherApps
@@ -17,12 +16,12 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.sunshine.freeform.R
 import com.sunshine.freeform.databinding.ActivityChooseAppsBinding
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.Collator
-import kotlin.collections.ArrayList
 
 /**
  * @author sunshine
@@ -63,8 +62,8 @@ class ChooseAppsActivity : AppCompatActivity() {
         viewModel = ViewModelProvider(this)[ChooseAppsViewModel::class.java]
 
         pm = packageManager
-        userManager = getSystemService(Context.USER_SERVICE) as UserManager
-        launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
+        userManager = getSystemService(USER_SERVICE) as UserManager
+        launcherApps = getSystemService(LAUNCHER_APPS_SERVICE) as LauncherApps
 
         //需要指定列表模式1 是小窗应用 2 是 气泡应用 3是选择兼容性应用
         type = intent.getIntExtra("type", TYPE_FLOATING)
@@ -88,6 +87,7 @@ class ChooseAppsActivity : AppCompatActivity() {
 
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     private fun showAppsList(type: Int) {
         if (firstObserver || needToUpdateView) {
             GlobalScope.launch(Dispatchers.IO) {

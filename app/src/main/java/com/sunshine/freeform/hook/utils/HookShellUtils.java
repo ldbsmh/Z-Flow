@@ -9,8 +9,8 @@ import java.io.InputStreamReader;
 
 /**
  * @author Trinea
- * @date 2013-5-16
- * http://www.trinea.cn
+ * {@code @date} 2013-5-16
+ * @code @link: http://www.trinea.cn
  * 米窗声明：该类作者并非米窗，作者信息和源代码地址见上
  */
 public class HookShellUtils {

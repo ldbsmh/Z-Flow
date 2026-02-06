@@ -25,6 +25,9 @@
     <string name="add_telegram">Telegram exchange group</string>
     <string name="open_source">Github</string>
     <string name="try_to_init_shizuku">Trying to activate Shizuku service…</string>
+    <string name="try_to_init_xposed_service">Trying to connect Xposed service…</string>
+    <string name="xposed_service_connected">Xposed service connected</string>
+    <string name="xposed_service_not_connected">Xposed service not connected</string>
     <string name="try_to_init_xposed">Having Xposed does not help Mi-Freeform to open freeform, but Mi-Freeform can prevent the application from jumping out of the freeform to full screen after having Xposed. To use Xposed, you need to go to the Xposed management application (such as Lsposed) to check the \"system framework\" for the Mi-Freeform and restart the device</string>
     <string name="sui_service_description">You can already experience Mi-Freeform service</string>
     <string name="no_service_description">Neither Xposed nor Sui/Shizuku services start</string>

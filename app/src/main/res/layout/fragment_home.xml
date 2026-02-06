@@ -4,7 +4,8 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".ui.main.HomeFragment">
+    tools:context=".ui.main.HomeFragment"
+    tools:ignore="ContentDescription">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
@@ -191,19 +192,6 @@
                     app:layout_constraintEnd_toEndOf="parent"
                     app:layout_constraintStart_toStartOf="parent"
                     app:layout_constraintTop_toBottomOf="@+id/textView_guide">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_guide"
-                        style="@style/FreeForm.ButtonStyle"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/button_height"
-                        android:padding="@dimen/card_view_child_padding"
-                        android:text="@string/guide"
-                        android:textColor="@color/color_text"
-                        app:icon="@drawable/ic_guide"
-                        app:iconPadding="@dimen/icon_padding"
-                        app:iconSize="@dimen/icon_size"
-                        app:iconTint="@color/color_text" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/button_question"

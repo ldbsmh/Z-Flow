@@ -3,7 +3,6 @@ package com.sunshine.freeform.broadcast
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.widget.Toast
 import com.sunshine.freeform.app.MiFreeform
 import com.sunshine.freeform.service.ForegroundService
 import com.sunshine.freeform.service.KeepAliveService

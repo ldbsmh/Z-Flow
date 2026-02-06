@@ -42,7 +42,7 @@ class ChooseAppFloatingAdapter(
     private lateinit var launcherApps: LauncherApps
     private val userHandleMap = HashMap<Int, UserHandle>()
 
-    inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+    class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val icon: ImageView = itemView.findViewById(R.id.imageView_icon)
         val click: View = itemView.findViewById(R.id.view_click)
         val appName: TextView = itemView.findViewById(R.id.textView_appName)

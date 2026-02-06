@@ -2,9 +2,7 @@ package com.sunshine.freeform.utils
 
 import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.UserHandle
-import androidx.annotation.RequiresApi
 
 
 /**

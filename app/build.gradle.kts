@@ -12,7 +12,7 @@ extensions.configure<ApplicationExtension> {
 
     defaultConfig {
         applicationId = "com.sunshine.freeform"
-        minSdk = 34
+        minSdk = 33
         targetSdk = 36
         versionCode = 3000
         versionName = "3.0.00"
@@ -77,9 +77,6 @@ dependencies {
     implementation(libs.rikkax.borderview)
     implementation(libs.rikkax.recyclerview.ktx)
 
-    implementation(libs.shizuku.api)
-    implementation(libs.shizuku.provider)
-
     implementation(libs.androidx.room.runtime)
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.room.ktx)
@@ -96,6 +93,10 @@ dependencies {
     implementation(libs.hiddenapibypass)
 
     implementation(libs.rikkax.refine.runtime)
+
+    // Rikka Hidden API compat for system_server hooks
+    compileOnly(libs.rikka.hidden.stub)
+    implementation(libs.rikka.hidden.compat)
 
     compileOnly(project(":hidden-api"))
 }

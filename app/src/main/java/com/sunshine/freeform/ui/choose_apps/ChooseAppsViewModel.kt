@@ -11,6 +11,7 @@ import com.sunshine.freeform.room.DatabaseRepository
 import com.sunshine.freeform.room.FreeFormAppsEntity
 import com.sunshine.freeform.room.NotificationAppsEntity
 import com.sunshine.freeform.systemapi.UserHandle
+import androidx.core.content.edit
 
 /**
  * @author sunshine
@@ -84,7 +85,7 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun putBoolean(key: String, newValue: Boolean) {
-        sp.edit().putBoolean(key, newValue).apply()
+        sp.edit { putBoolean(key, newValue) }
     }
 
     private fun getBoolean(key: String, default: Boolean): Boolean {

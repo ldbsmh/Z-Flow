@@ -1,14 +1,11 @@
 package com.sunshine.freeform.ui.floating_apps_sort
 
-import android.content.Context
 import android.content.pm.LauncherApps
-import android.os.Build
 import android.os.Bundle
 import android.os.UserHandle
 import android.os.UserManager
 import android.view.MenuItem
 import android.view.View
-import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.ItemTouchHelper
@@ -18,7 +15,7 @@ import com.sunshine.freeform.R
 import com.sunshine.freeform.databinding.ActivityFloatingAppsSortBinding
 import com.sunshine.freeform.room.FreeFormAppsEntity
 import com.sunshine.freeform.utils.PackageUtils
-import java.util.*
+import java.util.Collections
 
 class FloatingAppsSortActivity : AppCompatActivity() {
 
@@ -38,8 +35,8 @@ class FloatingAppsSortActivity : AppCompatActivity() {
         var firstInit = true
 
         //处理多用户
-        val launcherApps: LauncherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-        val userManager = getSystemService(Context.USER_SERVICE) as UserManager
+        val launcherApps: LauncherApps = getSystemService(LAUNCHER_APPS_SERVICE) as LauncherApps
+        val userManager = getSystemService(USER_SERVICE) as UserManager
         val userHandleMap = HashMap<Int, UserHandle>()
 
 
@@ -68,7 +65,7 @@ class FloatingAppsSortActivity : AppCompatActivity() {
                 }
                 viewModel.deleteNotInstall(noInstallAppsList)
                 //有需要删除的应用时不加载，等删除后再加载
-                if (noInstallAppsList.size == 0) {
+                if (noInstallAppsList.isEmpty()) {
                     firstInit = false
 
                     //加载条关闭
@@ -97,8 +94,8 @@ class FloatingAppsSortActivity : AppCompatActivity() {
                                 viewHolder: RecyclerView.ViewHolder,
                                 target: RecyclerView.ViewHolder
                         ): Boolean {
-                            val fromPosition = viewHolder.adapterPosition
-                            val targetPosition = target.adapterPosition
+                            val fromPosition = viewHolder.bindingAdapterPosition
+                            val targetPosition = target.bindingAdapterPosition
 
                             if (fromPosition < targetPosition) {
                                 for (i in fromPosition until targetPosition) {
@@ -146,7 +143,7 @@ class FloatingAppsSortActivity : AppCompatActivity() {
         return true
     }
 
-    inner class AppsComparable: Comparator<FreeFormAppsEntity> {
+    class AppsComparable: Comparator<FreeFormAppsEntity> {
 
         override fun compare(o1: FreeFormAppsEntity?, o2: FreeFormAppsEntity?): Int {
             return o1!!.sortNum.compareTo(o2!!.sortNum)

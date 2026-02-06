@@ -31,3 +31,5 @@
 
 #避免对AIDL混淆
 -keep class * implements android.os.IInterface {*;}
+
+-dontwarn javax.**

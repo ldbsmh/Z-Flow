@@ -3,14 +3,16 @@ package com.sunshine.freeform.bean;
 import android.os.Parcel;
 import android.os.Parcelable;
 
+import java.io.Serial;
 import java.io.Serializable;
 
 /**
  * @author sunshine
- * @date 2021/3/14
+ * {@code @date} 2021/3/14
  */
 public class MotionEventBean implements Parcelable, Serializable {
 
+    @Serial
     private static final long serialVersionUID = -7373576824258678549L;
 
     //
@@ -56,7 +58,7 @@ public class MotionEventBean implements Parcelable, Serializable {
         this.displayId = in.readInt();
     }
 
-    public static final Creator<MotionEventBean> CREATOR = new Creator<MotionEventBean>() {
+    public static final Creator<MotionEventBean> CREATOR = new Creator<>() {
         @Override
         public MotionEventBean createFromParcel(Parcel source) {
             return new MotionEventBean(source);

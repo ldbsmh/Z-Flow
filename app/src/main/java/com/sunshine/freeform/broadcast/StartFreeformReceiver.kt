@@ -13,7 +13,7 @@ class StartFreeformReceiver : BroadcastReceiver() {
         val activityName = intent.getStringExtra("activityName")
         val userId = intent.getIntExtra("userId", -1)
         val extras = intent.getStringExtra("extras")
-        val parcelable = intent.getParcelableExtra<Parcelable>(Intent.EXTRA_INTENT)
+        val parcelable = intent.getParcelableExtra(Intent.EXTRA_INTENT, Parcelable::class.java)
         var target = Intent()
         if (packageName != null && activityName != null)
             target = Intent(Intent.ACTION_MAIN)
