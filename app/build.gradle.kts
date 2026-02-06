@@ -70,6 +70,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
 
     compileOnly(libs.xposed.api)
+    implementation(libs.ezxhelper.core)
+    implementation(libs.ezxhelper.api)
 
     implementation(libs.rikkax.appcompat)
     implementation(libs.rikkax.borderview)

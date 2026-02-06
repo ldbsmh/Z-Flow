@@ -12,6 +12,7 @@ lifecycle = "2.10.0"
 
 # Xposed
 xposed = "82"
+ezxhelper = "3.1.1-rc1"
 
 # UI
 material = "1.13.0"
@@ -57,6 +58,8 @@ androidx-lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-view
 
 # Xposed
 xposed-api = { module = "de.robv.android.xposed:api", version.ref = "xposed" }
+ezxhelper-core = { module = "io.github.kyuubiran.ezxhelper:core", version.ref = "ezxhelper" }
+ezxhelper-api = { module = "io.github.kyuubiran.ezxhelper:xposed-api-82", version.ref = "ezxhelper" }
 
 # UI
 refine-gradle-plugin = { module = "dev.rikka.tools.refine:gradle-plugin", version.ref = "rikkax-refine" }

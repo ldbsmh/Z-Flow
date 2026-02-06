@@ -1,49 +1,27 @@
 package com.sunshine.freeform.hook
 
 import com.sunshine.freeform.hook.utils.XLog
-import de.robv.android.xposed.IXposedHookLoadPackage
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XC_MethodReplacement
-import de.robv.android.xposed.XposedHelpers
-import de.robv.android.xposed.callbacks.XC_LoadPackage
+import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
+import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
+import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
 
-class HookMyself : IXposedHookLoadPackage {
-    override fun handleLoadPackage(p0: XC_LoadPackage.LoadPackageParam) {
-        if (p0.packageName == "com.sunshine.freeform") {
-//            XposedHelpers.findAndHookMethod(
-//                "com.sunshine.freeform.ui.permission.PermissionActivity",
-//                p0.classLoader,
-//                "checkXposedPermission",
-//                Boolean::class.javaPrimitiveType,
-//                object : XC_MethodHook() {
-//                    override fun beforeHookedMethod(param: MethodHookParam) {
-//                        param.args[0] = true
-//                    }
-//                }
-//            )
-//            XposedHelpers.findAndHookMethod(
-//                "com.sunshine.freeform.ui.main.HomeFragment",
-//                p0.classLoader,
-//                "checkXposedPermission",
-//                Boolean::class.javaPrimitiveType,
-//                object : XC_MethodHook() {
-//                    override fun beforeHookedMethod(param: MethodHookParam) {
-//                        param.args[0] = true
-//                    }
-//                }
-//            )
-            XposedHelpers.findAndHookMethod(
-                "com.sunshine.freeform.hook.utils.HookTest",
-                p0.classLoader,
-                "checkXposed",
-                object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        param.result = true
-                    }
+object HookMyself {
+
+    fun init(classLoader: ClassLoader) {
+        runCatching {
+            val hookTestClazz = loadClass("com.sunshine.freeform.hook.utils.HookTest", classLoader)
+
+            MethodFinder.fromClass(hookTestClazz)
+                .filterByName("checkXposed")
+                .filterEmptyParam()
+                .first()
+                .createHook {
+                    returnConstant(true)
                 }
-            )
+
+            XLog.d("HookMyself: hook checkXposed success")
+        }.onFailure {
+            XLog.e("HookMyself init failed", it)
         }
     }
-
-
 }
