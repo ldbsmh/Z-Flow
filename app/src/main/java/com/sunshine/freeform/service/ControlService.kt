@@ -2,15 +2,14 @@ package com.sunshine.freeform.service
 
 import android.annotation.SuppressLint
 import android.os.SystemClock
-import android.view.*
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import com.sunshine.freeform.IControlService
-
 import com.sunshine.freeform.bean.MotionEventBean
 import com.sunshine.freeform.systemapi.InputManager
 import com.sunshine.freeform.systemapi.ServiceManager
 import com.sunshine.freeform.utils.ShellUtils
-import rikka.shizuku.ShizukuBinderWrapper
-import rikka.shizuku.SystemServiceHelper
 
 /**
  * @author sunshine
@@ -95,7 +94,7 @@ class ControlService : IControlService.Stub() {
             ).result
 
             result == 0
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
 
@@ -128,7 +127,7 @@ class ControlService : IControlService.Stub() {
             KeyEvent::class.java.getMethod("setSource", Int::class.javaPrimitiveType)
                 .invoke(up, InputDevice.SOURCE_KEYBOARD)
             inputManager!!.injectInputEvent(up, displayId)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
 
         }
     }

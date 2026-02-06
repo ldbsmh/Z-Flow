@@ -1,7 +1,6 @@
 package com.sunshine.freeform.systemapi
 
 import android.os.UserHandle
-import android.util.Log
 
 /**
  * @author sunshine
@@ -15,7 +14,7 @@ object UserHandle {
     fun getUserId(userHandle: UserHandle, uid: Int): Int {
         return try {
             userHandle::class.java.getMethod("getUserId", Int::class.javaPrimitiveType).invoke(userHandle, uid) as Int
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             0
         }
     }

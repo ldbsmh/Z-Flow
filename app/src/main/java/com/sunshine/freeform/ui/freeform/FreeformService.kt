@@ -1,7 +1,7 @@
 package com.sunshine.freeform.ui.freeform
 
-import android.app.ActivityOptions
 import android.app.ActivityManager
+import android.app.ActivityOptions
 import android.app.ActivityOptionsHidden
 import android.app.PendingIntent
 import android.app.PendingIntentHidden
@@ -11,7 +11,6 @@ import android.content.ComponentName
 import android.content.ContextHidden
 import android.content.Intent
 import android.hardware.display.DisplayManager
-import android.os.Build
 import android.os.IBinder
 import android.os.Parcelable
 import android.os.SystemClock
@@ -94,8 +93,8 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
                     initFreeformView()
                 }
                 mUserId = intent.getIntExtra(Intent.EXTRA_USER, 0)
-                mIntent = intent.getParcelableExtra(Intent.EXTRA_INTENT)
-                mComponentName = intent.getParcelableExtra(Intent.EXTRA_COMPONENT_NAME)
+                mIntent = intent.getParcelableExtra(Intent.EXTRA_INTENT, Parcelable::class.java)
+                mComponentName = intent.getParcelableExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName::class.java)
                 mFreeformView.config = mConfig
                 if (startIntent() < 0) {
                     return START_NOT_STICKY
@@ -106,7 +105,7 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
                 if (mIntent == null)
                     return START_NOT_STICKY
                 if (startIntent(
-                        parcelable = intent.getParcelableExtra(Intent.EXTRA_INTENT),
+                        parcelable = intent.getParcelableExtra(Intent.EXTRA_INTENT, Parcelable::class.java),
                         displayId = intent.getIntExtra(EXTRA_DISPLAY_ID, mVirtualDisplay.display.displayId)
                     ) < 0) {
                     return START_NOT_STICKY
@@ -209,31 +208,25 @@ class FreeformService: Service(), ScreenListener.ScreenStateListener {
     }
 
     override fun onScreenOff() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (mFreeformView.isDestroy) {
-                mFreeformRunningTasks.forEach {
-                    startService(
-                        Intent(this, FreeformService::class.java)
-                            .setAction(ACTION_CALL_INTENT)
-                            .putExtra(Intent.EXTRA_INTENT, it.baseIntent)
-                            .putExtra(EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
-                    )
-                }
+        if (mFreeformView.isDestroy) {
+            mFreeformRunningTasks.forEach {
                 startService(
                     Intent(this, FreeformService::class.java)
                         .setAction(ACTION_CALL_INTENT)
-                        .putExtra(Intent.EXTRA_INTENT, mFocusedRunningTask!!.baseIntent)
+                        .putExtra(Intent.EXTRA_INTENT, it.baseIntent)
                         .putExtra(EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
                 )
             }
+            startService(
+                Intent(this, FreeformService::class.java)
+                    .setAction(ACTION_CALL_INTENT)
+                    .putExtra(Intent.EXTRA_INTENT, mFocusedRunningTask!!.baseIntent)
+                    .putExtra(EXTRA_DISPLAY_ID, Display.DEFAULT_DISPLAY)
+            )
+        }
 
-            if (mFreeformRunningTasks.isEmpty()) {
-                stopSelf()
-            }
-        } else {
-            if (mFreeformView.isDestroy) {
-                stopSelf()
-            }
+        if (mFreeformRunningTasks.isEmpty()) {
+            stopSelf()
         }
     }
 
