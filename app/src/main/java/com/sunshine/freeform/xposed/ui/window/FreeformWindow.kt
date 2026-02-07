@@ -42,6 +42,7 @@ import com.sunshine.freeform.xposed.utils.Instances
 import com.sunshine.freeform.xposed.utils.ReflectUtils.invokeMethodAs
 import dev.rikka.tools.refine.Refine
 import java.lang.reflect.Field
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -870,6 +871,8 @@ class FreeformWindow(
         private var moveStartY = 0f
         private var movedX = 0f
         private var movedY = 0f
+
+        private var minLong = 1.1
         private var isMoved = false
 
         @SuppressLint("ClickableViewAccessibility")
@@ -889,14 +892,17 @@ class FreeformWindow(
                 MotionEvent.ACTION_MOVE -> {
                     movedX = event.rawX - moveStartX
                     movedY = event.rawY - moveStartY
-                    isMoved = true
 
-                    windowLayoutParams.x += movedX.toInt()
-                    windowLayoutParams.y += movedY.toInt()
-                    Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                    if (abs(movedX) > minLong || abs(movedY) > minLong) {
+                        isMoved = true
 
-                    moveStartX = event.rawX
-                    moveStartY = event.rawY
+                        windowLayoutParams.x += movedX.toInt()
+                        windowLayoutParams.y += movedY.toInt()
+                        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+
+                        moveStartX = event.rawX
+                        moveStartY = event.rawY
+                    }
                 }
                 MotionEvent.ACTION_UP -> {
                     if (isMoved) {
