@@ -53,7 +53,7 @@ import kotlin.math.roundToInt
 @SuppressLint("ClickableViewAccessibility")
 class FreeformWindow(
     baseContext: Context,
-    private val componentName: ComponentName?,
+    val componentName: ComponentName?,
     private val userId: Int,
     private val taskId: Int,
     private val config: FreeformWindowConfig = FreeformWindowConfig()
@@ -173,9 +173,11 @@ class FreeformWindow(
     private var isDestroyed = false
     private var updateFrameCount = 0
     private var initFinish = false
-    private var isFloating = false
+    var isFloating = false
+        private set
     private var isZoomOut = false
-    private var isHidden = false
+    var isHidden = false
+        private set
     private var isAnimating = false
 
     // 挂起位置，0：是否在左，1：是否在上
@@ -678,6 +680,11 @@ class FreeformWindow(
 
             // 横屏时使用 mScaleX，竖屏时使用 mScaleY
             val currentScale = if (screenIsPortrait()) mScaleY else mScaleX
+
+            // 进入 mini 模式时，关闭其他 mini 窗口
+            if (currentScale <= goFloatScale) {
+                FreeformManager.destroyAllMiniWindows()
+            }
 
             when {
                 // 缩小到悬浮模式阈值 -> 进入 mini 悬浮状态
@@ -1188,7 +1195,28 @@ class FreeformWindow(
      */
     @SuppressLint("ClickableViewAccessibility")
     private fun floatViewToNormalView() {
+        floatViewToNormalViewInternal()
+    }
+
+    /**
+     * 公开方法：从 mini/hidden 状态恢复到正常模式
+     * 供 FreeformManager 调用
+     */
+    fun restoreToNormalView() {
+        if (isDestroyed) return
+        if (isHidden) {
+            hiddenViewToFloatView(true)
+        } else if (isFloating) {
+            floatViewToNormalViewInternal()
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun floatViewToNormalViewInternal() {
         if (isAnimating) return
+
+        // 恢复普通模式时，关闭其他普通窗口
+        FreeformManager.destroyAllNormalWindows()
 
         binding.textureView.setOnTouchListener { _, motionEvent ->
             forwardMotionEvent(motionEvent)

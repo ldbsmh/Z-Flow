@@ -5,6 +5,8 @@ import android.app.ActivityOptions
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.os.UserHandle
@@ -68,6 +70,44 @@ object FreeformManager : IFreeformManager.Stub() {
 
     fun getWindow(displayId: Int): FreeformWindow? = windowList.find { it.displayId == displayId }
 
+    /**
+     * 查找指定应用的窗口（mini 或 hidden 状态）
+     */
+    fun findFloatingWindow(packageName: String?): FreeformWindow? {
+        if (packageName == null) return null
+        return windowList.find {
+            it.componentName?.packageName == packageName && (it.isFloating || it.isHidden)
+        }
+    }
+
+    /**
+     * 查找普通状态的窗口（非 mini/hidden）
+     */
+    fun findNormalWindow(): FreeformWindow? {
+        return windowList.find { !it.isFloating && !it.isHidden }
+    }
+
+    /**
+     * 查找 mini/hidden 状态的窗口
+     */
+    fun findMiniWindow(): FreeformWindow? {
+        return windowList.find { it.isFloating || it.isHidden }
+    }
+
+    /**
+     * 关闭所有 mini/hidden 状态的窗口
+     */
+    fun destroyAllMiniWindows() {
+        windowList.filter { it.isFloating || it.isHidden }.forEach { it.destroy() }
+    }
+
+    /**
+     * 关闭所有普通状态的窗口
+     */
+    fun destroyAllNormalWindows() {
+        windowList.filter { !it.isFloating && !it.isHidden }.forEach { it.destroy() }
+    }
+
     // IFreeformManager implementation
 
     override fun getVersionName(): String = BuildConfig.VERSION_NAME
@@ -84,6 +124,20 @@ object FreeformManager : IFreeformManager.Stub() {
         runOnMainThread {
             try {
                 Instances.iStatusBarService.collapsePanels()
+
+                // 检查是否有同应用的 mini/hidden 窗口
+                val existingFloatingWindow = findFloatingWindow(componentName?.packageName)
+                if (existingFloatingWindow != null) {
+                    // 同应用：关闭当前普通状态窗口，将 mini 窗口恢复到普通状态
+                    destroyAllNormalWindows()
+                    existingFloatingWindow.restoreToNormalView()
+                    XLog.d("$TAG: Restored existing floating window for ${componentName?.packageName}")
+                    return@runOnMainThread
+                }
+
+                // 不同应用：关闭当前普通状态窗口，创建新窗口
+                destroyAllNormalWindows()
+
                 // Build config from parameters
                 val config = FreeformWindowConfig(
                     freeformDpi = freeformDpi,
@@ -258,10 +312,10 @@ object FreeformManager : IFreeformManager.Stub() {
     override fun isServiceReady(): Boolean = isReady
 
     private fun runOnMainThread(action: () -> Unit) {
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
             action()
         } else {
-            android.os.Handler(android.os.Looper.getMainLooper()).post(action)
+            Handler(Looper.getMainLooper()).post(action)
         }
     }
 }
