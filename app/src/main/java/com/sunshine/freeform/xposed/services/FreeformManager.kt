@@ -95,6 +95,15 @@ object FreeformManager : IFreeformManager.Stub() {
     }
 
     /**
+     * 将所有 mini/hidden 窗口提升到最顶层，确保其在普通窗口之上
+     */
+    fun bringMiniWindowsToFront() {
+        // 使用 toList() 创建快照避免并发修改异常
+        // 使用 reversed() 保持正确的 Z-order（后添加的在上层）
+        windowList.filter { it.isFloating || it.isHidden }.toList().reversed().forEach { it.moveToTop() }
+    }
+
+    /**
      * 关闭所有 mini/hidden 状态的窗口
      */
     fun destroyAllMiniWindows() {
@@ -148,6 +157,9 @@ object FreeformManager : IFreeformManager.Stub() {
                 // Pass componentName, userId, taskId to FreeformWindow
                 // Activity will be started in onSurfaceTextureAvailable after VirtualDisplay is created
                 FreeformWindow(Instances.systemUiContext, componentName, userId, taskId, config)
+
+                // 将 mini 窗口提升到最顶层
+                bringMiniWindowsToFront()
             } catch (e: Exception) {
                 XLog.e("$TAG: Failed to create window", e)
             }

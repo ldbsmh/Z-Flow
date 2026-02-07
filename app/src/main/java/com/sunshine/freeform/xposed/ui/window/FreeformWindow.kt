@@ -1384,6 +1384,10 @@ class FreeformWindow(
             Instances.windowManager.removeView(binding.root)
             Instances.windowManager.addView(binding.root, windowLayoutParams)
             FreeformManager.moveToTop(displayId)
+            // 如果是普通窗口，重新将 mini 窗口提升到顶层
+            if (!isFloating && !isHidden) {
+                FreeformManager.bringMiniWindowsToFront()
+            }
         } catch (e: Exception) {
             XLog.e("$TAG: Failed to move to top", e)
         }
