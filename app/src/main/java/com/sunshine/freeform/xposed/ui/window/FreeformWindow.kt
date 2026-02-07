@@ -269,7 +269,13 @@ class FreeformWindow(
             (rootWidth * config.freeformSizeLand).roundToInt()
         }
         freeformHeight += cardHeightMargin.roundToInt()
-        freeformWidth = ((freeformHeight + cardWidthMargin) * WIDTH_HEIGHT_RATIO).roundToInt()
+
+        if (screenIsPortrait()) {
+            val realCardHeight = freeformHeight - (cardHeightMargin * freeformHeight / rootHeight)
+            freeformWidth = (realCardHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+        } else {
+            freeformWidth = ((freeformHeight + cardWidthMargin) * WIDTH_HEIGHT_RATIO).roundToInt()
+        }
     }
 
     /**
@@ -648,7 +654,15 @@ class FreeformWindow(
             val tempHeight = freeformHeight + dy
             if (tempHeight >= hangUpViewHeight && tempHeight <= rootHeight * 0.9) {
                 freeformHeight += dy.roundToInt()
-                freeformWidth = (freeformHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+                
+                // Keep aspect ratio correct by subtracting margins
+                if (screenIsPortrait()) {
+                    val visualMarginHeight = cardHeightMargin * (freeformHeight / rootHeight.toFloat())
+                    val contentHeight = freeformHeight - visualMarginHeight
+                    freeformWidth = (contentHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+                } else {
+                    freeformWidth = (freeformHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+                }
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
                 mScaleY = freeformHeight / rootHeight.toFloat()
@@ -659,7 +673,15 @@ class FreeformWindow(
             val tempWidth = freeformWidth + dx
             if (tempWidth >= hangUpViewWidth && tempWidth <= rootWidth * 0.9) {
                 freeformWidth += dx.roundToInt()
-                freeformHeight = ((freeformWidth / WIDTH_HEIGHT_RATIO) - cardWidthMargin).roundToInt()
+                
+                // Keep aspect ratio correct by subtracting margins
+                if (!screenIsPortrait()) {
+                     val visualMarginWidth = cardWidthMargin * (freeformWidth / rootWidth.toFloat())
+                     val contentWidth = freeformWidth - visualMarginWidth
+                     freeformHeight = (contentWidth / WIDTH_HEIGHT_RATIO).roundToInt()
+                } else {
+                    freeformHeight = ((freeformWidth / WIDTH_HEIGHT_RATIO) - cardWidthMargin).roundToInt()
+                }
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
                 mScaleY = freeformHeight / rootHeight.toFloat()
