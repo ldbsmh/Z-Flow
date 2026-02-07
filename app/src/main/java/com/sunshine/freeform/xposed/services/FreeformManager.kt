@@ -76,7 +76,7 @@ object FreeformManager : IFreeformManager.Stub() {
     fun findFloatingWindow(packageName: String?): FreeformWindow? {
         if (packageName == null) return null
         return windowList.find {
-            it.componentName?.packageName == packageName && (it.isFloating || it.isHidden)
+            !it.isDestroyed && it.componentName?.packageName == packageName && (it.isFloating || it.isHidden)
         }
     }
 
@@ -84,14 +84,23 @@ object FreeformManager : IFreeformManager.Stub() {
      * 查找普通状态的窗口（非 mini/hidden）
      */
     fun findNormalWindow(): FreeformWindow? {
-        return windowList.find { !it.isFloating && !it.isHidden }
+        return windowList.find { !it.isDestroyed && !it.isFloating && !it.isHidden }
     }
 
     /**
      * 查找 mini/hidden 状态的窗口
      */
     fun findMiniWindow(): FreeformWindow? {
-        return windowList.find { it.isFloating || it.isHidden }
+        return windowList.find { !it.isDestroyed && (it.isFloating || it.isHidden) }
+    }
+
+    /**
+     * 将所有 mini/hidden 窗口提升到最顶层，确保其在普通窗口之上
+     */
+    fun bringMiniWindowsToFront() {
+        // 使用 toList() 创建快照避免并发修改异常
+        // 使用 reversed() 保持正确的 Z-order（后添加的在上层）
+        windowList.filter { it.isFloating || it.isHidden }.toList().reversed().forEach { it.moveToTop() }
     }
 
     /**
@@ -148,6 +157,9 @@ object FreeformManager : IFreeformManager.Stub() {
                 // Pass componentName, userId, taskId to FreeformWindow
                 // Activity will be started in onSurfaceTextureAvailable after VirtualDisplay is created
                 FreeformWindow(Instances.systemUiContext, componentName, userId, taskId, config)
+
+                // 将 mini 窗口提升到最顶层
+                bringMiniWindowsToFront()
             } catch (e: Exception) {
                 XLog.e("$TAG: Failed to create window", e)
             }

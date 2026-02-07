@@ -33,6 +33,7 @@ import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.animation.addListener
 import androidx.core.content.ContextCompat
 import com.qauxv.ui.CommonContextWrapper
+import com.sunshine.freeform.BuildConfig
 import com.sunshine.freeform.R
 import com.sunshine.freeform.databinding.ViewFreeformFlymeBinding
 import com.sunshine.freeform.hook.utils.XLog
@@ -41,6 +42,7 @@ import com.sunshine.freeform.xposed.utils.Instances
 import com.sunshine.freeform.xposed.utils.ReflectUtils.invokeMethodAs
 import dev.rikka.tools.refine.Refine
 import java.lang.reflect.Field
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -170,7 +172,8 @@ class FreeformWindow(
     private val screenPaddingY: Int = context.resources.getDimension(R.dimen.freeform_screen_height_padding).roundToInt()
 
     // 状态
-    private var isDestroyed = false
+    var isDestroyed = false
+        private set
     private var updateFrameCount = 0
     private var initFinish = false
     var isFloating = false
@@ -267,7 +270,13 @@ class FreeformWindow(
             (rootWidth * config.freeformSizeLand).roundToInt()
         }
         freeformHeight += cardHeightMargin.roundToInt()
-        freeformWidth = ((freeformHeight + cardWidthMargin) * WIDTH_HEIGHT_RATIO).roundToInt()
+
+        if (screenIsPortrait()) {
+            val realCardHeight = freeformHeight - (cardHeightMargin * freeformHeight / rootHeight)
+            freeformWidth = (realCardHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+        } else {
+            freeformWidth = ((freeformHeight + cardWidthMargin) * WIDTH_HEIGHT_RATIO).roundToInt()
+        }
     }
 
     /**
@@ -646,7 +655,15 @@ class FreeformWindow(
             val tempHeight = freeformHeight + dy
             if (tempHeight >= hangUpViewHeight && tempHeight <= rootHeight * 0.9) {
                 freeformHeight += dy.roundToInt()
-                freeformWidth = (freeformHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+                
+                // Keep aspect ratio correct by subtracting margins
+                if (screenIsPortrait()) {
+                    val visualMarginHeight = cardHeightMargin * (freeformHeight / rootHeight.toFloat())
+                    val contentHeight = freeformHeight - visualMarginHeight
+                    freeformWidth = (contentHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+                } else {
+                    freeformWidth = (freeformHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+                }
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
                 mScaleY = freeformHeight / rootHeight.toFloat()
@@ -657,7 +674,15 @@ class FreeformWindow(
             val tempWidth = freeformWidth + dx
             if (tempWidth >= hangUpViewWidth && tempWidth <= rootWidth * 0.9) {
                 freeformWidth += dx.roundToInt()
-                freeformHeight = ((freeformWidth / WIDTH_HEIGHT_RATIO) - cardWidthMargin).roundToInt()
+                
+                // Keep aspect ratio correct by subtracting margins
+                if (!screenIsPortrait()) {
+                     val visualMarginWidth = cardWidthMargin * (freeformWidth / rootWidth.toFloat())
+                     val contentWidth = freeformWidth - visualMarginWidth
+                     freeformHeight = (contentWidth / WIDTH_HEIGHT_RATIO).roundToInt()
+                } else {
+                    freeformHeight = ((freeformWidth / WIDTH_HEIGHT_RATIO) - cardWidthMargin).roundToInt()
+                }
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
                 mScaleY = freeformHeight / rootHeight.toFloat()
@@ -846,6 +871,8 @@ class FreeformWindow(
         private var moveStartY = 0f
         private var movedX = 0f
         private var movedY = 0f
+
+        private var minLong = 1.1
         private var isMoved = false
 
         @SuppressLint("ClickableViewAccessibility")
@@ -865,14 +892,17 @@ class FreeformWindow(
                 MotionEvent.ACTION_MOVE -> {
                     movedX = event.rawX - moveStartX
                     movedY = event.rawY - moveStartY
-                    isMoved = true
 
-                    windowLayoutParams.x += movedX.toInt()
-                    windowLayoutParams.y += movedY.toInt()
-                    Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                    if (abs(movedX) > minLong || abs(movedY) > minLong) {
+                        isMoved = true
 
-                    moveStartX = event.rawX
-                    moveStartY = event.rawY
+                        windowLayoutParams.x += movedX.toInt()
+                        windowLayoutParams.y += movedY.toInt()
+                        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+
+                        moveStartX = event.rawX
+                        moveStartY = event.rawY
+                    }
                 }
                 MotionEvent.ACTION_UP -> {
                     if (isMoved) {
@@ -925,11 +955,22 @@ class FreeformWindow(
                                     if (position != 0) {
                                         // 进入侧边栏模式
                                         isHidden = true
-                                        hiddenView = LayoutInflater.from(context).inflate(R.layout.view_floating_button, null, false)
+                                        val inflateContext = try {
+                                            val moduleContext = context.createPackageContext(
+                                                BuildConfig.APPLICATION_ID,
+                                                Context.CONTEXT_IGNORE_SECURITY or Context.CONTEXT_INCLUDE_CODE
+                                            )
+                                            CommonContextWrapper.createAppCompatContext(moduleContext)
+                                        } catch (e: Exception) {
+                                            XLog.e("$TAG: Failed to create module context for inflation", e)
+                                            context
+                                        }
+
+                                        hiddenView = LayoutInflater.from(inflateContext).inflate(R.layout.view_floating_button, null, false)
                                         hiddenView.setOnTouchListener(this@FloatViewTouchListener)
                                         if (position == 1) {
                                             hiddenView.findViewById<View>(R.id.backgroundView).background =
-                                                ContextCompat.getDrawable(context, R.drawable.floating_button_bg_right)
+                                                ContextCompat.getDrawable(inflateContext, R.drawable.floating_button_bg_right)
                                         }
 
                                         Instances.windowManager.addView(hiddenView, WindowManager.LayoutParams().apply {
@@ -1384,6 +1425,10 @@ class FreeformWindow(
             Instances.windowManager.removeView(binding.root)
             Instances.windowManager.addView(binding.root, windowLayoutParams)
             FreeformManager.moveToTop(displayId)
+            // 如果是普通窗口，重新将 mini 窗口提升到顶层
+            if (!isFloating && !isHidden) {
+                FreeformManager.bringMiniWindowsToFront()
+            }
         } catch (e: Exception) {
             XLog.e("$TAG: Failed to move to top", e)
         }
