@@ -76,7 +76,7 @@ object FreeformManager : IFreeformManager.Stub() {
     fun findFloatingWindow(packageName: String?): FreeformWindow? {
         if (packageName == null) return null
         return windowList.find {
-            it.componentName?.packageName == packageName && (it.isFloating || it.isHidden)
+            !it.isDestroyed && it.componentName?.packageName == packageName && (it.isFloating || it.isHidden)
         }
     }
 
@@ -84,14 +84,14 @@ object FreeformManager : IFreeformManager.Stub() {
      * 查找普通状态的窗口（非 mini/hidden）
      */
     fun findNormalWindow(): FreeformWindow? {
-        return windowList.find { !it.isFloating && !it.isHidden }
+        return windowList.find { !it.isDestroyed && !it.isFloating && !it.isHidden }
     }
 
     /**
      * 查找 mini/hidden 状态的窗口
      */
     fun findMiniWindow(): FreeformWindow? {
-        return windowList.find { it.isFloating || it.isHidden }
+        return windowList.find { !it.isDestroyed && (it.isFloating || it.isHidden) }
     }
 
     /**

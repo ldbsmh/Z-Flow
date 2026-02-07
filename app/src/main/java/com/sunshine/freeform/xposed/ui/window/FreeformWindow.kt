@@ -170,7 +170,8 @@ class FreeformWindow(
     private val screenPaddingY: Int = context.resources.getDimension(R.dimen.freeform_screen_height_padding).roundToInt()
 
     // 状态
-    private var isDestroyed = false
+    var isDestroyed = false
+        private set
     private var updateFrameCount = 0
     private var initFinish = false
     var isFloating = false
