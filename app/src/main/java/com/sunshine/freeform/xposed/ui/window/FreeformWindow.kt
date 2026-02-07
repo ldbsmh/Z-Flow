@@ -161,6 +161,10 @@ class FreeformWindow(
     private val freeformShadow: Float = context.resources.getDimension(R.dimen.freeform_shadow)
     private val cardCornerRadius: Float = context.resources.getDimension(R.dimen.card_corner_radius)
 
+    // 侧边栏按钮尺寸 - 缓存避免在动画回调中访问资源导致崩溃
+    private val floatingButtonWidth: Int = context.resources.getDimension(R.dimen.floating_button_width).toInt()
+    private val floatingButtonHeight: Int = context.resources.getDimension(R.dimen.floating_button_height).toInt()
+
     // 屏幕边距
     private val screenPaddingX: Int = context.resources.getDimension(R.dimen.freeform_screen_width_padding).roundToInt()
     private val screenPaddingY: Int = context.resources.getDimension(R.dimen.freeform_screen_height_padding).roundToInt()
@@ -921,9 +925,6 @@ class FreeformWindow(
                                                 ContextCompat.getDrawable(context, R.drawable.floating_button_bg_right)
                                         }
 
-                                        val floatingButtonWidth = context.resources.getDimension(R.dimen.floating_button_width).toInt()
-                                        val floatingButtonHeight = context.resources.getDimension(R.dimen.floating_button_height).toInt()
-
                                         Instances.windowManager.addView(hiddenView, WindowManager.LayoutParams().apply {
                                             x = (realScreenWidth - floatingButtonWidth) / 2 * position
                                             y = location[1]
@@ -1148,8 +1149,6 @@ class FreeformWindow(
             location[0] -= (hangUpViewWidth + screenPaddingX)
             position = -1
         }
-
-        val floatingButtonWidth = context.resources.getDimension(R.dimen.floating_button_width).toInt()
 
         AnimatorSet().apply {
             playTogether(
