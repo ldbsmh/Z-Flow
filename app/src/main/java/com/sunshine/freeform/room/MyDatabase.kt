@@ -34,8 +34,8 @@ abstract class MyDatabase : RoomDatabase() {
         }
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "CREATE TABLE IF NOT EXISTS" +
                             "'CompatibleAppsEntity'" +
                             "('packageName' TEXT NOT NULL, PRIMARY KEY('packageName'))"
@@ -44,11 +44,11 @@ abstract class MyDatabase : RoomDatabase() {
         }
 
         private val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "DROP TABLE IF EXISTS 'CompatibleAppsEntity'"
                 )
-                database.execSQL(
+                db.execSQL(
                     "ALTER TABLE 'FreeFormAppsEntity'" +
                             "ADD 'sortNum' int NOT NULL DEFAULT 0"
                 )
@@ -56,31 +56,31 @@ abstract class MyDatabase : RoomDatabase() {
         }
 
         private val MIGRATION_3_4 = object : Migration(3, 4) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE 'FreeFormAppsEntity' RENAME TO 'FreeFormAppsEntity_OLD'"
                 )
-                database.execSQL(
+                db.execSQL(
                     "CREATE TABLE IF NOT EXISTS" +
                             "'FreeFormAppsEntity'" +
                             "('sortNum' INTEGER NOT NULL, 'packageName' TEXT NOT NULL, PRIMARY KEY('sortNum'))"
                 )
-                database.execSQL(
+                db.execSQL(
                     "INSERT INTO 'FreeFormAppsEntity'('packageName')" +
                             "SELECT packageName from 'FreeFormAppsEntity_OLD'"
                 )
-                database.execSQL(
+                db.execSQL(
                     "DROP TABLE 'FreeFormAppsEntity_OLD'"
                 )
             }
         }
 
         private val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE 'FreeFormAppsEntity' ADD COLUMN 'userId' INTEGER NOT NULL DEFAULT 0"
                 )
-                database.execSQL(
+                db.execSQL(
                     "ALTER TABLE 'NotificationAppsEntity' ADD COLUMN 'userId' INTEGER NOT NULL DEFAULT 0"
                 )
             }

@@ -15,7 +15,10 @@
     <string name="reject">拒绝</string>
 
     <!--FreeformView-->
-    <string name="service_not_running">Shizuku/Sui服务没有运行，你是否为米窗授权了Shizuku/Sui？</string>
+    <string name="service_not_running">Xposed服务未连接，请确保已在Xposed管理器中激活模块并勾选系统框架</string>
+    <string name="xposed_service_connected">Xposed服务已连接</string>
+    <string name="xposed_service_not_connected">Xposed服务未连接</string>
+    <string name="try_to_init_xposed_service">正在尝试连接Xposed服务…</string>
     <string name="overlay_no_permission">没有悬浮窗权限</string>
     <string name="app_is_running">该应用已经处于小窗模式</string>
     <string name="create_display_fail">创建屏幕失败，这表示米窗可能不能在该ROM上运行，请联系开发者</string>

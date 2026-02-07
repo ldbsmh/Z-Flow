@@ -17,11 +17,8 @@ import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.github.promeg.pinyinhelper.Pinyin
 import com.sunshine.freeform.R
 import com.sunshine.freeform.systemapi.UserHandle
-import com.sunshine.freeform.ui.freeform.FreeformConfig
 import com.sunshine.freeform.ui.freeform.FreeformService
-import com.sunshine.freeform.ui.freeform.FreeformView
 import java.lang.reflect.Method
-import kotlin.collections.ArrayList
 
 /**
  * @author sunshine
@@ -33,7 +30,7 @@ class AllAppsAdapter(
     private val callback: ChooseAppFloatingView.ClickListener
 ) : RecyclerView.Adapter<AllAppsAdapter.ViewHolder>() {
 
-    inner class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+    class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val icon: ImageView = itemView.findViewById(R.id.imageView_icon)
         val click: View = itemView.findViewById(R.id.view_click)
         val appName: TextView = itemView.findViewById(R.id.textView_appName)

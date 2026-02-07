@@ -1,89 +1,37 @@
 package com.sunshine.freeform.app
 
 import android.app.Application
-import android.content.ComponentName
 import android.content.Context
-import android.content.ServiceConnection
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.IBinder
-import androidx.lifecycle.*
+import androidx.lifecycle.MutableLiveData
 import com.google.android.material.color.DynamicColors
-import com.sunshine.freeform.BuildConfig
-import com.sunshine.freeform.IControlService
-import com.sunshine.freeform.service.ControlService
-import com.sunshine.freeform.utils.ServiceUtils
+import com.sunshine.freeform.service.FreeformManagerProxy
 import org.lsposed.hiddenapibypass.HiddenApiBypass
-import rikka.shizuku.Shizuku
-import rikka.sui.Sui
-import java.lang.StringBuilder
 
 /**
- * @author sunshine
- * @date 2021/3/17
+ * Application class for Mi-Freeform.
+ * Now uses Xposed-based FreeformManager instead of Shizuku.
  */
 class MiFreeform : Application() {
     val isRunning = MutableLiveData(false)
-    var controlService: IControlService? = null
 
-    private val onRequestPermissionResultListener =
-        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-            if (requestCode == SUI_CODE && grantResult == PackageManager.PERMISSION_GRANTED) {
-                initShizuku()
-            }
-        }
-
-    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
-        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            Shizuku.requestPermission(SUI_CODE)
-        } else {
-            initShizuku()
-        }
-    }
-
-    private val binderDeadListener = Shizuku.OnBinderDeadListener {
-        isRunning.postValue(false)
-    }
-
-    private val userServiceArgs =
-        Shizuku.UserServiceArgs(
-            ComponentName(
-                BuildConfig.APPLICATION_ID,
-                ControlService::class.java.name
-            )
-        ).processNameSuffix("service")
-
-    private val userServiceConnection = object : ServiceConnection {
-        override fun onServiceDisconnected(name: ComponentName?) {
-            isRunning.value = false
-            controlService = null
-        }
-
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            controlService = IControlService.Stub.asInterface(service)
-            if (controlService!!.init()) isRunning.value = true
-        }
-    }
+    /**
+     * Client-side proxy for FreeformManager service running in system_server.
+     */
+    val freeformManagerProxy: FreeformManagerProxy
+        get() = FreeformManagerProxy
 
     companion object {
         lateinit var me: MiFreeform
         private const val TAG = "MiFreeForm"
         const val PACKAGE_NAME = "com.sunshine.freeform"
-        //软件版本，该版本指需要再次展示介绍界面的版本
         const val VERSION = 1
-        //隐私策略版本，用于展示隐私策略
         const val VERSION_PRIVACY = 1
         const val APP_SETTINGS_NAME = "app_settings"
-        private const val SUI_CODE = 0
 
         private val log = StringBuilder()
 
-        fun addLog(tag: String, functionName: String,  e: Exception) {
+        fun addLog(tag: String, functionName: String, e: Exception) {
             log.append("$tag,$functionName:${e.message}")
-        }
-
-        init {
-            Sui.init(BuildConfig.APPLICATION_ID)
         }
     }
 
@@ -91,47 +39,76 @@ class MiFreeform : Application() {
         super.onCreate()
         me = this
 
-        DynamicColors.applyToActivitiesIfAvailable(this);
+        DynamicColors.applyToActivitiesIfAvailable(this)
 
-        Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
-        Shizuku.addRequestPermissionResultListener(onRequestPermissionResultListener)
-        Shizuku.addBinderDeadListener(binderDeadListener)
+        // Check if FreeformManager is connected
+        checkServiceConnection()
     }
 
     override fun attachBaseContext(base: Context?) {
         super.attachBaseContext(base)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            HiddenApiBypass.addHiddenApiExemptions("")
-        }
+        HiddenApiBypass.addHiddenApiExemptions("")
     }
 
-    private fun bindShizukuService() {
-        try {
-            Shizuku.bindUserService(userServiceArgs, userServiceConnection)
-        } catch (e: Exception) {
-            addLog(TAG, "bindShizukuService", e)
-        }
+    /**
+     * Check if FreeformManager service is connected via Xposed.
+     * The binder link is established automatically when the app starts
+     * via UserService in system_server.
+     */
+    private fun checkServiceConnection() {
+        // Give some time for the binder link to be established
+        android.os.Handler(mainLooper).postDelayed({
+            if (FreeformManagerProxy.isConnected) {
+                isRunning.postValue(true)
+            } else {
+                isRunning.postValue(false)
+            }
+        }, 500)
     }
 
-    fun initShizuku() {
-        if (pingServiceBinder()) return
-        bindShizukuService()
-        ServiceUtils.initWithShizuku(this)
+    /**
+     * Check if the service is ready.
+     * For compatibility with existing code that checked Shizuku status.
+     */
+    fun isServiceReady(): Boolean {
+        return FreeformManagerProxy.isConnected && FreeformManagerProxy.isServiceReady
     }
 
-    fun pingServiceBinder(): Boolean {
-        return controlService?.asBinder()?.pingBinder() == true
-    }
-
-    fun execShell(command: String, useRoot: Boolean): Boolean {
-        return controlService?.execShell(command, useRoot)!!
-    }
-
-    fun initShizuku(callback: ShizukuBindCallback) {
-        initShizuku()
+    /**
+     * Retry connection check.
+     * Called when UI wants to refresh status.
+     */
+    fun recheckConnection() {
+        checkServiceConnection()
     }
 
     interface ShizukuBindCallback {
         fun onBind()
+    }
+
+    @Deprecated("Use FreeformManagerProxy directly", ReplaceWith("FreeformManagerProxy"))
+    fun initShizuku() {
+        // No-op, service is connected via Xposed automatically
+        recheckConnection()
+    }
+
+    @Deprecated("Use FreeformManagerProxy directly", ReplaceWith("FreeformManagerProxy"))
+    fun initShizuku(callback: ShizukuBindCallback) {
+        recheckConnection()
+        if (FreeformManagerProxy.isConnected) {
+            callback.onBind()
+        }
+    }
+
+    @Deprecated("No longer needed with Xposed implementation")
+    fun pingServiceBinder(): Boolean {
+        return FreeformManagerProxy.isConnected
+    }
+
+    @Deprecated("Shell execution moved to FreeformManager")
+    fun execShell(command: String, useRoot: Boolean): Boolean {
+        // Shell execution is no longer supported in the same way
+        // Tasks should be performed via FreeformManager AIDL methods
+        return false
     }
 }

@@ -27,6 +27,7 @@ import com.sunshine.freeform.ui.view.IntegerSimpleMenuPreference
 import com.sunshine.freeform.utils.PermissionUtils
 import kotlin.math.min
 import kotlin.math.roundToInt
+import androidx.core.content.edit
 
 class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClickListener,
     Preference.OnPreferenceChangeListener {
@@ -44,7 +45,7 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             if (PermissionUtils.isAccessibilitySettingsOn(requireContext())) {
                 findPreference<IntegerSimpleMenuPreference>(SERVICE_TYPE)!!.setValueIndex(0)
             } else {
-                sp.edit().putInt("service_type", ForegroundService.SERVICE_TYPE).apply()
+                sp.edit { putInt("service_type", ForegroundService.SERVICE_TYPE) }
                 findPreference<IntegerSimpleMenuPreference>(SERVICE_TYPE)!!.setValueIndex(1)
                 requireContext().startForegroundService(Intent(requireContext(), ForegroundService::class.java))
             }
@@ -87,7 +88,7 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             }
             FREEFORM_SCALE -> {
                 val editView = layoutInflater.inflate(R.layout.view_edit, null, false)
-                val til = editView.findViewById<TextInputLayout>(R.id.til_freeform_dpi)
+                editView.findViewById<TextInputLayout>(R.id.til_freeform_dpi)
                 val editText = editView.findViewById<AppCompatEditText>(R.id.edit_freeform_dpi)
 
                 //优化 可点击输入缩放值 q220910.2

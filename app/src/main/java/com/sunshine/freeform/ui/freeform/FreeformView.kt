@@ -12,16 +12,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
+import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
-import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.GestureDetector
-import android.view.IRotationWatcher
 import android.view.InputEvent
 import android.view.KeyEvent
 import android.view.LayoutInflater
@@ -40,12 +38,8 @@ import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.sunshine.freeform.R
 import com.sunshine.freeform.app.MiFreeform
+import com.sunshine.freeform.bean.MotionEventBean
 import com.sunshine.freeform.databinding.ViewFreeformFlymeBinding
-import com.sunshine.freeform.utils.ServiceUtils.activityTaskManager
-import com.sunshine.freeform.utils.ServiceUtils.displayManager
-import com.sunshine.freeform.utils.ServiceUtils.iWindowManager
-import com.sunshine.freeform.utils.ServiceUtils.inputManager
-import com.sunshine.freeform.utils.ServiceUtils.windowManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -61,6 +55,10 @@ class FreeformView(
     private var virtualDisplay: VirtualDisplay,
     var screenListener: ScreenListener,
 ) : FreeformViewAbs(config), View.OnTouchListener, ScreenListener.ScreenStateListener {
+
+    //系统服务
+    private val windowManager: WindowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val displayManager: DisplayManager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
 
     //ViewModel
     private val viewModel = FreeformViewModel(context)
@@ -98,12 +96,18 @@ class FreeformView(
     //虚拟屏幕方向，1 竖屏， 0 横屏
     private var virtualDisplayRotation = VIRTUAL_DISPLAY_ROTATION_PORTRAIT
 
-    private val iRotationWatcher = object : IRotationWatcher.Stub() {
-        override fun onRotationChanged(rotation: Int) {
-            if (rotation != screenRotation) {
-                screenRotation = rotation
-                scope.launch(Dispatchers.Main) {
-                    onScreenOrientationChanged()
+    //屏幕旋转监听
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == Display.DEFAULT_DISPLAY) {
+                val newRotation = defaultDisplay.rotation
+                if (newRotation != screenRotation) {
+                    screenRotation = newRotation
+                    scope.launch(Dispatchers.Main) {
+                        onScreenOrientationChanged()
+                    }
                 }
             }
         }
@@ -293,13 +297,8 @@ class FreeformView(
 
     fun initSystemService() {
         try {
-            if (!rikka.shizuku.Shizuku.pingBinder()) {
-                Log.e(TAG, "Shizuku binder is not available")
-                return
-            }
-
             setDisplayIdMethod = InputEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
-            activityTaskManager.registerTaskStackListener(taskStackListener)
+            // Task stack listener is now managed by FreeformManager in system_server
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize system services", e)
         }
@@ -400,27 +399,9 @@ class FreeformView(
     }
 
     private fun performBackKey() {
-        val downEvent = KeyEvent(
-            SystemClock.uptimeMillis(),
-            SystemClock.uptimeMillis(),
-            KeyEvent.ACTION_DOWN,
-            KeyEvent.KEYCODE_BACK,
-            0
-        )
-        val upEvent = KeyEvent(
-            SystemClock.uptimeMillis(),
-            SystemClock.uptimeMillis(),
-            KeyEvent.ACTION_UP,
-            KeyEvent.KEYCODE_BACK,
-            0
-        )
-
         runCatching {
-            setDisplayIdMethod?.invoke(downEvent, virtualDisplay.display.displayId)
-            inputManager.injectInputEvent(downEvent, 0)
-
-            setDisplayIdMethod?.invoke(upEvent, virtualDisplay.display.displayId)
-            inputManager.injectInputEvent(upEvent, 0)
+            // Inject BACK key press via FreeformManagerProxy
+            MiFreeform.me.freeformManagerProxy.injectKeyEvent(KeyEvent.KEYCODE_BACK, virtualDisplay.display.displayId)
         }
     }
 
@@ -495,7 +476,7 @@ class FreeformView(
     }
 
     private fun initOrientationChangedListener() {
-        iWindowManager.watchRotation(iRotationWatcher, Display.DEFAULT_DISPLAY)
+        displayManager.registerDisplayListener(displayListener, null)
     }
 
     private fun initTextureViewListener() {
@@ -1548,13 +1529,13 @@ class FreeformView(
         }
 
         runCatching {
-            iWindowManager.removeRotationWatcher(iRotationWatcher)
+            displayManager.unregisterDisplayListener(displayListener)
         }
 
         screenListener.removeScreenStateListener(this@FreeformView)
         viewModel.unregisterOnSharedPreferenceChangeListener(sharedPreferencesChangeListener)
 
-        activityTaskManager.unregisterTaskStackListener(taskStackListener)
+        // Task stack listener is managed by FreeformManager in system_server
     }
 
     //优化 将触摸设置为一等公民，以支持多点触控，也可以看一下为什么那样，多点触控就不支持了... q220906.1
@@ -1574,19 +1555,22 @@ class FreeformView(
         }
 
         /**
-         * 触控处理
+         * 触控处理 - 使用 FreeformManagerProxy 注入触摸事件
          */
         private fun handleTouch(event: MotionEvent) {
+            val count = event.pointerCount
+            val xArray = FloatArray(count)
+            val yArray = FloatArray(count)
 
-            val newEvent = MotionEvent.obtain(event)
-
-            val matrix = Matrix()
-            matrix.setScale(1f/ scaleX, 1f/scaleY)
-
-            newEvent.transform(matrix)
-            setDisplayIdMethod?.invoke(newEvent, virtualDisplay.display.displayId)
-            inputManager.injectInputEvent(newEvent, 0)
-            newEvent.recycle()
+            for (i in 0 until count) {
+                val coords = MotionEvent.PointerCoords()
+                event.getPointerCoords(i, coords)
+                xArray[i] = coords.x / scaleX
+                yArray[i] = coords.y / scaleY
+            }
+            MiFreeform.me.freeformManagerProxy.injectMotionEvent(
+                MotionEventBean(event.action, xArray, yArray, virtualDisplay.display.displayId)
+            )
         }
     }
 
@@ -1619,7 +1603,7 @@ class FreeformView(
 
             if (!isDestroy && taskList.contains(tId) && newDisplayId == Display.DEFAULT_DISPLAY) {
                 if (config.useSuiRefuseToFullScreen)
-                    activityTaskManager.moveRootTaskToDisplay(tId, virtualDisplay.display.displayId)
+                    MiFreeform.me.freeformManagerProxy.moveTaskToDisplay(tId, virtualDisplay.display.displayId)
                 else
                     context.startService(
                         Intent(context, FreeformService::class.java)

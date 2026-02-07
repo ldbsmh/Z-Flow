@@ -1,31 +1,25 @@
 package com.sunshine.freeform.utils
 
-import android.util.Log
-import com.sunshine.freeform.utils.ShellUtils
-import rikka.shizuku.Shizuku
-import rikka.shizuku.ShizukuBinderWrapper
 import java.io.BufferedReader
 import java.io.DataOutputStream
 import java.io.IOException
 import java.io.InputStreamReader
-import java.lang.AssertionError
-import java.lang.Exception
-import java.lang.StringBuilder
 
 /**
  * @author Trinea, sunshine0523
  * @date 2013-5-16
  * http://www.trinea.cn
- * 米窗声明：该类部分作者并非米窗，作者信息和源代码地址见上
+ * Shell command execution utility.
+ * Note: Shizuku-based execution has been removed. Use standard shell commands only.
  */
 class ShellUtils private constructor() {
 
     class CommandResult(
-        /** 运行结果  */
+        /** Execution result code */
         var result: Int,
-        /** 运行成功结果  */
+        /** Success output */
         var successMsg: String?,
-        /** 运行失败结果  */
+        /** Error output */
         var errorMsg: String?
     )
 
@@ -34,18 +28,14 @@ class ShellUtils private constructor() {
         private const val COMMAND_SH = "sh"
         private const val COMMAND_EXIT = "exit\n"
         private const val COMMAND_LINE_END = "\n"
-        fun execCommand(command: String, isRoot: Boolean): CommandResult {
-            return execCommand(arrayOf(command), isRoot, false)
-        }
 
-        fun execCommandWithShizuku(command: String, isRoot: Boolean): CommandResult {
-            return execCommand(arrayOf(command), isRoot, true)
+        fun execCommand(command: String, isRoot: Boolean): CommandResult {
+            return execCommand(arrayOf(command), isRoot)
         }
 
         private fun execCommand(
             commands: Array<String>?,
-            isRoot: Boolean,
-            useShizuku: Boolean
+            isRoot: Boolean
         ): CommandResult {
             var result = -1
             if (commands == null || commands.isEmpty()) {

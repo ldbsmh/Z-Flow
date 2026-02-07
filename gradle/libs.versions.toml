@@ -29,15 +29,13 @@ room = "2.8.4"
 # Preference
 preference = "1.2.1"
 
-# Shizuku
-shizuku = "13.1.5"
-
 # Rikka Tools
 rikkax-appcompat = "1.6.1"
 rikkax-borderview = "1.1.0"
 rikkax-recyclerview = "1.3.2"
 rikkax-preference = "1.0.3"
 rikkax-refine = "4.4.0"
+rikka-hidden = "4.4.0"
 
 # Other
 tinypinyin = "2.0.3"
@@ -81,10 +79,6 @@ androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 androidx-preference-ktx = { module = "androidx.preference:preference-ktx", version.ref = "preference" }
 rikkax-preference-simplemenu = { module = "dev.rikka.rikkax.preference:simplemenu-preference", version.ref = "rikkax-preference" }
 
-# Shizuku
-shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
-shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
-
 # Rikka Tools
 rikkax-appcompat = { module = "dev.rikka.rikkax.appcompat:appcompat", version.ref = "rikkax-appcompat" }
 rikkax-borderview = { module = "dev.rikka.rikkax.widget:borderview", version.ref = "rikkax-borderview" }
@@ -92,6 +86,8 @@ rikkax-recyclerview-ktx = { module = "dev.rikka.rikkax.recyclerview:recyclerview
 rikkax-refine-runtime = { module = "dev.rikka.tools.refine:runtime", version.ref = "rikkax-refine" }
 rikkax-refine-annotation = { module = "dev.rikka.tools.refine:annotation", version.ref = "rikkax-refine" }
 rikkax-refine-annotation-processor = { module = "dev.rikka.tools.refine:annotation-processor", version.ref = "rikkax-refine" }
+rikka-hidden-stub = { module = "dev.rikka.hidden:stub", version.ref = "rikka-hidden" }
+rikka-hidden-compat = { module = "dev.rikka.hidden:compat", version.ref = "rikka-hidden" }
 
 # Other
 tinypinyin = { module = "com.github.promeg:tinypinyin", version.ref = "tinypinyin" }

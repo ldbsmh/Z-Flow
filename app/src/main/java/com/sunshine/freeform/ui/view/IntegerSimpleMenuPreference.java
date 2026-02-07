@@ -24,7 +24,7 @@ import rikka.preference.simplemenu.R;
  * a {@link rikka.preference.SimpleMenuPreference} to implement night mode in user interface settings.
  * a {@link rikka.preference.SimpleMenuPreference} which use integer values array as entryValues.
  *
- * @author rikka https://github.com/RikkaApps/Shizuku/blob/master/manager/src/main/java/moe/shizuku/manager/settings/IntegerSimpleMenuPreference.java
+ * @author rikka <a href="https://github.com/RikkaApps/Shizuku/blob/master/manager/src/main/java/moe/shizuku/manager/settings/IntegerSimpleMenuPreference.java">...</a>
  * @author Haruue Icymoon haruue@caoyue.com.cn
  */
 
@@ -355,7 +355,7 @@ public class IntegerSimpleMenuPreference extends Preference {
         }
 
         public static final Parcelable.Creator<SavedState> CREATOR =
-                new Parcelable.Creator<SavedState>() {
+                new Parcelable.Creator<>() {
                     public SavedState createFromParcel(Parcel in) {
                         return new SavedState(in);
                     }
@@ -367,7 +367,7 @@ public class IntegerSimpleMenuPreference extends Preference {
     }
 
     @Override
-    public void onBindViewHolder(PreferenceViewHolder holder) {
+    public void onBindViewHolder(@NonNull PreferenceViewHolder holder) {
         super.onBindViewHolder(holder);
 
         mItemView = holder.itemView;
@@ -375,7 +375,7 @@ public class IntegerSimpleMenuPreference extends Preference {
 
         if (mAnchor == null) {
             throw new IllegalStateException("SimpleMenuPreference item layout must contain" +
-                    "a view id is android.R.id.empty to support iconSpaceReserved");
+                    " a view id is android.R.id.empty to support iconSpaceReserved");
         }
     }
 }

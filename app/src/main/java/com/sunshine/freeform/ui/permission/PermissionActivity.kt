@@ -1,18 +1,14 @@
 package com.sunshine.freeform.ui.permission
 
-import android.accessibilityservice.AccessibilityService
 import android.content.Intent
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.util.Log
 import android.view.View
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
@@ -22,7 +18,6 @@ import com.sunshine.freeform.databinding.ActivityPermissionBinding
 import com.sunshine.freeform.hook.utils.HookTest
 import com.sunshine.freeform.ui.splash.SplashActivity
 import com.sunshine.freeform.utils.PermissionUtils
-import rikka.sui.Sui
 
 
 class PermissionActivity : AppCompatActivity(), View.OnClickListener {
@@ -111,15 +106,15 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
     }
 
     private fun checkShizukuPermission(): Boolean {
-        val result = MiFreeform.me?.isRunning?.value!!
+        val result = MiFreeform.me.isRunning.value ?: false
         if (result) {
             binding.content.infoShizukuBg.setBackgroundColor(getColor(R.color.success_color))
             binding.content.imageViewShizukuService.setImageDrawable(AppCompatResources.getDrawable(this, R.drawable.ic_done))
-            binding.content.textViewShizukuServiceInfo.text = if (Sui.isSui()) getString(R.string.sui_start) else getString(R.string.shizuku_start)
+            binding.content.textViewShizukuServiceInfo.text = getString(R.string.xposed_service_connected)
         } else {
             binding.content.infoShizukuBg.setBackgroundColor(getColor(R.color.warn_color))
             binding.content.imageViewShizukuService.setImageDrawable(AppCompatResources.getDrawable(this, R.drawable.ic_error_white))
-            binding.content.textViewShizukuServiceInfo.text = getString(R.string.shizuku_no_start)
+            binding.content.textViewShizukuServiceInfo.text = getString(R.string.xposed_service_not_connected)
         }
         return result
     }
@@ -161,8 +156,8 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
                 }
             }
             R.id.materialCardView_shizuku_info -> {
-                MiFreeform.me?.initShizuku()
-                MiFreeform.me?.isRunning?.observe(this) {
+                MiFreeform.me.recheckConnection()
+                MiFreeform.me.isRunning.observe(this) {
                     checkShizukuPermission()
                 }
             }
@@ -172,7 +167,7 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
             R.id.materialCardView_overlay_info -> {
                 overlayRFAR.launch(Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
+                    "package:$packageName".toUri()
                 ))
             }
             R.id.materialCardView_notification_info -> {

@@ -18,8 +18,10 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 
         when (lpparam.packageName) {
             "android" -> {
-                XLog.d("MainHook: init HookFramework for android")
+                XLog.d("MainHook: init HookFramework for android (system_server)")
                 HookFramework.init(lpparam.classLoader)
+                // Initialize system_server hooks for FreeformManager
+                HookSystem.init(lpparam.classLoader)
             }
             "com.sunshine.freeform" -> {
                 XLog.d("MainHook: init HookMyself")

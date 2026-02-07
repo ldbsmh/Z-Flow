@@ -12,6 +12,8 @@ import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
 
+import androidx.annotation.NonNull;
+
 import com.sunshine.freeform.R;
 
 import java.util.Arrays;
@@ -20,7 +22,7 @@ import java.util.List;
 /**
  * 波浪侧边栏
  * author: imilk
- * https://github.com/Solartisan/WaveSideBar.git
+ * <a href="https://github.com/Solartisan/WaveSideBar.git">...</a>
  * 米窗声明：该类作者并非米窗，作者信息和源代码地址见上
  */
 public class WaveSideBarView extends View {
@@ -43,17 +45,15 @@ public class WaveSideBarView extends View {
     private int newChoose ;
 
     // 字母列表画笔
-    private Paint mLettersPaint = new Paint();
+    private final Paint mLettersPaint = new Paint();
 
     // 提示字母画笔
-    private Paint mTextPaint = new Paint();
+    private final Paint mTextPaint = new Paint();
     // 波浪画笔
     private Paint mWavePaint = new Paint();
 
     private float mTextSize;
-    private float mLargeTextSize;
     private int mTextColor;
-    private int mWaveColor;
     private int mTextColorChoose;
     private int mWidth;
     private int mHeight;
@@ -61,10 +61,10 @@ public class WaveSideBarView extends View {
     private int mPadding;
 
     // 波浪路径
-    private Path mWavePath = new Path();
+    private final Path mWavePath = new Path();
 
     // 圆形路径
-    private Path mBallPath = new Path();
+    private final Path mBallPath = new Path();
 
     // 手指滑动的Y点作为中心点
     private int mCenterY; //中心点Y
@@ -103,10 +103,10 @@ public class WaveSideBarView extends View {
         mLetters = Arrays.asList(context.getResources().getStringArray(R.array.waveSideBarLetters));
 
         mTextColor = Color.parseColor("#969696");
-        mWaveColor = context.getColor(R.color.color_primary);
+        int mWaveColor = context.getColor(R.color.color_primary);
         mTextColorChoose = context.getColor(android.R.color.white);
         mTextSize = context.getResources().getDimensionPixelSize(R.dimen.textSize_sidebar);
-        mLargeTextSize = context.getResources().getDimensionPixelSize(R.dimen.large_textSize_sidebar);
+        float mLargeTextSize = context.getResources().getDimensionPixelSize(R.dimen.large_textSize_sidebar);
         mPadding = context.getResources().getDimensionPixelSize(R.dimen.textSize_sidebar_padding);
         if (attrs != null) {
             TypedArray a = getContext().obtainStyledAttributes(attrs, R.styleable.WaveSideBarView);
@@ -185,7 +185,7 @@ public class WaveSideBarView extends View {
     }
 
     @Override
-    protected void onDraw(Canvas canvas) {
+    protected void onDraw(@NonNull Canvas canvas) {
         super.onDraw(canvas);
         //绘制字母列表
         drawLetters(canvas);
@@ -266,7 +266,6 @@ public class WaveSideBarView extends View {
     /**
      * 绘制波浪
      *
-     * @param canvas
      */
     private void drawWavePath(Canvas canvas) {
         mWavePath.reset();
@@ -314,22 +313,19 @@ public class WaveSideBarView extends View {
         }
         mRatioAnimator.cancel();
         mRatioAnimator.setFloatValues(value);
-        mRatioAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-            @Override
-            public void onAnimationUpdate(ValueAnimator value) {
+        mRatioAnimator.addUpdateListener(value1 -> {
 
-                mRatio = (float) value.getAnimatedValue();
-                //球弹到位的时候，并且点击的位置变了，即点击的时候显示当前选择位置
-                if (mRatio==1f&&oldChoose != newChoose){
-                    if (newChoose >= 0 && newChoose < mLetters.size()) {
-                        mChoose = newChoose;
-                        if (listener != null) {
-                            listener.onLetterChange(mLetters.get(newChoose));
-                        }
+            mRatio = (float) value1.getAnimatedValue();
+            //球弹到位的时候，并且点击的位置变了，即点击的时候显示当前选择位置
+            if (mRatio==1f&&oldChoose != newChoose){
+                if (newChoose >= 0 && newChoose < mLetters.size()) {
+                    mChoose = newChoose;
+                    if (listener != null) {
+                        listener.onLetterChange(mLetters.get(newChoose));
                     }
                 }
-                invalidate();
             }
+            invalidate();
         });
         mRatioAnimator.start();
     }

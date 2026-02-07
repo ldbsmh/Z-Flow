@@ -16,7 +16,7 @@ object HookSystemUI {
     }
 
     private fun hookDisplayLayout(classLoader: ClassLoader) {
-        val displayLayoutClazz = loadClass("com.android.systemui.wm.DisplayLayout", classLoader)
+        val displayLayoutClazz = loadClass("com.android.wm.shell.common.DisplayLayout", classLoader)
         var lastObj: Any? = null
 
         MethodFinder.fromClass(displayLayoutClazz)
