@@ -33,6 +33,7 @@ import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.animation.addListener
 import androidx.core.content.ContextCompat
 import com.qauxv.ui.CommonContextWrapper
+import com.sunshine.freeform.BuildConfig
 import com.sunshine.freeform.R
 import com.sunshine.freeform.databinding.ViewFreeformFlymeBinding
 import com.sunshine.freeform.hook.utils.XLog
@@ -926,11 +927,22 @@ class FreeformWindow(
                                     if (position != 0) {
                                         // 进入侧边栏模式
                                         isHidden = true
-                                        hiddenView = LayoutInflater.from(context).inflate(R.layout.view_floating_button, null, false)
+                                        val inflateContext = try {
+                                            val moduleContext = context.createPackageContext(
+                                                BuildConfig.APPLICATION_ID,
+                                                Context.CONTEXT_IGNORE_SECURITY or Context.CONTEXT_INCLUDE_CODE
+                                            )
+                                            CommonContextWrapper.createAppCompatContext(moduleContext)
+                                        } catch (e: Exception) {
+                                            XLog.e("$TAG: Failed to create module context for inflation", e)
+                                            context
+                                        }
+
+                                        hiddenView = LayoutInflater.from(inflateContext).inflate(R.layout.view_floating_button, null, false)
                                         hiddenView.setOnTouchListener(this@FloatViewTouchListener)
                                         if (position == 1) {
                                             hiddenView.findViewById<View>(R.id.backgroundView).background =
-                                                ContextCompat.getDrawable(context, R.drawable.floating_button_bg_right)
+                                                ContextCompat.getDrawable(inflateContext, R.drawable.floating_button_bg_right)
                                         }
 
                                         Instances.windowManager.addView(hiddenView, WindowManager.LayoutParams().apply {
