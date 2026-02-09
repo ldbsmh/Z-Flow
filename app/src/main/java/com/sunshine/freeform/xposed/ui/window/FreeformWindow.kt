@@ -1,6 +1,7 @@
 package com.sunshine.freeform.xposed.ui.window
 
 import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
@@ -27,6 +28,7 @@ import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
 import android.view.WindowManagerHidden
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -587,7 +589,7 @@ class FreeformWindow(
         // 淡出动画
         ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f).apply {
             duration = 100
-            addListener(object : android.animation.AnimatorListenerAdapter() {
+            addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     // 在淡出完成后执行尺寸变更
                     initFloatViewSize()
@@ -611,7 +613,7 @@ class FreeformWindow(
                     // 淡入动画
                     ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f).apply {
                         duration = 150
-                        addListener(object : android.animation.AnimatorListenerAdapter() {
+                        addListener(object : AnimatorListenerAdapter() {
                             override fun onAnimationEnd(animation: Animator) {
                                 isAnimating = false
                             }
@@ -948,7 +950,7 @@ class FreeformWindow(
                             )
                         )
                         duration = 300
-                        addListener(object : android.animation.AnimatorListenerAdapter() {
+                        addListener(object : AnimatorListenerAdapter() {
                             override fun onAnimationEnd(animation: Animator) {
                                 isAnimating = false
                                 // 移动应用到主屏幕
@@ -975,7 +977,7 @@ class FreeformWindow(
                         )
                         duration = 300
                         interpolator = OvershootInterpolator(1.5f)
-                        addListener(object : android.animation.AnimatorListenerAdapter() {
+                        addListener(object : AnimatorListenerAdapter() {
                             override fun onAnimationEnd(animation: Animator) {
                                 mScaleX = targetScaleX
                                 mScaleY = targetScaleY
@@ -1557,16 +1559,37 @@ class FreeformWindow(
     }
 
     fun moveToTop() {
-        if (isDestroyed) return
+        if (isDestroyed || isAnimating) return
         try {
-            Instances.windowManager.removeView(binding.root)
-            Instances.windowManager.addView(binding.root, windowLayoutParams)
-            FreeformManager.moveToTop(displayId)
-            // 如果是普通窗口，重新将 mini 窗口提升到顶层
-            if (!isFloating && !isHidden) {
-                FreeformManager.bringMiniWindowsToFront()
+            isAnimating = true
+            ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f).apply {
+                duration = 175
+                interpolator = AccelerateDecelerateInterpolator()
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        Instances.windowManager.removeView(binding.root)
+                        Instances.windowManager.addView(binding.root, windowLayoutParams)
+                        FreeformManager.moveToTop(displayId)
+                        if (!isFloating && !isHidden) {
+                            FreeformManager.bringMiniWindowsToFront()
+                        }
+                        ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f).apply {
+                            duration = 200
+                            interpolator = AccelerateDecelerateInterpolator()
+                            startDelay = 25
+                            addListener(object : AnimatorListenerAdapter() {
+                                override fun onAnimationEnd(animation: Animator) {
+                                    isAnimating = false
+                                }
+                            })
+                            start()
+                        }
+                    }
+                })
+                start()
             }
         } catch (e: Exception) {
+            isAnimating = false
             XLog.e("$TAG: Failed to move to top", e)
         }
     }
@@ -1591,7 +1614,7 @@ class FreeformWindow(
                 ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f),
             )
             duration = 200
-            addListener(object : android.animation.AnimatorListenerAdapter() {
+            addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     isAnimating = false
                     destroy()
