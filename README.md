@@ -1,17 +1,18 @@
-# Mi-FreeForm (Flyme Style Edition)
+# Z-Flow
+> (Flyme Style Edition based on Mi-Freeform)
 
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/DtHnAme/Mi-FreeForm)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/relimus/Z-Flow)
 
-<img src="https://raw.githubusercontent.com/DtHnAme/Mi-FreeForm/master/app/src/main/res/mipmap/ic_launcher.png" width="100"/>
+<img src="https://raw.githubusercontent.com/relimus/Z-Flow/master/app/src/main/res/mipmap/ic_launcher.png" width="100"/>
 
-Mi-FreeForm is an APP that is activated through Shizuku/Sui and can display most apps in the form of freeform. Current support:
+Z-Flow is an APP that is activated through Xposed and can display most apps in the form of freeform. Current support:
 - Open the favorites app in small window mode through the global sidebar
 - Open the favorites app with resident notifications
 - Open the favorites app with a tile
 - Make the APP that sends notifications open in freeform mode
 
 ## Download
-[Release](https://github.com/DtHnAme/Mi-FreeForm/releases/)
+[Release](https://github.com/relimus/Z-Flow/releases/)
 
 ## Library
 [AppIconLoader](https://github.com/zhanghai/AppIconLoader)
@@ -30,6 +31,7 @@ Mi-FreeForm is an APP that is activated through Shizuku/Sui and can display most
 ```
 Copyright (C) 2021-2022  sunshine0523
 Copyright (C) 2023  DtHnAme
+Copyright (C) 2024-2026 relimus
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

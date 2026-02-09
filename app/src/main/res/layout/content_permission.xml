@@ -54,7 +54,7 @@
                     app:layout_constraintTop_toTopOf="parent"
                     app:srcCompat="@drawable/ic_error_white" />
 
-                <com.sunshine.freeform.ui.view.MTextView
+                <io.relimus.zflow.ui.view.MTextView
                     android:id="@+id/textView_service_xposed_info"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -103,7 +103,7 @@
                     app:layout_constraintTop_toTopOf="parent"
                     app:srcCompat="@drawable/ic_error_white" />
 
-                <com.sunshine.freeform.ui.view.MTextView
+                <io.relimus.zflow.ui.view.MTextView
                     android:id="@+id/textView_shizuku_service_info"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -148,7 +148,7 @@
                     app:layout_constraintTop_toTopOf="parent"
                     app:srcCompat="@drawable/ic_error_white" />
 
-                <com.sunshine.freeform.ui.view.MTextView
+                <io.relimus.zflow.ui.view.MTextView
                     android:id="@+id/textView_accessibility_service_info"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -194,7 +194,7 @@
                     app:layout_constraintTop_toTopOf="parent"
                     app:srcCompat="@drawable/ic_error_white" />
 
-                <com.sunshine.freeform.ui.view.MTextView
+                <io.relimus.zflow.ui.view.MTextView
                     android:id="@+id/textView_overlay_service_info"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -240,7 +240,7 @@
                     app:layout_constraintTop_toTopOf="parent"
                     app:srcCompat="@drawable/ic_error_white" />
 
-                <com.sunshine.freeform.ui.view.MTextView
+                <io.relimus.zflow.ui.view.MTextView
                     android:id="@+id/textView_notification_service_info"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"

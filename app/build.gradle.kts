@@ -7,11 +7,11 @@ plugins {
 }
 
 extensions.configure<ApplicationExtension> {
-    namespace = "com.sunshine.freeform"
+    namespace = "io.relimus.zflow"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.sunshine.freeform"
+        applicationId = "io.relimus.zflow"
         minSdk = 33
         targetSdk = 36
         versionCode = 3000

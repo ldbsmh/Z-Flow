@@ -1,6 +1,6 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
-    <style name="Base.Theme.MiFreeform" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Base.Theme.ZFlow" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/color_primary</item>
         <item name="colorPrimaryVariant">?colorPrimary</item>
         <item name="colorSecondary">?colorPrimary</item>
@@ -15,7 +15,7 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
-    <style name="Theme.MiFreeform" parent="Base.Theme.MiFreeform" />
+    <style name="Theme.ZFlow" parent="Base.Theme.ZFlow" />
 
     <style name="FreeForm.ButtonStyle" parent="Widget.MaterialComponents.Button.TextButton">
         <item name="android:textSize">@dimen/button_text_size</item>

@@ -2,7 +2,7 @@
  * Based on QAuxiliary - An Xposed module
  * https://github.com/cinit/QAuxiliary
  *
- * Modified for Flyme-Freeform project
+ * Modified for Z-Flow project
  */
 package com.qauxv.util;
 

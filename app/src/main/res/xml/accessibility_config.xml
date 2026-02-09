@@ -4,5 +4,5 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_desc"
-    android:packageNames="com.sunshine.freeform"
+    android:packageNames="io.relimus.zflow"
     android:notificationTimeout="100" />

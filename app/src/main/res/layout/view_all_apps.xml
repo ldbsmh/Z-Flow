@@ -19,7 +19,7 @@
         android:layout_height="match_parent"
         android:layout_marginEnd="@dimen/wave_sidebar_width" />
 
-    <com.sunshine.freeform.ui.view.WaveSideBarView
+    <io.relimus.zflow.ui.view.WaveSideBarView
         android:id="@+id/waveSideBarView"
         android:layout_width="wrap_content"
         android:layout_height="match_parent"

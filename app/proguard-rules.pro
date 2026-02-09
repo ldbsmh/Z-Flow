@@ -21,13 +21,13 @@
 #-renamesourcefileattribute SourceFile
 
 # 混淆会导致序列化失败
--keep class com.sunshine.freeform.bean.MotionEventBean {*;}
+-keep class io.relimus.zflow.bean.MotionEventBean {*;}
 # 不混淆需要hook的类
--keep class com.sunshine.freeform.hook.HookFramework {*;}
--keep class com.sunshine.freeform.hook.HookMyself {*;}
--keep class com.sunshine.freeform.hook.HookSystemUI {*;}
--keep class com.sunshine.freeform.hook.utils.HookShellUtils {*;}
--keep class com.sunshine.freeform.hook.**{*;}
+-keep class io.relimus.zflow.hook.HookFramework {*;}
+-keep class io.relimus.zflow.hook.HookMyself {*;}
+-keep class io.relimus.zflow.hook.HookSystemUI {*;}
+-keep class io.relimus.zflow.hook.utils.HookShellUtils {*;}
+-keep class io.relimus.zflow.hook.**{*;}
 
 #避免对AIDL混淆
 -keep class * implements android.os.IInterface {*;}
