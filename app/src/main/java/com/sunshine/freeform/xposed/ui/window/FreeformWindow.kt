@@ -37,6 +37,7 @@ import com.sunshine.freeform.BuildConfig
 import com.sunshine.freeform.R
 import com.sunshine.freeform.databinding.ViewFreeformFlymeBinding
 import com.sunshine.freeform.hook.utils.XLog
+import com.sunshine.freeform.ui.freeform.FreeformHelper
 import com.sunshine.freeform.xposed.services.FreeformManager
 import com.sunshine.freeform.xposed.utils.Instances
 import com.sunshine.freeform.xposed.utils.ReflectUtils.invokeMethodAs
@@ -63,6 +64,10 @@ class FreeformWindow(
     companion object {
         private const val TAG = "FreeformWindow"
         private const val WIDTH_HEIGHT_RATIO = 11f / 21f
+
+        // 虚拟显示屏方向常量
+        private const val VIRTUAL_DISPLAY_ROTATION_PORTRAIT = 1
+        private const val VIRTUAL_DISPLAY_ROTATION_LANDSCAPE = 0
     }
 
     private val context: Context = CommonContextWrapper.createAppCompatContext(baseContext)
@@ -78,6 +83,9 @@ class FreeformWindow(
 
     // 屏幕方向 - 使用 Surface.ROTATION_* 常量
     private var screenRotation: Int = Instances.displayManager.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0
+
+    // 虚拟显示屏方向 - 小窗内应用的方向
+    private var virtualDisplayRotation = VIRTUAL_DISPLAY_ROTATION_PORTRAIT
 
     // 主线程 Handler
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -113,11 +121,26 @@ class FreeformWindow(
             return if (screenIsPortrait()) max(width, height) else min(width, height)
         }
 
-    // 窗口尺寸 (用于显示) - 动态计算
+    // 窗口尺寸 (用于显示) - 动态计算，考虑小窗内应用方向
     private val rootWidth: Int
-        get() = if (screenIsPortrait()) realScreenWidth else realScreenHeight
+        get() {
+            var tmp = if (screenIsPortrait()) realScreenWidth else realScreenHeight
+            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                tmp = realScreenWidth
+            }
+            return tmp
+        }
     private val rootHeight: Int
-        get() = if (screenIsPortrait()) realScreenHeight else realScreenWidth
+        get() {
+            var tmp = if (screenIsPortrait()) realScreenHeight else realScreenWidth
+            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                tmp = ((rootWidth * WIDTH_HEIGHT_RATIO) + cardHeightMargin).roundToInt()
+                if (!screenIsPortrait()) {
+                    tmp = realScreenHeight
+                }
+            }
+            return tmp
+        }
 
     // Margins - 根据屏幕方向动态计算
     private val cardHeightMargin: Float
@@ -206,10 +229,17 @@ class FreeformWindow(
         }
     })
 
-    // 手势检测器 - bar 双击
+    // 手势检测器 - bar 双击切换小窗内应用方向
     private val middleGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            // 双击可以添加其他功能，如旋转
+            if (config.manualAdjustFreeformRotation) {
+                virtualDisplayRotation = if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
+                    VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
+                } else {
+                    VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+                }
+                onFreeFormRotationChanged()
+            }
             return false
         }
     })
@@ -253,44 +283,57 @@ class FreeformWindow(
 
     /**
      * 初始化悬浮模式尺寸 - 参考 FreeformView.initFloatViewSize
-     * 横屏时不需要额外处理，因为 rootHeight 已经根据方向返回正确的值
+     * 支持小窗内应用横屏时的尺寸计算
+     * mini 状态下 cardViewMarginAnim 会将 margin 动画到 0，故使用简化公式
      */
     private fun initFloatViewSize() {
         hangUpViewHeight = (rootHeight * config.floatViewSize).roundToInt()
         hangUpViewWidth = (hangUpViewHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+            hangUpViewWidth = (realScreenHeight * config.floatViewSize).roundToInt()
+            hangUpViewHeight = (hangUpViewWidth * WIDTH_HEIGHT_RATIO).roundToInt()
+            if (!screenIsPortrait()) {
+                hangUpViewWidth = (realScreenWidth * config.floatViewSize).roundToInt()
+                hangUpViewHeight = (hangUpViewWidth * WIDTH_HEIGHT_RATIO).roundToInt()
+            }
+        }
     }
 
     /**
      * 刷新小窗显示尺寸 - 参考 FreeformView.refreshFreeformSize
+     * 修复宽高比计算问题
      */
     private fun refreshFreeformSize() {
-        freeformHeight = if (screenIsPortrait()) {
-            (rootWidth / WIDTH_HEIGHT_RATIO * config.freeformSize).roundToInt()
-        } else {
-            (rootWidth * config.freeformSizeLand).roundToInt()
-        }
-        freeformHeight += cardHeightMargin.roundToInt()
-
         if (screenIsPortrait()) {
-            val realCardHeight = freeformHeight - (cardHeightMargin * freeformHeight / rootHeight)
-            freeformWidth = (realCardHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+            // 竖屏状态，以宽度为基准计算，确保宽高比正确
+            freeformWidth = (rootWidth * config.freeformSize).roundToInt()
+            val contentHeight = (freeformWidth - (freeformShadow * 2)) / WIDTH_HEIGHT_RATIO
+            freeformHeight = (contentHeight + cardHeightMargin).roundToInt()
         } else {
+            // 横屏状态
+            freeformHeight = (rootWidth * config.freeformSizeLand).roundToInt()
+            freeformHeight += cardHeightMargin.roundToInt()
             freeformWidth = ((freeformHeight + cardWidthMargin) * WIDTH_HEIGHT_RATIO).roundToInt()
+        }
+        if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+            // 内部应用横屏时，小窗变成宽扁形态 - 移植自 FreeformView.kt
+            if (screenIsPortrait()) {
+                freeformWidth = (rootWidth - (rootWidth * 0.05)).roundToInt()
+                freeformHeight = ((freeformWidth + (cardHeightMargin * 2)) * WIDTH_HEIGHT_RATIO) .roundToInt()
+            } else {
+                freeformWidth = (realScreenWidth / 2 + cardWidthMargin).roundToInt()
+                freeformHeight = ((freeformWidth * WIDTH_HEIGHT_RATIO) * 0.95).roundToInt()
+            }
         }
     }
 
     /**
-     * 刷新缩放阈值
-     * 竖屏时基于高度，横屏时基于宽度
+     * 刷新缩放阈值 - 完全复刻 FreeformView.refreshActionScale
+     * goFloatScale 基于 freeformHeight * 0.8
      */
     private fun refreshActionScale() {
-        if (screenIsPortrait()) {
-            goFloatScale = (freeformHeight * 0.8f) / rootHeight
-            goFullScale = (freeformHeight * 1.1f) / rootHeight
-        } else {
-            goFloatScale = (freeformWidth * 0.8f) / rootWidth
-            goFullScale = (freeformWidth * 1.1f) / rootWidth
-        }
+        goFloatScale = (freeformHeight * 0.8f) / rootHeight
+        goFullScale = (freeformHeight * 1.1f) / rootHeight
     }
 
     private fun getScreenDpi(): Int {
@@ -408,6 +451,7 @@ class FreeformWindow(
 
     /**
      * 生成居中位置 - 参考 FreeformView.genCenterLocation
+     * 支持小窗内应用横屏时的位置计算
      */
     private fun genCenterLocation(): IntArray {
         val center = intArrayOf(0, 0)
@@ -415,6 +459,12 @@ class FreeformWindow(
             center[0] = (freeformWidth - rootHeight + screenPaddingX) / 2
             if (!hangUpPosition[0]) {
                 center[0] = (freeformWidth - rootHeight + screenPaddingX) / -2
+            }
+            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                center[0] = (freeformWidth - realScreenWidth + screenPaddingX) / 2
+                if (!hangUpPosition[0]) {
+                    center[0] = (freeformWidth - realScreenWidth + screenPaddingX) / -2
+                }
             }
         }
         return center
@@ -508,6 +558,89 @@ class FreeformWindow(
         refreshTouchScale()
         refreshScale()
         refreshActionScale()
+    }
+
+    /**
+     * 调整虚拟显示屏尺寸
+     */
+    private fun resizeVirtualDisplay() {
+        if (!::virtualDisplay.isInitialized || isDestroyed) return
+        try {
+            virtualDisplay.resize(freeformScreenWidth, freeformScreenHeight, freeformDpi)
+        } catch (e: Exception) {
+            XLog.e("$TAG: Failed to resize VirtualDisplay", e)
+        }
+    }
+
+    /**
+     * 小窗内应用方向变化处理 - 参考 FreeformView.onFreeFormRotationChanged
+     * 当小窗内应用从竖屏切换到横屏（或反之）时调用
+     * 添加渐变过渡动画以平滑视觉切换
+     */
+    private fun onFreeFormRotationChanged() {
+        if (isDestroyed || isAnimating) return
+        isAnimating = true
+
+        val tempHeight = max(freeformScreenHeight, freeformScreenWidth)
+        val tempWidth = min(freeformScreenHeight, freeformScreenWidth)
+
+        // 淡出动画
+        ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f).apply {
+            duration = 100
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    // 在淡出完成后执行尺寸变更
+                    initFloatViewSize()
+                    if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_PORTRAIT) {
+                        freeformScreenHeight = tempHeight
+                        freeformScreenWidth = tempWidth
+                    } else {
+                        freeformScreenHeight = tempWidth
+                        freeformScreenWidth = tempHeight
+                    }
+                    refreshFreeformSize()
+                    resetScale()
+                    resizeVirtualDisplay()
+                    Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                        width = rootWidth
+                        height = rootHeight
+                        x = genCenterLocation()[0]
+                        y = genCenterLocation()[1]
+                    })
+
+                    // 淡入动画
+                    ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f).apply {
+                        duration = 150
+                        addListener(object : android.animation.AnimatorListenerAdapter() {
+                            override fun onAnimationEnd(animation: Animator) {
+                                isAnimating = false
+                            }
+                        })
+                        start()
+                    }
+                }
+            })
+            start()
+        }
+    }
+
+    /**
+     * 公开方法：设置虚拟显示屏方向
+     * 供 FreeformManager 的 TaskStackListener 调用
+     */
+    fun setVirtualDisplayRotation(rotation: Int) {
+        if (isDestroyed) return
+        var tempRotation = rotation
+        // 某些应用可能会有非标准的方向值，将其转为竖屏
+        if (tempRotation != VIRTUAL_DISPLAY_ROTATION_PORTRAIT && tempRotation != VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+            tempRotation = VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+        }
+        if (tempRotation != virtualDisplayRotation) {
+            virtualDisplayRotation = tempRotation
+            mainHandler.post {
+                onFreeFormRotationChanged()
+            }
+        }
     }
 
     /**
@@ -642,6 +775,7 @@ class FreeformWindow(
 
     /**
      * 处理拖拽缩放
+     * 根据小窗内应用方向(virtualDisplayRotation)选择乘/除，保持宽高比一致性
      * dy < 0 (向上拖动) -> 高度减少 -> 缩小 (竖屏)
      * dy > 0 (向下拖动) -> 高度增加 -> 放大 (竖屏)
      * dx < 0 (向左拖动) -> 宽度减少 -> 缩小 (横屏)
@@ -650,42 +784,48 @@ class FreeformWindow(
     private fun handleToFloatScale(dx: Float, dy: Float) {
         if (isFloating || isAnimating) return
 
+
+        val ratio =
+            if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                1 / WIDTH_HEIGHT_RATIO
+        } else {
+            WIDTH_HEIGHT_RATIO
+        }
+
         if (dy != 0f) {
-            // 竖屏：垂直方向缩放
             val tempHeight = freeformHeight + dy
             if (tempHeight >= hangUpViewHeight && tempHeight <= rootHeight * 0.9) {
                 freeformHeight += dy.roundToInt()
-                
-                // Keep aspect ratio correct by subtracting margins
-                if (screenIsPortrait()) {
-                    val visualMarginHeight = cardHeightMargin * (freeformHeight / rootHeight.toFloat())
-                    val contentHeight = freeformHeight - visualMarginHeight
-                    freeformWidth = (contentHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+
+                val contentHeight = freeformHeight - cardHeightMargin
+                val contentWidth = contentHeight * ratio
+                if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                    freeformWidth = (contentWidth + (freeformShadow * 2)).roundToInt()
                 } else {
-                    freeformWidth = (freeformHeight * WIDTH_HEIGHT_RATIO).roundToInt()
+                    freeformWidth = (contentWidth + cardWidthMargin).roundToInt()
                 }
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
                 mScaleY = freeformHeight / rootHeight.toFloat()
+
                 isZoomOut = true
             }
         } else if (dx != 0f) {
-            // 横屏：水平方向缩放
             val tempWidth = freeformWidth + dx
             if (tempWidth >= hangUpViewWidth && tempWidth <= rootWidth * 0.9) {
                 freeformWidth += dx.roundToInt()
-                
-                // Keep aspect ratio correct by subtracting margins
-                if (!screenIsPortrait()) {
-                     val visualMarginWidth = cardWidthMargin * (freeformWidth / rootWidth.toFloat())
-                     val contentWidth = freeformWidth - visualMarginWidth
-                     freeformHeight = (contentWidth / WIDTH_HEIGHT_RATIO).roundToInt()
+
+                val contentWidth = if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                    freeformWidth - (freeformShadow * 2)
                 } else {
-                    freeformHeight = ((freeformWidth / WIDTH_HEIGHT_RATIO) - cardWidthMargin).roundToInt()
+                    freeformWidth - cardWidthMargin
                 }
+                val contentHeight = contentWidth / ratio
+                freeformHeight = (contentHeight + cardHeightMargin).roundToInt()
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
                 mScaleY = freeformHeight / rootHeight.toFloat()
+
                 isZoomOut = true
             }
         }
@@ -703,17 +843,14 @@ class FreeformWindow(
             val scaleX: Float = hangUpViewWidth / rootWidth.toFloat()
             val scaleY: Float = hangUpViewHeight / rootHeight.toFloat()
 
-            // 横屏时使用 mScaleX，竖屏时使用 mScaleY
-            val currentScale = if (screenIsPortrait()) mScaleY else mScaleX
-
             // 进入 mini 模式时，关闭其他 mini 窗口
-            if (currentScale <= goFloatScale) {
+            if (mScaleY <= goFloatScale) {
                 FreeformManager.destroyAllMiniWindows()
             }
 
             when {
                 // 缩小到悬浮模式阈值 -> 进入 mini 悬浮状态
-                currentScale <= goFloatScale -> {
+                mScaleY <= goFloatScale -> {
                     isAnimating = true
                     AnimatorSet().apply {
                         playTogether(
@@ -768,10 +905,10 @@ class FreeformWindow(
                                                     onEnd = {
                                                         mScaleX = scaleX
                                                         mScaleY = scaleY
-                                                        binding.cardRoot.radius = cardCornerRadius * scaleX
+                                                        binding.cardRoot.radius = cardCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
                                                         Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                                                            height = (rootHeight * scaleY).roundToInt()
-                                                            width = (rootWidth * scaleX).roundToInt()
+                                                            height = hangUpViewHeight
+                                                            width = hangUpViewWidth
                                                         })
                                                         binding.freeformRoot.scaleY = 1f
                                                         binding.freeformRoot.scaleX = 1f
@@ -796,7 +933,7 @@ class FreeformWindow(
                     }
                 }
                 // 放大到全屏阈值 -> 移动到主屏幕
-                currentScale >= goFullScale -> {
+                mScaleY >= goFullScale -> {
                     isAnimating = true
                     AnimatorSet().apply {
                         playTogether(
@@ -1582,4 +1719,5 @@ data class FreeformWindowConfig(
     var freeformSizeLand: Float = 0.9f,
     var floatViewSize: Float = 0.33f,
     var dimAmount: Float = 0.2f,
+    var manualAdjustFreeformRotation: Boolean = false,
 )

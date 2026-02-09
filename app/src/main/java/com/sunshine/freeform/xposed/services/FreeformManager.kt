@@ -2,6 +2,7 @@ package com.sunshine.freeform.xposed.services
 
 import android.annotation.SuppressLint
 import android.app.ActivityOptions
+import android.app.TaskStackListener
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
@@ -36,12 +37,73 @@ object FreeformManager : IFreeformManager.Stub() {
     private val displayIdList = mutableListOf<Int>()
     private var isReady = false
 
+    // 存储 displayId 对应的 taskId 列表
+    private val displayTaskMap = mutableMapOf<Int, MutableList<Int>>()
+
     lateinit var activityManagerService: Any
         internal set
+
+    // TaskStackListener 监听应用方向变化
+    private val taskStackListener = object : TaskStackListener() {
+        override fun onTaskCreated(taskId: Int, componentName: ComponentName?) {
+            // 不需要处理，因为窗口创建时会自动关联 task
+        }
+
+        override fun onTaskRemovalStarted(taskInfo: android.app.ActivityManager.RunningTaskInfo) {
+            // 如果是小窗内的任务被移除，关闭对应的窗口
+            runOnMainThread {
+                displayTaskMap.entries.find { it.value.contains(taskInfo.taskId) }?.let { entry ->
+                    val displayId = entry.key
+                    entry.value.remove(taskInfo.taskId)
+                    // 如果这个 display 上没有任务了，可以关闭窗口
+                    if (entry.value.isEmpty()) {
+                        getWindow(displayId)?.destroy()
+                    }
+                }
+            }
+        }
+
+        override fun onTaskDisplayChanged(taskId: Int, newDisplayId: Int) {
+            runOnMainThread {
+                // 更新 task 的 display 映射
+                displayTaskMap.values.forEach { it.remove(taskId) }
+                if (displayIdList.contains(newDisplayId)) {
+                    displayTaskMap.getOrPut(newDisplayId) { mutableListOf() }.add(taskId)
+                }
+            }
+        }
+
+        override fun onTaskRequestedOrientationChanged(taskId: Int, requestedOrientation: Int) {
+            runOnMainThread {
+                // 找到包含此 task 的 display
+                displayTaskMap.entries.find { it.value.contains(taskId) }?.let { entry ->
+                    getWindow(entry.key)?.setVirtualDisplayRotation(requestedOrientation)
+                }
+            }
+        }
+
+        override fun onActivityRequestedOrientationChanged(taskId: Int, requestedOrientation: Int) {
+            runOnMainThread {
+                // Android 10 及以上使用此回调
+                displayTaskMap.entries.find { it.value.contains(taskId) }?.let { entry ->
+                    getWindow(entry.key)?.setVirtualDisplayRotation(requestedOrientation)
+                }
+            }
+        }
+    }
 
     fun systemReady() {
         Instances.init(activityManagerService)
         isReady = true
+
+        // 注册 TaskStackListener
+        try {
+            Instances.activityTaskManager.registerTaskStackListener(taskStackListener)
+            XLog.d("$TAG: TaskStackListener registered")
+        } catch (e: Exception) {
+            XLog.e("$TAG: Failed to register TaskStackListener", e)
+        }
+
         XLog.d("$TAG: System ready, FreeformManager initialized")
     }
 
@@ -50,6 +112,8 @@ object FreeformManager : IFreeformManager.Stub() {
     fun addWindow(window: FreeformWindow) {
         windowList.add(0, window)
         displayIdList.add(0, window.displayId)
+        // 初始化 display 对应的 task 列表
+        displayTaskMap[window.displayId] = mutableListOf()
     }
 
     fun removeWindow(displayId: Int) {
@@ -57,6 +121,8 @@ object FreeformManager : IFreeformManager.Stub() {
         if (window != null) {
             windowList.remove(window)
             displayIdList.remove(displayId)
+            // 清理 displayTaskMap
+            displayTaskMap.remove(displayId)
         }
     }
 
