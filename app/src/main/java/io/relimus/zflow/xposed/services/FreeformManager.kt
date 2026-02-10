@@ -53,14 +53,14 @@ object FreeformManager : IFreeformManager.Stub() {
         }
 
         override fun onTaskRemovalStarted(taskInfo: ActivityManager.RunningTaskInfo) {
-            // 如果是小窗内的任务被移除，关闭对应的窗口
+            // 如果是小窗内的任务被移除，真正销毁对应的窗口
             runOnMainThread {
                 displayTaskMap.entries.find { it.value.contains(taskInfo.taskId) }?.let { entry ->
                     val displayId = entry.key
                     entry.value.remove(taskInfo.taskId)
-                    // 如果这个 display 上没有任务了，可以关闭窗口
+                    // 如果这个 display 上没有任务了，真正销毁窗口
                     if (entry.value.isEmpty()) {
-                        getWindow(displayId)?.destroy()
+                        getWindow(displayId)?.realDestroy()
                     }
                 }
             }
@@ -140,12 +140,40 @@ object FreeformManager : IFreeformManager.Stub() {
     fun getWindow(displayId: Int): FreeformWindow? = windowList.find { it.displayId == displayId }
 
     /**
+     * 检查指定 displayId 上是否有任务
+     */
+    fun hasTaskOnDisplay(displayId: Int): Boolean {
+        val taskList = displayTaskMap[displayId]
+        return taskList != null && taskList.isNotEmpty()
+    }
+
+    /**
      * 查找指定应用的窗口（mini 或 hidden 状态）
      */
     fun findFloatingWindow(packageName: String?): FreeformWindow? {
         if (packageName == null) return null
         return windowList.find {
             !it.isDestroyed && it.componentName?.packageName == packageName && (it.isFloating || it.isHidden)
+        }
+    }
+
+    /**
+     * 查找指定应用的后台窗口（isClosedToBack 状态）
+     */
+    fun findBackWindow(packageName: String?): FreeformWindow? {
+        if (packageName == null) return null
+        return windowList.find {
+            !it.isDestroyed && it.componentName?.packageName == packageName && it.isClosedToBack
+        }
+    }
+
+    /**
+     * 查找指定应用的任意可用窗口（包括后台窗口）
+     */
+    fun findAnyWindow(packageName: String?): FreeformWindow? {
+        if (packageName == null) return null
+        return windowList.find {
+            !it.isDestroyed && it.componentName?.packageName == packageName
         }
     }
 
@@ -173,17 +201,17 @@ object FreeformManager : IFreeformManager.Stub() {
     }
 
     /**
-     * 关闭所有 mini/hidden 状态的窗口
+     * 关闭所有 mini/hidden 状态的窗口（退到后台）
      */
-    fun destroyAllMiniWindows() {
-        windowList.filter { it.isFloating || it.isHidden }.forEach { it.destroy() }
+    fun closeAllMiniWindows() {
+        windowList.filter { it.isFloating || it.isHidden }.forEach { it.closeToBack() }
     }
 
     /**
-     * 关闭所有普通状态的窗口
+     * 关闭所有普通状态的窗口（退到后台）
      */
-    fun destroyAllNormalWindows() {
-        windowList.filter { !it.isFloating && !it.isHidden }.forEach { it.destroy() }
+    fun closeAllNormalWindows() {
+        windowList.filter { !it.isFloating && !it.isHidden && !it.isClosedToBack }.forEach { it.closeToBack() }
     }
 
     // IFreeformManager implementation
@@ -203,18 +231,27 @@ object FreeformManager : IFreeformManager.Stub() {
             try {
                 Instances.iStatusBarService.collapsePanels()
 
-                // 检查是否有同应用的 mini/hidden 窗口
-                val existingFloatingWindow = findFloatingWindow(componentName?.packageName)
-                if (existingFloatingWindow != null) {
-                    // 同应用：关闭当前普通状态窗口，将 mini 窗口恢复到普通状态
-                    destroyAllNormalWindows()
-                    existingFloatingWindow.restoreToNormalView()
-                    XLog.d("$TAG: Restored existing floating window for ${componentName?.packageName}")
-                    return@runOnMainThread
+                // 1. 检查是否已经有一个处于后台的同名应用窗口
+                val existingWindow = findAnyWindow(componentName?.packageName)
+                if (existingWindow != null) {
+                    if (existingWindow.isClosedToBack) {
+                        // 如果在后台，恢复它
+                        closeAllNormalWindows()
+                        existingWindow.restoreFromBack()
+                        bringMiniWindowsToFront()
+                        XLog.d("$TAG: Restored existing back window for ${componentName?.packageName}")
+                        return@runOnMainThread
+                    } else if (existingWindow.isFloating || existingWindow.isHidden) {
+                        // 如果是 mini/hidden 状态，恢复到正常模式
+                        closeAllNormalWindows()
+                        existingWindow.restoreToNormalView()
+                        XLog.d("$TAG: Restored existing floating window for ${componentName?.packageName}")
+                        return@runOnMainThread
+                    }
                 }
 
-                // 不同应用：关闭当前普通状态窗口，创建新窗口
-                destroyAllNormalWindows()
+                // 2. 如果不存在，关闭当前普通状态窗口，创建新窗口
+                closeAllNormalWindows()
 
                 // Build config from parameters
                 val config = FreeformWindowConfig(
@@ -237,13 +274,13 @@ object FreeformManager : IFreeformManager.Stub() {
 
     override fun destroyWindow(displayId: Int) {
         runOnMainThread {
-            getWindow(displayId)?.destroy()
+            getWindow(displayId)?.closeToBack()
         }
     }
 
     override fun destroyAllWindows() {
         runOnMainThread {
-            windowList.toList().forEach { it.destroy() }
+            windowList.toList().forEach { it.realDestroy() }
         }
     }
 

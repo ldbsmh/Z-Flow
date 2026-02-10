@@ -202,6 +202,8 @@ class FreeformWindow(
     // 状态
     var isDestroyed = false
         private set
+    var isClosedToBack = false
+        private set
     private var updateFrameCount = 0
     private var initFinish = false
     var isFloating = false
@@ -228,7 +230,7 @@ class FreeformWindow(
     private val backgroundGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             if (!isFloating) {
-                destroyWithAnimation()
+                closeToBackWithAnimation()
             }
             return true
         }
@@ -726,11 +728,11 @@ class FreeformWindow(
 
         // 长按关闭
         binding.bottomBar.middleView.setOnLongClickListener {
-            destroy()
+            closeToBack()
             true
         }
         binding.bottomBar.sideView.setOnLongClickListener {
-            destroy()
+            closeToBack()
             true
         }
     }
@@ -850,7 +852,7 @@ class FreeformWindow(
 
             // 进入 mini 模式时，关闭其他 mini 窗口
             if (mScaleY <= goFloatScale) {
-                FreeformManager.destroyAllMiniWindows()
+                FreeformManager.closeAllMiniWindows()
             }
 
             when {
@@ -958,7 +960,7 @@ class FreeformWindow(
                                 isAnimating = false
                                 // 移动应用到主屏幕
                                 moveToDefaultDisplay()
-                                destroy()
+                                closeToBack()
                             }
                         })
                         start()
@@ -1058,7 +1060,7 @@ class FreeformWindow(
 
                         // 拖到顶部关闭
                         if (nowY <= realScreenHeight * 0.1f) {
-                            destroyWithAnimation()
+                            closeToBackWithAnimation()
                             isMoved = false
                             return true
                         }
@@ -1398,8 +1400,8 @@ class FreeformWindow(
     private fun floatViewToNormalViewInternal() {
         if (isAnimating) return
 
-        // 恢复普通模式时，关闭其他普通窗口
-        FreeformManager.destroyAllNormalWindows()
+        // 恢复普通模式时，关闭其他普通窗口（退到后台）
+        FreeformManager.closeAllNormalWindows()
 
         binding.textureView.setOnTouchListener { _, motionEvent ->
             forwardMotionEvent(motionEvent)
@@ -1609,10 +1611,138 @@ class FreeformWindow(
     }
 
     /**
-     * 带动画的销毁
+     * 模拟 moveTaskToBack：移除视图，但保留 VirtualDisplay 和任务状态
      */
-    private fun destroyWithAnimation() {
-        if (isDestroyed || isAnimating) return
+    fun closeToBack() {
+        if (isDestroyed || isClosedToBack) return
+        isClosedToBack = true
+
+        try {
+            // 取消注册屏幕方向监听
+            Instances.displayManager.unregisterDisplayListener(displayListener)
+
+            // 移除侧边栏视图
+            if (isHidden && ::hiddenView.isInitialized) {
+                Instances.windowManager.removeView(hiddenView)
+            }
+
+            // 移除主视图和背景（但不释放 virtualDisplay！）
+            if (binding.root.isAttachedToWindow) {
+                Instances.windowManager.removeView(binding.root)
+            }
+            if (backgroundView.isAttachedToWindow) {
+                Instances.windowManager.removeView(backgroundView)
+            }
+
+            XLog.d("$TAG: FreeformWindow moved to back (views removed), displayId=$displayId")
+        } catch (e: Exception) {
+            XLog.e("$TAG: Error moving window to back", e)
+        }
+    }
+
+    /**
+     * 恢复窗口：重新添加到 WindowManager
+     */
+    fun restoreFromBack() {
+        if (!isClosedToBack || isDestroyed) return
+
+        try {
+            // 重新计算正常尺寸
+            refreshFreeformSize()
+            refreshScale()
+            refreshTouchScale()
+
+            // 重置 windowLayoutParams 为正常尺寸
+            windowLayoutParams.apply {
+                width = rootWidth
+                height = rootHeight
+                x = genCenterLocation()[0]
+                y = genCenterLocation()[1]
+            }
+
+            // 重置 cardRoot margin
+            (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
+                if (screenIsPortrait()) {
+                    topMargin = freeformShadow.roundToInt()
+                    bottomMargin = barHeight.roundToInt()
+                    rightMargin = 0
+                } else {
+                    topMargin = 0
+                    bottomMargin = 0
+                    rightMargin = barHeight.roundToInt()
+                }
+            }
+            binding.cardRoot.radius = cardCornerRadius
+
+            // 重新初始化控制栏布局
+            initFloatBar()
+
+            // 重置动画状态，准备播放入场动画
+            initFinish = false
+            updateFrameCount = 0
+            binding.lottieView.alpha = 1f
+            binding.lottieView.playAnimation()
+            binding.textureView.alpha = 0f
+
+            // 重新添加视图
+            Instances.windowManager.addView(backgroundView, backgroundLayoutParams.apply {
+                dimAmount = config.dimAmount
+            })
+            Instances.windowManager.addView(binding.root, windowLayoutParams)
+
+            // 重新注册监听
+            Instances.displayManager.registerDisplayListener(displayListener, mainHandler)
+
+            // 重新关联 Surface（如果 TextureView 已经有 SurfaceTexture）
+            binding.textureView.surfaceTexture?.let { surfaceTexture ->
+                if (::virtualDisplay.isInitialized) {
+                    surfaceTexture.setDefaultBufferSize(freeformScreenWidth, freeformScreenHeight)
+                    virtualDisplay.surface = Surface(surfaceTexture)
+                }
+            }
+
+            isClosedToBack = false
+            isFloating = false
+            isHidden = false
+
+            // 重置视图状态
+            binding.freeformRoot.scaleX = mScaleX
+            binding.freeformRoot.scaleY = mScaleY
+            binding.freeformRoot.alpha = 1f
+            binding.bottomBar.root.alpha = 1f
+            backgroundView.visibility = View.VISIBLE
+
+            // 设置触摸处理
+            binding.textureView.setOnTouchListener { _, event ->
+                forwardMotionEvent(event)
+                true
+            }
+
+            // 重新设置控制栏事件
+            setupControlBar()
+
+            // 禁用窗口移动动画
+            setWindowNoUpdateAnimation()
+
+            // 检查 VirtualDisplay 上是否还有任务，如果没有则重新启动 activity
+            if (!FreeformManager.hasTaskOnDisplay(displayId)) {
+                if (componentName != null && userId >= 0) {
+                    XLog.d("$TAG: No task on display, restarting activity")
+                    FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
+                }
+            }
+
+            XLog.d("$TAG: FreeformWindow restored from back, displayId=$displayId")
+        } catch (e: Exception) {
+            XLog.e("$TAG: Error restoring window", e)
+        }
+    }
+
+    /**
+     * 带动画的关闭到后台
+     */
+    private fun closeToBackWithAnimation() {
+        if (isDestroyed || isClosedToBack || isAnimating) return
 
         isAnimating = true
         AnimatorSet().apply {
@@ -1625,35 +1755,34 @@ class FreeformWindow(
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     isAnimating = false
-                    destroy()
+                    closeToBack()
                 }
             })
             start()
         }
     }
 
-    fun destroy() {
+    /**
+     * 真正的销毁：在任务被手动移除或 App 退出时调用
+     */
+    fun realDestroy() {
         if (isDestroyed) return
+
+        // 确保视图已移除
+        if (!isClosedToBack) {
+            closeToBack()
+        }
+
         isDestroyed = true
 
         try {
-            // 取消注册屏幕方向监听
-            Instances.displayManager.unregisterDisplayListener(displayListener)
-
-            // 移除侧边栏视图
-            if (isHidden && ::hiddenView.isInitialized) {
-                Instances.windowManager.removeView(hiddenView)
-            }
-
             FreeformManager.removeWindow(displayId)
             if (::virtualDisplay.isInitialized) {
                 virtualDisplay.release()
             }
-            Instances.windowManager.removeView(binding.root)
-            Instances.windowManager.removeView(backgroundView)
-            XLog.d("$TAG: FreeformWindow destroyed, displayId=$displayId")
+            XLog.d("$TAG: FreeformWindow real destroyed, displayId=$displayId")
         } catch (e: Exception) {
-            XLog.e("$TAG: Error destroying window", e)
+            XLog.e("$TAG: Error real destroying window", e)
         }
     }
 
