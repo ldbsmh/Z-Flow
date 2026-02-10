@@ -18,6 +18,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Flyme-Freeform"
+rootProject.name = "Z-Flow"
 include(":app")
 include(":hidden-api")

@@ -7,7 +7,7 @@
 
     <fragment
         android:id="@+id/FirstFragment"
-        android:name="com.sunshine.freeform.ui.guide.FirstFragment"
+        android:name="io.relimus.zflow.ui.guide.FirstFragment"
         tools:layout="@layout/fragment_guide_first">
 
         <action
@@ -21,5 +21,5 @@
 
     <fragment
         android:id="@+id/SecondFragment"
-        android:name="com.sunshine.freeform.ui.guide.SecondFragment"/>
+        android:name="io.relimus.zflow.ui.guide.SecondFragment"/>
 </navigation>

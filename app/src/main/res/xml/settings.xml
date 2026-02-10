@@ -10,7 +10,7 @@
             android:title="@string/switch_hide_recent"
             android:summary="@string/switch_hide_recent_summary"
             app:iconSpaceReserved="false"/>
-        <com.sunshine.freeform.ui.view.IntegerSimpleMenuPreference
+        <io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
             app:entries="@array/service_type"
             app:entryValues="@array/service_type_value"
             android:key="service_type"
@@ -110,7 +110,7 @@
             android:summary="@string/switch_floating_summary"
             app:iconSpaceReserved="false"/>
 
-        <com.sunshine.freeform.ui.view.IntegerSimpleMenuPreference
+        <io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
             app:entries="@array/floating_show_position"
             app:entryValues="@array/floating_show_position_value"
             android:key="floating_position_x"

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.sunshine.freeform">
+    package="io.relimus.zflow">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -18,7 +18,7 @@
         tools:ignore="PackageVisibilityPolicy,QueryAllPackagesPermission" />
 
     <application
-        android:name=".app.MiFreeform"
+        android:name="io.relimus.zflow.app.ZFlow"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -26,9 +26,9 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.MiFreeform">
+        android:theme="@style/Theme.ZFlow">
         <activity
-            android:name=".ui.splash.SplashActivity"
+            android:name="io.relimus.zflow.ui.splash.SplashActivity"
             android:excludeFromRecents="true"
             android:exported="true"
             android:taskAffinity=":splash">
@@ -54,13 +54,13 @@
             android:name=".ui.permission.PermissionActivity"
             android:exported="false" />
         <activity
-            android:name=".ui.main.MainActivity"
+            android:name="io.relimus.zflow.ui.main.MainActivity"
             android:exported="false" />
         <activity android:name=".ui.floating_apps_sort.FloatingAppsSortActivity" />
         <activity android:name=".ui.choose_apps.ChooseAppsActivity" />
 
         <service
-            android:name=".service.KeepAliveService"
+            android:name="io.relimus.zflow.service.KeepAliveService"
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -74,7 +74,7 @@
                 android:resource="@xml/accessibility_config" />
         </service>
         <service
-            android:name=".service.notification.NotificationService"
+            android:name="io.relimus.zflow.service.notification.NotificationService"
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
@@ -83,11 +83,11 @@
             </intent-filter>
         </service>
         <service
-            android:name=".service.notification.NotificationIntentService"
+            android:name="io.relimus.zflow.service.notification.NotificationIntentService"
             android:enabled="true"
             android:exported="false" />
         <service
-            android:name=".service.QuickStartTileService"
+            android:name="io.relimus.zflow.service.QuickStartTileService"
             android:exported="true"
             android:icon="@drawable/tile_icon"
             android:label="@string/choose_freeform_app"
@@ -101,19 +101,19 @@
             android:exported="true"
             android:permission="EnableFreeform">
             <intent-filter>
-                <action android:name="com.sunshine.freeform.ui.freeform.FreeformService"/>
+                <action android:name="io.relimus.zflow.ui.freeform.FreeformService"/>
             </intent-filter>
         </service>
 
         <service
-            android:name=".service.ForegroundService"
+            android:name="io.relimus.zflow.service.ForegroundService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
         <!-- ServiceProvider for receiving binder from system_server via Xposed -->
         <provider
-            android:name=".providers.ServiceProvider"
+            android:name="io.relimus.zflow.providers.ServiceProvider"
             android:authorities="${applicationId}.freeform.provider"
             android:enabled="true"
             android:exported="true"
@@ -121,7 +121,7 @@
             tools:ignore="ExportedContentProvider" />
 
         <receiver
-            android:name=".broadcast.BootBroadcastReceiver"
+            android:name="io.relimus.zflow.broadcast.BootBroadcastReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter android:priority="1000">

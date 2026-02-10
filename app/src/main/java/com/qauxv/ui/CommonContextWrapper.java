@@ -2,7 +2,7 @@
  * Based on QAuxiliary - An Xposed module
  * https://github.com/cinit/QAuxiliary
  *
- * Modified for Flyme-Freeform project
+ * Modified for Z-Flow project
  */
 package com.qauxv.ui;
 
@@ -17,7 +17,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.sunshine.freeform.R;
+import io.relimus.zflow.R;
 import com.qauxv.util.SavedInstanceStatePatchedClassReferencer;
 
 import io.github.kyuubiran.ezxhelper.xposed.EzXposed;
@@ -134,7 +134,7 @@ public class CommonContextWrapper extends ContextThemeWrapper {
         if (isAppCompatContext(base)) {
             return base;
         }
-        return new CommonContextWrapper(base, R.style.Theme_MiFreeform,
+        return new CommonContextWrapper(base, R.style.Theme_ZFlow,
                 recreateNighModeConfig(base, base.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK));
     }
 
