@@ -54,7 +54,7 @@ object UserService {
         appUid = pms.getPackageUid(BuildConfig.APPLICATION_ID, 0L, 0)
         XLog.d("$TAG: App UID = $appUid")
 
-        waitSystemService("activity")
+        waitActivityService()
         ActivityManagerApis.registerUidObserver(
             uidObserver,
             ActivityManagerHidden.UID_OBSERVER_ACTIVE,
@@ -64,8 +64,8 @@ object UserService {
         XLog.d("$TAG: UID observer registered")
     }
 
-    private fun waitSystemService(name: String) {
-        while (ServiceManager.getService(name) == null) {
+    private fun waitActivityService() {
+        while (ServiceManager.getService("activity") == null) {
             Thread.sleep(1000)
         }
     }

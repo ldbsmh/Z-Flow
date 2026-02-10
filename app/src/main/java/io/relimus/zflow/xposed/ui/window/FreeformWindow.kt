@@ -16,12 +16,9 @@ import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.Display
 import android.view.GestureDetector
 import android.view.Gravity
-import android.view.InputDevice
-import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.Surface
@@ -521,7 +518,7 @@ class FreeformWindow(
         refreshActionScale()
 
         if (isFloating && !isHidden) {
-            moveFloatViewLocation(location, true)
+            moveFloatViewLocation(location)
         } else if (isHidden) {
             moveHiddenViewLocation(location)
         } else {
@@ -787,9 +784,9 @@ class FreeformWindow(
         val ratio =
             if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
                 1 / WIDTH_HEIGHT_RATIO
-        } else {
-            WIDTH_HEIGHT_RATIO
-        }
+            } else {
+                WIDTH_HEIGHT_RATIO
+            }
 
         if (dy != 0f) {
             val tempHeight = freeformHeight + dy
@@ -1002,6 +999,7 @@ class FreeformWindow(
      * 悬浮模式触摸监听 - 完整移植自 FreeformView.kt
      * 支持：拖动、点击恢复、拖到侧边变侧边栏、拖到顶部关闭
      */
+    @SuppressLint("InflateParams")
     private inner class FloatViewTouchListener : View.OnTouchListener {
         private var moveStartX = 0f
         private var moveStartY = 0f
@@ -1156,7 +1154,7 @@ class FreeformWindow(
     // 侧边栏点击手势 - 点击恢复到悬浮模式
     private val hideGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            hiddenViewToFloatView(false)
+            hiddenViewToFloatView()
             return true
         }
     })
@@ -1247,7 +1245,7 @@ class FreeformWindow(
      * 从侧边栏恢复到悬浮模式
      */
     @SuppressLint("ClickableViewAccessibility")
-    private fun hiddenViewToFloatView(goNormalView: Boolean) {
+    private fun hiddenViewToFloatView() {
         val windowCoordinate = intArrayOf(
             windowLayoutParams.x,
             windowLayoutParams.y
@@ -1276,9 +1274,6 @@ class FreeformWindow(
                     if (!isHidden) {
                         lastFloatViewLocation = intArrayOf(location[0], windowCoordinate[1])
                     }
-                    if (goNormalView) {
-                        floatViewToNormalView()
-                    }
                 }
             )
             duration = 300
@@ -1290,7 +1285,7 @@ class FreeformWindow(
     /**
      * 移动悬浮视图位置
      */
-    private fun moveFloatViewLocation(location: IntArray, reset: Boolean) {
+    private fun moveFloatViewLocation(location: IntArray) {
         val windowCoordinate = intArrayOf(
             windowLayoutParams.x,
             windowLayoutParams.y
@@ -1300,14 +1295,12 @@ class FreeformWindow(
             playTogether(moveViewAnim(windowCoordinate, location))
             addListener(
                 onStart = {
-                    if (reset) {
-                        binding.freeformRoot.scaleY = 1f
-                        binding.freeformRoot.scaleX = 1f
-                        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                            height = hangUpViewHeight
-                            width = hangUpViewWidth
-                        })
-                    }
+                    binding.freeformRoot.scaleY = 1f
+                    binding.freeformRoot.scaleX = 1f
+                    Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+                        height = hangUpViewHeight
+                        width = hangUpViewWidth
+                    })
                 }
             )
             duration = 350
@@ -1325,15 +1318,12 @@ class FreeformWindow(
         val layoutParams = hiddenView.layoutParams as WindowManager.LayoutParams
         val windowCoordinate = intArrayOf(layoutParams.x, layoutParams.y)
 
-        var position = 0
-        // R
-        if (layoutParams.x > 0) {
+        val position = if (layoutParams.x > 0) {
             location[0] += (hangUpViewWidth + screenPaddingX)
-            position = 1
-        // L
+            1
         } else {
             location[0] -= (hangUpViewWidth + screenPaddingX)
-            position = -1
+            -1
         }
 
         AnimatorSet().apply {
@@ -1530,54 +1520,6 @@ class FreeformWindow(
         }
     }
 
-    private fun injectBackKey() {
-        if (displayId < 0) return
-
-        try {
-            val downTime = SystemClock.uptimeMillis()
-
-            val downEvent = KeyEvent(
-                downTime, downTime,
-                KeyEvent.ACTION_DOWN,
-                KeyEvent.KEYCODE_BACK, 0
-            )
-            ObjectUtil.invokeMethod(
-                obj = downEvent,
-                methodName = "setSource",
-                paramTypes = paramTypes(Int::class.javaPrimitiveType),
-                params = params(InputDevice.SOURCE_KEYBOARD)
-            )
-            ObjectUtil.invokeMethod(
-                obj = downEvent,
-                methodName = "setDisplayId",
-                paramTypes = paramTypes(Int::class.javaPrimitiveType),
-                params = params(displayId)
-            )
-            Instances.inputManager.injectInputEvent(downEvent, 0)
-
-            val upEvent = KeyEvent(
-                downTime, SystemClock.uptimeMillis(),
-                KeyEvent.ACTION_UP,
-                KeyEvent.KEYCODE_BACK, 0
-            )
-            ObjectUtil.invokeMethod(
-                obj = upEvent,
-                methodName = "setSource",
-                paramTypes = paramTypes(Int::class.javaPrimitiveType),
-                params = params(InputDevice.SOURCE_KEYBOARD)
-            )
-            ObjectUtil.invokeMethod(
-                obj = upEvent,
-                methodName = "setDisplayId",
-                paramTypes = paramTypes(Int::class.javaPrimitiveType),
-                params = params(displayId)
-            )
-            Instances.inputManager.injectInputEvent(upEvent, 0)
-        } catch (e: Exception) {
-            XLog.e("$TAG: Failed to inject back key", e)
-        }
-    }
-
     fun moveToTop() {
         if (isDestroyed || isAnimating) return
         try {
@@ -1615,12 +1557,6 @@ class FreeformWindow(
         } catch (e: Exception) {
             isAnimating = false
             XLog.e("$TAG: Failed to move to top", e)
-        }
-    }
-
-    private fun moveToTopIfNeeded() {
-        if (!FreeformManager.isTop(displayId)) {
-            moveToTop()
         }
     }
 

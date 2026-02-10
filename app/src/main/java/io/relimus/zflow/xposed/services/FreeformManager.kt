@@ -129,8 +129,6 @@ object FreeformManager : IFreeformManager.Stub() {
         }
     }
 
-    fun isTop(displayId: Int): Boolean = displayIdList.isEmpty() || displayIdList[0] == displayId
-
     fun moveToTop(displayId: Int) {
         if (displayIdList.remove(displayId)) {
             displayIdList.add(0, displayId)
@@ -148,26 +146,6 @@ object FreeformManager : IFreeformManager.Stub() {
     }
 
     /**
-     * 查找指定应用的窗口（mini 或 hidden 状态）
-     */
-    fun findFloatingWindow(packageName: String?): FreeformWindow? {
-        if (packageName == null) return null
-        return windowList.find {
-            !it.isDestroyed && it.componentName?.packageName == packageName && (it.isFloating || it.isHidden)
-        }
-    }
-
-    /**
-     * 查找指定应用的后台窗口（isClosedToBack 状态）
-     */
-    fun findBackWindow(packageName: String?): FreeformWindow? {
-        if (packageName == null) return null
-        return windowList.find {
-            !it.isDestroyed && it.componentName?.packageName == packageName && it.isClosedToBack
-        }
-    }
-
-    /**
      * 查找指定应用的任意可用窗口（包括后台窗口）
      */
     fun findAnyWindow(packageName: String?): FreeformWindow? {
@@ -175,20 +153,6 @@ object FreeformManager : IFreeformManager.Stub() {
         return windowList.find {
             !it.isDestroyed && it.componentName?.packageName == packageName
         }
-    }
-
-    /**
-     * 查找普通状态的窗口（非 mini/hidden）
-     */
-    fun findNormalWindow(): FreeformWindow? {
-        return windowList.find { !it.isDestroyed && !it.isFloating && !it.isHidden }
-    }
-
-    /**
-     * 查找 mini/hidden 状态的窗口
-     */
-    fun findMiniWindow(): FreeformWindow? {
-        return windowList.find { !it.isDestroyed && (it.isFloating || it.isHidden) }
     }
 
     /**

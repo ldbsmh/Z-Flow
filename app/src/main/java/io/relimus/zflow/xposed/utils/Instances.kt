@@ -50,9 +50,6 @@ object Instances {
     val systemUiContext: Context
         get() = ObjectUtil.getObject(activityManagerService, "mUiContext") as Context
 
-    val isInitialized: Boolean
-        get() = ::systemContext.isInitialized
-
     fun init(activityManagerService: Any) {
         Instances.activityManagerService = activityManagerService
         systemContext = ObjectUtil.getObject(activityManagerService, "mContext") as Context
