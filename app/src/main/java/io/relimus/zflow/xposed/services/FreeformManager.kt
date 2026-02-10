@@ -144,7 +144,7 @@ object FreeformManager : IFreeformManager.Stub() {
      */
     fun hasTaskOnDisplay(displayId: Int): Boolean {
         val taskList = displayTaskMap[displayId]
-        return taskList != null && taskList.isNotEmpty()
+        return !taskList.isNullOrEmpty()
     }
 
     /**
@@ -239,13 +239,11 @@ object FreeformManager : IFreeformManager.Stub() {
                         closeAllNormalWindows()
                         existingWindow.restoreFromBack()
                         bringMiniWindowsToFront()
-                        XLog.d("$TAG: Restored existing back window for ${componentName?.packageName}")
                         return@runOnMainThread
                     } else if (existingWindow.isFloating || existingWindow.isHidden) {
                         // 如果是 mini/hidden 状态，恢复到正常模式
                         closeAllNormalWindows()
                         existingWindow.restoreToNormalView()
-                        XLog.d("$TAG: Restored existing floating window for ${componentName?.packageName}")
                         return@runOnMainThread
                     }
                 }

@@ -252,7 +252,6 @@ class FreeformWindow(
     })
 
     init {
-        XLog.d("$TAG: FreeformWindow constructor called, componentName=$componentName, userId=$userId, taskId=$taskId")
         try {
             initConfig()
             initWindow()
@@ -284,8 +283,6 @@ class FreeformWindow(
 
         // 缩放阈值
         refreshActionScale()
-
-        XLog.d("$TAG: Config - dpi=$freeformDpi, freeformSize=${freeformWidth}x${freeformHeight}, screenSize=${freeformScreenWidth}x${freeformScreenHeight}, portrait=${screenIsPortrait()}")
     }
 
     /**
@@ -358,11 +355,8 @@ class FreeformWindow(
     }
 
     private fun initWindow() {
-        XLog.d("$TAG: initWindow: Creating context wrapper")
         val wrappedContext = CommonContextWrapper.createAppCompatContext(context)
-        XLog.d("$TAG: initWindow: Context wrapper created, inflating layout")
         binding = ViewFreeformFlymeBinding.inflate(LayoutInflater.from(wrappedContext))
-        XLog.d("$TAG: initWindow: Layout inflated")
 
         // 创建背景 View (点击关闭)
         backgroundView = View(context).apply {
@@ -452,8 +446,6 @@ class FreeformWindow(
 
         // 禁用窗口移动动画
         setWindowNoUpdateAnimation()
-
-        XLog.d("$TAG: FreeformWindow initialized, waiting for surface")
     }
 
     /**
@@ -806,10 +798,10 @@ class FreeformWindow(
 
                 val contentHeight = freeformHeight - cardHeightMargin
                 val contentWidth = contentHeight * ratio
-                if (FreeformHelper.screenIsPortrait(screenRotation)) {
-                    freeformWidth = (contentWidth + (freeformShadow * 2)).roundToInt()
+                freeformWidth = if (FreeformHelper.screenIsPortrait(screenRotation)) {
+                    (contentWidth + (freeformShadow * 2)).roundToInt()
                 } else {
-                    freeformWidth = (contentWidth + cardWidthMargin).roundToInt()
+                    (contentWidth + cardWidthMargin).roundToInt()
                 }
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
@@ -1639,8 +1631,6 @@ class FreeformWindow(
             if (backgroundView.isAttachedToWindow) {
                 Instances.windowManager.removeView(backgroundView)
             }
-
-            XLog.d("$TAG: FreeformWindow moved to back (views removed), displayId=$displayId")
         } catch (e: Exception) {
             XLog.e("$TAG: Error moving window to back", e)
         }
@@ -1737,8 +1727,6 @@ class FreeformWindow(
                     FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
                 }
             }
-
-            XLog.d("$TAG: FreeformWindow restored from back, displayId=$displayId")
         } catch (e: Exception) {
             XLog.e("$TAG: Error restoring window", e)
         }
@@ -1786,7 +1774,6 @@ class FreeformWindow(
             if (::virtualDisplay.isInitialized) {
                 virtualDisplay.release()
             }
-            XLog.d("$TAG: FreeformWindow real destroyed, displayId=$displayId")
         } catch (e: Exception) {
             XLog.e("$TAG: Error real destroying window", e)
         }
@@ -1796,9 +1783,7 @@ class FreeformWindow(
 
     @SuppressLint("WrongConstant")
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-        XLog.d("$TAG: onSurfaceTextureAvailable called, size=${width}x${height}")
         try {
-            XLog.d("$TAG: Creating VirtualDisplay with size=${freeformScreenWidth}x${freeformScreenHeight}, dpi=$freeformDpi")
             val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION or
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
                     (1 shl 10) // VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 << 10
@@ -1811,7 +1796,6 @@ class FreeformWindow(
                 flags
             )
             displayId = virtualDisplay.display.displayId
-            XLog.d("$TAG: VirtualDisplay created, displayId=$displayId")
 
             // Configure IME policy
             try {
@@ -1820,7 +1804,6 @@ class FreeformWindow(
                     displayId,
                     WindowManagerHidden.DISPLAY_IME_POLICY_FALLBACK_DISPLAY
                 )
-                XLog.d("$TAG: IME policy set")
             } catch (e: Exception) {
                 XLog.w("$TAG: Failed to set IME policy", e)
             }
@@ -1828,19 +1811,14 @@ class FreeformWindow(
             // Attach surface
             surface.setDefaultBufferSize(freeformScreenWidth, freeformScreenHeight)
             virtualDisplay.surface = Surface(surface)
-            XLog.d("$TAG: Surface attached")
 
             // Register with manager
             FreeformManager.addWindow(this)
 
-            XLog.d("$TAG: VirtualDisplay ready, displayId=$displayId")
-
             // Start activity on the virtual display
             if (componentName != null && userId >= 0) {
-                XLog.d("$TAG: Starting activity $componentName on display $displayId")
                 FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
             } else if (taskId > 0) {
-                XLog.d("$TAG: Moving task $taskId to display $displayId")
                 FreeformManager.moveTaskToDisplay(taskId, displayId)
             }
         } catch (e: Exception) {
@@ -1870,7 +1848,6 @@ class FreeformWindow(
                 binding.lottieView.animate().alpha(0f).setDuration(200).start()
                 binding.textureView.animate().alpha(1f).setDuration(200).start()
                 initFinish = true
-                XLog.d("$TAG: App started rendering, hiding loading animation")
             }
         }
     }
