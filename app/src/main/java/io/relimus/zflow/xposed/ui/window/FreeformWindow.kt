@@ -1275,7 +1275,9 @@ class FreeformWindow(
             addListener(
                 onStart = {
                     hiddenView.setOnTouchListener(null)
-                    Instances.windowManager.removeView(hiddenView)
+                    if (hiddenView.isAttachedToWindow) {
+                        Instances.windowManager.removeView(hiddenView)
+                    }
                     isHidden = false
                 },
                 onEnd = {
@@ -1577,6 +1579,10 @@ class FreeformWindow(
                 interpolator = AccelerateDecelerateInterpolator()
                 addListener(object : AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: Animator) {
+                        if (isDestroyed || !binding.root.isAttachedToWindow) {
+                            isAnimating = false
+                            return
+                        }
                         Instances.windowManager.removeView(binding.root)
                         Instances.windowManager.addView(binding.root, windowLayoutParams)
                         FreeformManager.moveToTop(displayId)
@@ -1622,7 +1628,7 @@ class FreeformWindow(
             Instances.displayManager.unregisterDisplayListener(displayListener)
 
             // 移除侧边栏视图
-            if (isHidden && ::hiddenView.isInitialized) {
+            if (isHidden && ::hiddenView.isInitialized && hiddenView.isAttachedToWindow) {
                 Instances.windowManager.removeView(hiddenView)
             }
 
