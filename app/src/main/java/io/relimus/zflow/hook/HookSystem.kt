@@ -17,21 +17,21 @@ import kotlin.concurrent.thread
 object HookSystem {
     private const val TAG = "HookSystem"
 
-    fun init(classLoader: ClassLoader) {
+    fun init() {
         XLog.d("$TAG: Initializing system_server hooks")
 
         // Hook ServiceManager.addService to register UserService when PackageManager is ready
-        hookServiceManager(classLoader)
+        hookServiceManager()
 
         // Hook ActivityManagerService.systemReady to initialize FreeformManager
-        hookActivityManagerService(classLoader)
+        hookActivityManagerService()
 
         XLog.d("$TAG: System hooks initialized")
     }
 
-    private fun hookServiceManager(classLoader: ClassLoader) {
+    private fun hookServiceManager() {
         var unhook: XC_MethodHook.Unhook? = null
-        unhook = MethodFinder.fromClass(loadClass("android.os.ServiceManager", classLoader))
+        unhook = MethodFinder.fromClass(loadClass("android.os.ServiceManager"))
             .filterByName("addService")
             .first()
             .createHook {
@@ -54,9 +54,9 @@ object HookSystem {
             }
     }
 
-    private fun hookActivityManagerService(classLoader: ClassLoader) {
+    private fun hookActivityManagerService() {
         var unhook: XC_MethodHook.Unhook? = null
-        unhook = MethodFinder.fromClass(loadClass("com.android.server.am.ActivityManagerService", classLoader))
+        unhook = MethodFinder.fromClass(loadClass("com.android.server.am.ActivityManagerService"))
             .filterByName("systemReady")
             .first()
             .createHook {

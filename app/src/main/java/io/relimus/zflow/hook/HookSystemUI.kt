@@ -7,16 +7,16 @@ import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
 
 object HookSystemUI {
 
-    fun init(classLoader: ClassLoader) {
+    fun init() {
         runCatching {
-            hookDisplayLayout(classLoader)
+            hookDisplayLayout()
         }.onFailure {
             XLog.e("HookSystemUI init failed", it)
         }
     }
 
-    private fun hookDisplayLayout(classLoader: ClassLoader) {
-        val displayLayoutClazz = loadClass("com.android.wm.shell.common.DisplayLayout", classLoader)
+    private fun hookDisplayLayout() {
+        val displayLayoutClazz = loadClass("com.android.wm.shell.common.DisplayLayout")
         var lastObj: Any? = null
 
         MethodFinder.fromClass(displayLayoutClazz)

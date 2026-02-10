@@ -7,9 +7,9 @@ import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
 
 object HookMyself {
 
-    fun init(classLoader: ClassLoader) {
+    fun init() {
         runCatching {
-            val hookTestClazz = loadClass("io.relimus.zflow.hook.utils.HookTest", classLoader)
+            val hookTestClazz = loadClass("io.relimus.zflow.hook.utils.HookTest")
 
             MethodFinder.fromClass(hookTestClazz)
                 .filterByName("checkXposed")

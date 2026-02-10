@@ -19,21 +19,21 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         when (lpparam.packageName) {
             "android" -> {
                 XLog.d("MainHook: init HookFramework for android (system_server)")
-                HookFramework.init(lpparam.classLoader)
+                HookFramework.init()
                 // Initialize system_server hooks for FreeformManager
-                HookSystem.init(lpparam.classLoader)
-                HookReload.init(lpparam.classLoader)
+                HookSystem.init()
+                HookReload.init()
             }
             "io.relimus.zflow" -> {
                 XLog.d("MainHook: init HookMyself")
-                HookMyself.init(lpparam.classLoader)
+                HookMyself.init()
             }
             "com.android.systemui" -> {
                 XLog.d("MainHook: init HookSystemUI")
-                HookSystemUI.init(lpparam.classLoader)
+                HookSystemUI.init()
             }
             "com.android.launcher3" -> {
-                HookLauncher.init(lpparam.classLoader)
+                HookLauncher.init()
             }
         }
     }

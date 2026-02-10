@@ -25,16 +25,16 @@ object HookLauncher {
 
     private var mUserContextRef: WeakReference<Context>? = null
 
-    fun init(classLoader: ClassLoader) {
+    fun init() {
         runCatching {
-            hookLauncherAfterQ(classLoader)
+            hookLauncherAfterQ()
         }.onFailure {
             XLog.d("HookLauncher init failed", it)
         }
     }
 
-    private fun hookLauncherAfterQ(classLoader: ClassLoader) {
-        val taskOverlayFactoryClazz = loadClass("com.android.quickstep.TaskOverlayFactory", classLoader)
+    private fun hookLauncherAfterQ() {
+        val taskOverlayFactoryClazz = loadClass("com.android.quickstep.TaskOverlayFactory")
 
         MethodFinder.fromClass(taskOverlayFactoryClazz)
             .filterByName("getEnabledShortcuts")
@@ -54,7 +54,7 @@ object HookLauncher {
                     val key = XposedHelpers.getObjectField(task, "key")
                     val userId = XposedHelpers.getIntField(key, "userId")
 
-                    val remoteActionShortcutClazz = loadClass("com.android.launcher3.popup.RemoteActionShortcut", classLoader)
+                    val remoteActionShortcutClazz = loadClass("com.android.launcher3.popup.RemoteActionShortcut")
                     val intent = Intent("io.relimus.zflow.start_freeform").apply {
                         setPackage("io.relimus.zflow")
                         putExtra("packageName", topComponent.packageName)

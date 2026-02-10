@@ -20,12 +20,12 @@ object HookFramework {
             }
     }
 
-    fun init(classLoader: ClassLoader) {
-        hookATS(classLoader)
+    fun init() {
+        hookATS()
     }
 
-    private fun hookASS(classLoader: ClassLoader) {
-        val assClazz = loadClass("com.android.server.wm.ActivityStackSupervisor", classLoader)
+    private fun hookASS() {
+        val assClazz = loadClass("com.android.server.wm.ActivityStackSupervisor")
 
         MethodFinder.fromClass(assClazz)
             .filterByName("isCallerAllowedToLaunchOnDisplay")
@@ -44,8 +44,8 @@ object HookFramework {
             }
     }
 
-    private fun hookATS(classLoader: ClassLoader) {
-        val atsClazz = loadClass("com.android.server.wm.ActivityTaskSupervisor", classLoader)
+    private fun hookATS() {
+        val atsClazz = loadClass("com.android.server.wm.ActivityTaskSupervisor")
 
         MethodFinder.fromClass(atsClazz)
             .filterByName("isCallerAllowedToLaunchOnDisplay")
@@ -63,11 +63,11 @@ object HookFramework {
             }
     }
 
-    private fun hookATSOnT(classLoader: ClassLoader) {
-        val atsClazz = loadClass("com.android.server.wm.ActivityTaskSupervisor", classLoader)
-        val taskClazz = loadClass("com.android.server.wm.Task", classLoader)
-        val taskDisplayAreaClazz = loadClass("com.android.server.wm.TaskDisplayArea", classLoader)
-        val displayContentClazz = loadClass("com.android.server.wm.DisplayContent", classLoader)
+    private fun hookATSOnT() {
+        val atsClazz = loadClass("com.android.server.wm.ActivityTaskSupervisor")
+        val taskClazz = loadClass("com.android.server.wm.Task")
+        val taskDisplayAreaClazz = loadClass("com.android.server.wm.TaskDisplayArea")
+        val displayContentClazz = loadClass("com.android.server.wm.DisplayContent")
 
         MethodFinder.fromClass(atsClazz)
             .filterByName("handleNonResizableTaskIfNeeded")
