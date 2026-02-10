@@ -1384,10 +1384,26 @@ class FreeformWindow(
     fun restoreToNormalView() {
         if (isDestroyed) return
         if (isHidden) {
-            hiddenViewToFloatView(true)
+            hiddenViewToNormalView()
         } else if (isFloating) {
             floatViewToNormalViewInternal()
         }
+    }
+
+    /**
+     * 从侧边栏直接恢复到正常模式
+     * 避免经过 floating 中间状态导致动画衔接异常
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun hiddenViewToNormalView() {
+        if (::hiddenView.isInitialized) {
+            hiddenView.setOnTouchListener(null)
+            if (hiddenView.isAttachedToWindow) {
+                Instances.windowManager.removeView(hiddenView)
+            }
+        }
+        isHidden = false
+        floatViewToNormalViewInternal()
     }
 
     @SuppressLint("ClickableViewAccessibility")
