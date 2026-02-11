@@ -8,6 +8,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PixelFormat
@@ -627,10 +628,12 @@ class FreeformWindow(
      */
     fun setVirtualDisplayRotation(rotation: Int) {
         if (isDestroyed) return
-        var tempRotation = rotation
-        // 某些应用可能会有非标准的方向值，将其转为竖屏
-        if (tempRotation != VIRTUAL_DISPLAY_ROTATION_PORTRAIT && tempRotation != VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
-            tempRotation = VIRTUAL_DISPLAY_ROTATION_PORTRAIT
+        val tempRotation = when (rotation) {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE,
+            ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE -> VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
+            else -> VIRTUAL_DISPLAY_ROTATION_PORTRAIT
         }
         if (tempRotation != virtualDisplayRotation) {
             virtualDisplayRotation = tempRotation
