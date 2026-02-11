@@ -1602,11 +1602,20 @@ class FreeformWindow(
     fun restoreFromBack() {
         if (!isClosedToBack || isDestroyed) return
 
+        // 刷新屏幕方向（closeToBack 注销了 displayListener，期间方向变化不会被感知）
+        screenRotation = Instances.displayManager.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0
+        if (!screenIsPortrait()) {
+            hangUpPosition[0] = true
+        }
+        lastFloatViewLocation = intArrayOf(-1, -1)
+
         try {
             // 重新计算正常尺寸
+            initFloatViewSize()
             refreshFreeformSize()
             refreshScale()
             refreshTouchScale()
+            refreshActionScale()
 
             // 重置 windowLayoutParams 为正常尺寸
             windowLayoutParams.apply {
