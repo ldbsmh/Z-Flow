@@ -1761,7 +1761,7 @@ class FreeformWindow(
                 ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, mScaleY * 0.9f),
                 ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f),
             )
-            duration = 200
+            duration = 175
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     isAnimating = false
