@@ -165,6 +165,16 @@ object FreeformManager : IFreeformManager.Stub() {
     }
 
     /**
+     * 获取当前 mini/hidden 窗口的悬浮位置（排除指定 displayId）
+     */
+    fun getMiniWindowLocation(excludeDisplayId: Int): IntArray? {
+        return windowList.find {
+            (it.isFloating || it.isHidden) && !it.isDestroyed && !it.isClosedToBack
+                    && it.displayId != excludeDisplayId
+        }?.getMiniLocation()
+    }
+
+    /**
      * 关闭所有 mini/hidden 状态的窗口（退到后台）
      */
     fun closeAllMiniWindows() {

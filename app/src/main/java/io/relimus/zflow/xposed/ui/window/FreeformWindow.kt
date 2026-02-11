@@ -623,6 +623,22 @@ class FreeformWindow(
     }
 
     /**
+     * 获取当前 mini/hidden 状态下的悬浮位置
+     * floating: 直接返回 windowLayoutParams 坐标
+     * hidden: windowLayoutParams.x 已偏离屏幕，根据 hangUpPosition 重建 x
+     */
+    fun getMiniLocation(): IntArray {
+        if (isHidden) {
+            return intArrayOf(
+                if (hangUpPosition[0]) (realScreenWidth - hangUpViewWidth - screenPaddingX) / -2
+                else (realScreenWidth - hangUpViewWidth - screenPaddingX) / 2,
+                windowLayoutParams.y
+            )
+        }
+        return intArrayOf(windowLayoutParams.x, windowLayoutParams.y)
+    }
+
+    /**
      * 公开方法：设置虚拟显示屏方向
      * 供 FreeformManager 的 TaskStackListener 调用
      */
@@ -843,8 +859,13 @@ class FreeformWindow(
             val scaleX: Float = hangUpViewWidth / rootWidth.toFloat()
             val scaleY: Float = hangUpViewHeight / rootHeight.toFloat()
 
-            // 进入 mini 模式时，关闭其他 mini 窗口
+            // 进入 mini 模式时，继承已有 mini/hidden 窗口的位置后关闭它们
             if (mScaleY <= goFloatScale) {
+                FreeformManager.getMiniWindowLocation(displayId)?.let { loc ->
+                    lastFloatViewLocation = loc
+                    hangUpPosition[0] = loc[0] <= 0
+                    hangUpPosition[1] = loc[1] <= 0
+                }
                 FreeformManager.closeAllMiniWindows()
             }
 
