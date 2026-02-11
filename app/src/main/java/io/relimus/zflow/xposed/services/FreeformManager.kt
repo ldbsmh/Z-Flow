@@ -68,10 +68,33 @@ object FreeformManager : IFreeformManager.Stub() {
 
         override fun onTaskDisplayChanged(taskId: Int, newDisplayId: Int) {
             runOnMainThread {
+                // 记录 task 之前所在的 display
+                val previousDisplayId = displayTaskMap.entries
+                    .find { it.value.contains(taskId) }?.key
+
                 // 更新 task 的 display 映射
                 displayTaskMap.values.forEach { it.remove(taskId) }
                 if (displayIdList.contains(newDisplayId)) {
                     displayTaskMap.getOrPut(newDisplayId) { mutableListOf() }.add(taskId)
+                }
+
+                // task 从 VirtualDisplay 移到默认屏幕（用户在桌面点击了同一个 App）
+                // 且对应窗口处于 mini/hidden 状态 → 恢复 normalView 并把 task 移回
+                if (previousDisplayId != null && newDisplayId == 0) {
+                    val window = getWindow(previousDisplayId)
+                    if (window != null && !window.isDestroyed
+                        && (window.isFloating || window.isHidden)
+                    ) {
+                        closeAllNormalWindows()
+                        window.restoreToNormalView()
+                        try {
+                            Instances.activityTaskManager.moveRootTaskToDisplay(
+                                taskId, previousDisplayId
+                            )
+                        } catch (e: Exception) {
+                            XLog.e("$TAG: Failed to move task $taskId back to display $previousDisplayId", e)
+                        }
+                    }
                 }
             }
         }
