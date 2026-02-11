@@ -15,6 +15,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.view.Display
 import android.view.GestureDetector
@@ -26,13 +27,13 @@ import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
 import android.view.WindowManagerHidden
-import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.animation.addListener
 import androidx.core.content.ContextCompat
 import com.qauxv.ui.CommonContextWrapper
+import de.robv.android.xposed.XposedHelpers
 import dev.rikka.tools.refine.Refine
 import io.github.kyuubiran.ezxhelper.core.misc.paramTypes
 import io.github.kyuubiran.ezxhelper.core.misc.params
@@ -1521,42 +1522,46 @@ class FreeformWindow(
     }
 
     fun moveToTop() {
-        if (isDestroyed || isAnimating) return
+        if (isDestroyed) return
         try {
-            isAnimating = true
-            ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f).apply {
-                duration = 175
-                interpolator = AccelerateDecelerateInterpolator()
-                addListener(object : AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: Animator) {
-                        if (isDestroyed || !binding.root.isAttachedToWindow) {
-                            isAnimating = false
-                            return
-                        }
-                        Instances.windowManager.removeView(binding.root)
-                        Instances.windowManager.addView(binding.root, windowLayoutParams)
-                        FreeformManager.moveToTop(displayId)
-                        if (!isFloating && !isHidden) {
-                            FreeformManager.bringMiniWindowsToFront()
-                        }
-                        ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f).apply {
-                            duration = 200
-                            interpolator = AccelerateDecelerateInterpolator()
-                            startDelay = 25
-                            addListener(object : AnimatorListenerAdapter() {
-                                override fun onAnimationEnd(animation: Animator) {
-                                    isAnimating = false
-                                }
-                            })
-                            start()
-                        }
-                    }
-                })
-                start()
+            if (binding.root.isAttachedToWindow) {
+                reorderWindowInWms(binding.root)
+            }
+            if (isHidden && ::hiddenView.isInitialized && hiddenView.isAttachedToWindow) {
+                reorderWindowInWms(hiddenView)
+            }
+            FreeformManager.moveToTop(displayId)
+            if (!isFloating && !isHidden) {
+                FreeformManager.bringMiniWindowsToFront()
             }
         } catch (e: Exception) {
-            isAnimating = false
             XLog.e("$TAG: Failed to move to top", e)
+        }
+    }
+
+    /**
+     * 通过 WMS 内部 API 将窗口的 WindowToken 移到 DisplayArea 顶部。
+     * 在 SurfaceFlinger 层面原子操作，用户完全不可见。
+     */
+    private fun reorderWindowInWms(view: View) {
+        val wms = Instances.iWindowManager
+        val viewRootImpl = XposedHelpers.callMethod(view, "getViewRootImpl") ?: return
+        val iWindow = XposedHelpers.getObjectField(viewRootImpl, "mWindow") as? IBinder ?: return
+        val globalLock = XposedHelpers.getObjectField(wms, "mGlobalLock") ?: return
+        try {
+            synchronized(globalLock) {
+                val windowMap = XposedHelpers.getObjectField(wms, "mWindowMap") as? HashMap<*, *> ?: return
+                val windowState = windowMap[iWindow] ?: return
+                val windowToken = XposedHelpers.callMethod(windowState, "getParent") ?: return
+                val displayArea = XposedHelpers.callMethod(windowToken, "getParent") ?: return
+                XposedHelpers.callMethod(displayArea, "positionChildAt", Int.MAX_VALUE, windowToken, false)
+                XposedHelpers.callMethod(
+                    XposedHelpers.getObjectField(wms, "mWindowPlacerLocked"),
+                    "requestTraversal"
+                )
+            }
+        } catch (e: Exception) {
+            XLog.e("$TAG: Failed to reorder window in WMS", e)
         }
     }
 
