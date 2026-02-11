@@ -28,6 +28,7 @@ import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
 import android.view.WindowManagerHidden
+import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -1073,9 +1074,9 @@ class FreeformWindow(
                             windowLayoutParams.y
                         )
 
-                        // 拖到顶部关闭
+                        // 拖到顶部关闭 - 向上滑出屏幕
                         if (nowY <= realScreenHeight * 0.1f) {
-                            closeToBackWithAnimation()
+                            slideUpAndClose()
                             isMoved = false
                             return true
                         }
@@ -1719,6 +1720,31 @@ class FreeformWindow(
             }
         } catch (e: Exception) {
             XLog.e("$TAG: Error restoring window", e)
+        }
+    }
+
+    /**
+     * mini 窗口向上滑出屏幕后关闭
+     */
+    private fun slideUpAndClose() {
+        if (isDestroyed || isClosedToBack || isAnimating) return
+        isAnimating = true
+
+        val targetY = -(realScreenHeight + hangUpViewHeight) / 2
+        ValueAnimator.ofInt(windowLayoutParams.y, targetY).apply {
+            addUpdateListener {
+                windowLayoutParams.y = it.animatedValue as Int
+                Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+            }
+            duration = 150
+            interpolator = AccelerateInterpolator()
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    isAnimating = false
+                    closeToBack()
+                }
+            })
+            start()
         }
     }
 
