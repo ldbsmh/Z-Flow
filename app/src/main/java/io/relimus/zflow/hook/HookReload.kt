@@ -1,7 +1,8 @@
 package io.relimus.zflow.hook
 
-import android.content.res.Configuration
+import android.content.pm.ActivityInfo
 import de.robv.android.xposed.XposedHelpers
+import io.github.kyuubiran.ezxhelper.core.finder.ConstructorFinder
 import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
@@ -29,21 +30,7 @@ object HookReload {
             .first()
             .createHook {
                 after {
-                    it.result = false
-                }
-            }
-    }
-
-    private fun hookResizable() {
-        MethodFinder.fromClass(activityRecordClass)
-            .filterByName("resolveOverrideConfiguration")
-            .filterByParamCount(1)
-            .filterByParamTypes(configurationClass)
-            .first()
-            .createHook {
-                after {
                     val activityRecord = it.thisObject
-
                     // 获取当前所在的 DisplayId
                     val displayContent =
                         XposedHelpers.getObjectField(activityRecord, "mDisplayContent")
@@ -63,31 +50,23 @@ object HookReload {
                         trackedTaskIds.add(taskId)
                     }
 
-                    // 只有被记录在案的 Task（即进入过小窗的任务），才执行抹除 Bounds 的逻辑
+                    // 只有被记录在案的 Task（即进入过小窗的任务），才返回 false
                     if (trackedTaskIds.contains(taskId)) {
-
-                        // 如果当前已经在主屏（从虚拟屏恢复回来），继续保持抹除，实现全屏放大
-                        // 如果在虚拟屏内，抹除 Bounds 确保它铺满小窗
-                        val resolvedConfig = XposedHelpers.callMethod(
-                            activityRecord,
-                            "getResolvedOverrideConfiguration"
-                        ) as Configuration
-                        val windowConfig =
-                            XposedHelpers.getObjectField(resolvedConfig, "windowConfiguration")
-
-                        XposedHelpers.callMethod(windowConfig, "setBounds", *arrayOf<Any?>(null))
-                        XposedHelpers.callMethod(windowConfig, "setAppBounds", *arrayOf<Any?>(null))
-                        XposedHelpers.callMethod(windowConfig, "setMaxBounds", *arrayOf<Any?>(null))
-
-                        // Android 14
-                        XposedHelpers.setObjectField(activityRecord, "mSizeCompatBounds", null)
-                        XposedHelpers.setFloatField(activityRecord, "mSizeCompatScale", 1.0f)
-                        XposedHelpers.setBooleanField(
-                            activityRecord,
-                            "mInSizeCompatModeForBounds",
-                            false
-                        )
+                        it.result = false
                     }
+                }
+            }
+    }
+
+    private fun hookResizable() {
+        ConstructorFinder.fromClass(activityRecordClass)
+            .first()
+            .createHook {
+                after {
+                    val activityRecord = it.thisObject
+                    val info = XposedHelpers.getObjectField(activityRecord, "info") as ActivityInfo
+
+                    XposedHelpers.setIntField(info, "resizeMode", 2)
                 }
             }
     }
