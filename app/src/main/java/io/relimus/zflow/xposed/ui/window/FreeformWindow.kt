@@ -44,7 +44,6 @@ import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.databinding.ViewFreeformFlymeBinding
 import io.relimus.zflow.hook.utils.XLog
-import io.relimus.zflow.ui.freeform.FreeformHelper
 import io.relimus.zflow.xposed.services.FreeformManager
 import io.relimus.zflow.xposed.utils.Instances
 import java.lang.reflect.Field
@@ -843,13 +842,22 @@ class FreeformWindow(
             if (tempWidth >= hangUpViewWidth && tempWidth <= rootWidth * 0.9) {
                 freeformWidth += dx.roundToInt()
 
-                val contentWidth = if (FreeformHelper.screenIsPortrait(screenRotation)) {
-                    freeformWidth - (freeformShadow * 2)
+                if (!screenIsPortrait()) {
+                    val initRatio = if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                        val w = (realScreenWidth / 2 + cardWidthMargin).roundToInt()
+                        val h = ((w * WIDTH_HEIGHT_RATIO) * 0.95).roundToInt()
+                        h.toFloat() / w
+                    } else {
+                        val h = (rootWidth * config.freeformSizeLand).roundToInt()
+                        val w = ((h + cardWidthMargin) * WIDTH_HEIGHT_RATIO).roundToInt()
+                        h.toFloat() / w
+                    }
+                    freeformHeight = (freeformWidth * initRatio).roundToInt()
                 } else {
-                    freeformWidth - cardWidthMargin
+                    val contentWidth = freeformWidth - (freeformShadow * 2)
+                    val contentHeight = contentWidth / ratio
+                    freeformHeight = (contentHeight + cardHeightMargin).roundToInt()
                 }
-                val contentHeight = contentWidth / ratio
-                freeformHeight = (contentHeight + cardHeightMargin).roundToInt()
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
                 mScaleY = freeformHeight / rootHeight.toFloat()
@@ -968,23 +976,40 @@ class FreeformWindow(
                 // 放大到全屏阈值 -> 移动到主屏幕
                 mScaleY >= goFullScale -> {
                     isAnimating = true
+                    val landscapeOnPortrait = virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
+                        && screenIsPortrait()
                     AnimatorSet().apply {
-                        playTogether(
-                            ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, 1f),
-                            ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, 1f),
-                            ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
-                            cardViewMarginAnim(
-                                (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
-                                (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
-                                (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
-                                0, 0, 0
+                        if (landscapeOnPortrait) {
+                            playTogether(
+                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, mScaleX * 1.05f),
+                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, mScaleY * 1.05f),
+                                ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f),
+                                ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
+                                cardViewMarginAnim(
+                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
+                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
+                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
+                                    0, 0, 0
+                                )
                             )
-                        )
+                        } else {
+                            playTogether(
+                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, 1f),
+                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, 1f),
+                                ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
+                                cardViewMarginAnim(
+                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
+                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
+                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
+                                    0, 0, 0
+                                )
+                            )
+                        }
                         duration = 300
                         addListener(object : AnimatorListenerAdapter() {
                             override fun onAnimationEnd(animation: Animator) {
                                 isAnimating = false
-                                // 移动应用到主屏幕
+                                if (landscapeOnPortrait) binding.freeformRoot.alpha = 1f
                                 moveToDefaultDisplay()
                                 closeToBack()
                             }
