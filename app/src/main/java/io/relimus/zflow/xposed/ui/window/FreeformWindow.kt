@@ -811,15 +811,26 @@ class FreeformWindow(
 
         if (dy != 0f) {
             val tempHeight = freeformHeight + dy
-            if (tempHeight >= hangUpViewHeight && tempHeight <= rootHeight * 0.9) {
+            val maxHeight = if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
+                && screenIsPortrait()) rootHeight * 1.15f else rootHeight * 0.9f
+            if (tempHeight >= hangUpViewHeight && tempHeight <= maxHeight) {
                 freeformHeight += dy.roundToInt()
 
-                val contentHeight = freeformHeight - cardHeightMargin
-                val contentWidth = contentHeight * ratio
-                freeformWidth = if (FreeformHelper.screenIsPortrait(screenRotation)) {
-                    (contentWidth + (freeformShadow * 2)).roundToInt()
+                if (screenIsPortrait()) {
+                    val initRatio = if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE) {
+                        val w = (rootWidth - (rootWidth * 0.05)).roundToInt()
+                        val h = ((w + (cardHeightMargin * 2)) * WIDTH_HEIGHT_RATIO).roundToInt()
+                        w.toFloat() / h
+                    } else {
+                        val w = (rootWidth * config.freeformSize).roundToInt()
+                        val h = (((w - (freeformShadow * 2)) / WIDTH_HEIGHT_RATIO) + cardHeightMargin).roundToInt()
+                        w.toFloat() / h
+                    }
+                    freeformWidth = (freeformHeight * initRatio).roundToInt()
                 } else {
-                    (contentWidth + cardWidthMargin).roundToInt()
+                    val contentHeight = freeformHeight - cardHeightMargin
+                    val contentWidth = contentHeight * ratio
+                    freeformWidth = (contentWidth + cardWidthMargin).roundToInt()
                 }
 
                 mScaleX = freeformWidth / rootWidth.toFloat()
