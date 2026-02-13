@@ -22,6 +22,7 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
                 // Initialize system_server hooks for FreeformManager
                 HookSystem.init()
                 HookReload.init()
+                HookPredictiveBack.init()
             }
             "io.relimus.zflow" -> {
                 XLog.d("MainHook: init HookMyself")
