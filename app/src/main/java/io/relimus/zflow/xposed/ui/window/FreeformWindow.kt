@@ -952,6 +952,7 @@ class FreeformWindow(
                                         moveViewAnim(windowCoordinate, location),
                                         ValueAnimator.ofFloat(config.dimAmount, 0f).apply {
                                             addUpdateListener {
+                                                if (!backgroundView.isAttachedToWindow) return@addUpdateListener
                                                 Instances.windowManager.updateViewLayout(
                                                     backgroundView,
                                                     backgroundLayoutParams.apply {
@@ -974,6 +975,7 @@ class FreeformWindow(
                                                 startDelay = 200
                                                 addListener(
                                                     onEnd = {
+                                                        if (!binding.root.isAttachedToWindow) return@addListener
                                                         mScaleX = scaleX
                                                         mScaleY = scaleY
                                                         binding.cardRoot.radius = cardCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
@@ -1124,7 +1126,9 @@ class FreeformWindow(
 
                         windowLayoutParams.x += movedX.toInt()
                         windowLayoutParams.y += movedY.toInt()
-                        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                        if (binding.root.isAttachedToWindow) {
+                            Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                        }
 
                         moveStartX = event.rawX
                         moveStartY = event.rawY
@@ -1272,6 +1276,7 @@ class FreeformWindow(
             moveAnim.play(
                 ValueAnimator.ofInt(startCoordinate[0], endCoordinate[0]).apply {
                     addUpdateListener {
+                        if (!binding.root.isAttachedToWindow) return@addUpdateListener
                         Instances.windowManager.updateViewLayout(
                             binding.root,
                             windowLayoutParams.apply {
@@ -1286,6 +1291,7 @@ class FreeformWindow(
             moveAnim.play(
                 ValueAnimator.ofInt(startCoordinate[1], endCoordinate[1]).apply {
                     addUpdateListener {
+                        if (!binding.root.isAttachedToWindow) return@addUpdateListener
                         Instances.windowManager.updateViewLayout(
                             binding.root,
                             windowLayoutParams.apply {
@@ -1387,6 +1393,7 @@ class FreeformWindow(
             playTogether(moveViewAnim(windowCoordinate, location))
             addListener(
                 onStart = {
+                    if (!binding.root.isAttachedToWindow) return@addListener
                     binding.freeformRoot.scaleY = 1f
                     binding.freeformRoot.scaleX = 1f
                     Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
@@ -1422,6 +1429,7 @@ class FreeformWindow(
             playTogether(
                 ValueAnimator.ofInt(windowCoordinate[0], (realScreenWidth - floatingButtonWidth) / 2 * position).apply {
                     addUpdateListener {
+                        if (!hiddenView.isAttachedToWindow) return@addUpdateListener
                         Instances.windowManager.updateViewLayout(
                             hiddenView,
                             layoutParams.apply {
@@ -1432,6 +1440,7 @@ class FreeformWindow(
                 },
                 ValueAnimator.ofInt(windowCoordinate[1], location[1]).apply {
                     addUpdateListener {
+                        if (!hiddenView.isAttachedToWindow) return@addUpdateListener
                         Instances.windowManager.updateViewLayout(
                             hiddenView,
                             layoutParams.apply {
@@ -1490,7 +1499,7 @@ class FreeformWindow(
 
     @SuppressLint("ClickableViewAccessibility")
     private fun floatViewToNormalViewInternal() {
-        if (isAnimating) return
+        if (isAnimating || isDestroyed || isClosedToBack || !binding.root.isAttachedToWindow) return
 
         // 恢复普通模式时，关闭其他普通窗口（退到后台）
         FreeformManager.closeAllNormalWindows()
@@ -1518,6 +1527,7 @@ class FreeformWindow(
                 moveViewAnim(windowCoordinate, center),
                 ValueAnimator.ofFloat(0f, config.dimAmount).apply {
                     addUpdateListener {
+                        if (!backgroundView.isAttachedToWindow) return@addUpdateListener
                         Instances.windowManager.updateViewLayout(backgroundView, backgroundLayoutParams.apply {
                             dimAmount = it.animatedValue as Float
                         })
@@ -1825,6 +1835,7 @@ class FreeformWindow(
         val targetY = -(realScreenHeight + hangUpViewHeight) / 2
         ValueAnimator.ofInt(windowLayoutParams.y, targetY).apply {
             addUpdateListener {
+                if (!binding.root.isAttachedToWindow) return@addUpdateListener
                 windowLayoutParams.y = it.animatedValue as Int
                 Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
             }
