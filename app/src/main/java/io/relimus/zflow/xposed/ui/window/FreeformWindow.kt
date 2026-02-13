@@ -28,6 +28,7 @@ import android.view.TextureView
 import android.view.View
 import android.view.WindowManager
 import android.view.WindowManagerHidden
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
@@ -421,17 +422,37 @@ class FreeformWindow(
             }
         }
 
-        // 添加视图
+        // 初始化缩放（需在动画前计算目标值）
+        refreshScale()
+        refreshTouchScale()
+        val targetScaleX = mScaleX
+        val targetScaleY = mScaleY
+
+        // 添加视图（初始不可见）
+        binding.freeformRoot.alpha = 0f
+        binding.freeformRoot.scaleX = targetScaleX * 0.9f
+        binding.freeformRoot.scaleY = targetScaleY * 0.9f
         Instances.windowManager.addView(backgroundView, backgroundLayoutParams)
         Instances.windowManager.addView(binding.root, windowLayoutParams)
+
+        // 入场渐入动画 - 延迟到视图完全 attached 后执行
+        binding.root.post {
+            if (!binding.root.isAttachedToWindow || isDestroyed) return@post
+            AnimatorSet().apply {
+                playTogether(
+                    ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f),
+                    ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, targetScaleX * 0.9f, targetScaleX),
+                    ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, targetScaleY * 0.9f, targetScaleY),
+                )
+                duration = 250
+                interpolator = AccelerateDecelerateInterpolator()
+                start()
+            }
+        }
 
         // 设置 TextureView
         binding.textureView.surfaceTextureListener = this
         binding.textureView.alpha = 0f
-
-        // 初始化缩放
-        refreshScale()
-        refreshTouchScale()
 
         // 初始化控制栏（根据屏幕方向）
         initFloatBar()
@@ -1707,11 +1728,31 @@ class FreeformWindow(
             binding.lottieView.playAnimation()
             binding.textureView.alpha = 0f
 
-            // 重新添加视图
+            // 重新添加视图（初始不可见）
+            binding.freeformRoot.alpha = 0f
+            binding.freeformRoot.scaleX = mScaleX * 0.9f
+            binding.freeformRoot.scaleY = mScaleY * 0.9f
             Instances.windowManager.addView(backgroundView, backgroundLayoutParams.apply {
-                dimAmount = config.dimAmount
+                    dimAmount = config.dimAmount
             })
             Instances.windowManager.addView(binding.root, windowLayoutParams)
+
+            // 入场渐入动画 - 延迟到视图完全 attached 后执行
+            val restoreTargetScaleX = mScaleX
+            val restoreTargetScaleY = mScaleY
+            binding.root.post {
+                if (!binding.root.isAttachedToWindow || isDestroyed) return@post
+                AnimatorSet().apply {
+                    playTogether(
+                        ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f),
+                        ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, restoreTargetScaleX * 0.9f, restoreTargetScaleX),
+                        ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, restoreTargetScaleY * 0.9f, restoreTargetScaleY),
+                    )
+                    duration = 250
+                    interpolator = AccelerateDecelerateInterpolator()
+                    start()
+                }
+            }
 
             // 重新注册监听
             Instances.displayManager.registerDisplayListener(displayListener, mainHandler)
@@ -1728,10 +1769,7 @@ class FreeformWindow(
             isFloating = false
             isHidden = false
 
-            // 重置视图状态
-            binding.freeformRoot.scaleX = mScaleX
-            binding.freeformRoot.scaleY = mScaleY
-            binding.freeformRoot.alpha = 1f
+            // 重置视图状态（alpha/scale 由入场动画控制）
             binding.bottomBar.root.alpha = 1f
             backgroundView.visibility = View.VISIBLE
 
