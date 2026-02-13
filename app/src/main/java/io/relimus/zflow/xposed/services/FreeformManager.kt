@@ -22,6 +22,7 @@ import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.bean.MotionEventBean
 import io.relimus.zflow.xposed.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.HookReload
 import io.relimus.zflow.xposed.IFreeformManager
 import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.ui.window.FreeformWindow
@@ -76,6 +77,11 @@ object FreeformManager : IFreeformManager.Stub() {
                 displayTaskMap.values.forEach { it.remove(taskId) }
                 if (displayIdList.contains(newDisplayId)) {
                     displayTaskMap.getOrPut(newDisplayId) { mutableListOf() }.add(taskId)
+                }
+
+                // 当任务从虚拟显示器移动到主屏幕时，追踪该任务（用于阻止 relaunch）
+                if (previousDisplayId != null && previousDisplayId != 0 && newDisplayId == 0) {
+                    HookReload.trackedTaskIds.add(taskId)
                 }
 
                 // task 从 VirtualDisplay 移到默认屏幕（用户在桌面点击了同一个 App）

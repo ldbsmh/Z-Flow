@@ -32,27 +32,15 @@ object HookReload {
                 after {
                     val activityRecord = it.thisObject
                     // 获取当前所在的 DisplayId
-                    val displayContent =
-                        XposedHelpers.getObjectField(activityRecord, "mDisplayContent")
-                    val currentDisplayId = if (displayContent != null) {
-                        XposedHelpers.getIntField(displayContent, "mDisplayId")
-                    } else {
-                        0
-                    }
 
                     // 获取所属的任务 Task
                     val task = XposedHelpers.callMethod(activityRecord, "getTask") ?: return@after
                     val taskId = XposedHelpers.getIntField(task, "mTaskId")
 
-                    // 关键逻辑：如果是虚拟显示器（ID != 0），则标记该 Task
-                    // 小窗创建的虚拟显示器 ID 通常 > 0
-                    if (currentDisplayId != 0) {
-                        trackedTaskIds.add(taskId)
-                    }
-
-                    // 只有被记录在案的 Task（即进入过小窗的任务），才返回 false
+                    // 对于主屏幕上的任务，检查是否曾经在小窗中（从小窗放大回来的）
                     if (trackedTaskIds.contains(taskId)) {
                         it.result = false
+                        trackedTaskIds.remove(taskId)
                     }
                 }
             }
