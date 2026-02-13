@@ -229,7 +229,7 @@ class FreeformWindow(
     // 手势检测器 - 背景点击关闭
     private val backgroundGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            if (!isFloating) {
+            if (!isFloating && !isAnimating) {
                 closeToBackWithAnimation()
             }
             return true
@@ -436,8 +436,12 @@ class FreeformWindow(
         Instances.windowManager.addView(binding.root, windowLayoutParams)
 
         // 入场渐入动画 - 延迟到视图完全 attached 后执行
+        isAnimating = true
         binding.root.post {
-            if (!binding.root.isAttachedToWindow || isDestroyed) return@post
+            if (!binding.root.isAttachedToWindow || isDestroyed) {
+                isAnimating = false
+                return@post
+            }
             AnimatorSet().apply {
                 playTogether(
                     ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f),
@@ -446,6 +450,11 @@ class FreeformWindow(
                 )
                 duration = 250
                 interpolator = AccelerateDecelerateInterpolator()
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        isAnimating = false
+                    }
+                })
                 start()
             }
         }
@@ -1740,8 +1749,12 @@ class FreeformWindow(
             // 入场渐入动画 - 延迟到视图完全 attached 后执行
             val restoreTargetScaleX = mScaleX
             val restoreTargetScaleY = mScaleY
+            isAnimating = true
             binding.root.post {
-                if (!binding.root.isAttachedToWindow || isDestroyed) return@post
+                if (!binding.root.isAttachedToWindow || isDestroyed) {
+                    isAnimating = false
+                    return@post
+                }
                 AnimatorSet().apply {
                     playTogether(
                         ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f),
@@ -1750,6 +1763,11 @@ class FreeformWindow(
                     )
                     duration = 250
                     interpolator = AccelerateDecelerateInterpolator()
+                    addListener(object : AnimatorListenerAdapter() {
+                        override fun onAnimationEnd(animation: Animator) {
+                            isAnimating = false
+                        }
+                    })
                     start()
                 }
             }
