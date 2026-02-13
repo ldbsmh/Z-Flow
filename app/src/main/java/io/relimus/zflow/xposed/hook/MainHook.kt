@@ -10,7 +10,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 
     override fun initZygote(startupParam: IXposedHookZygoteInit.StartupParam) {
         EzXposed.initZygote(startupParam)
-        HookFramework.initZygote()
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -33,6 +32,9 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
                 HookSystemUI.init()
             }
             "com.android.launcher3" -> {
+                HookLauncher.init()
+            }
+            "com.google.android.apps.nexuslauncher" -> {
                 HookLauncher.init()
             }
         }
