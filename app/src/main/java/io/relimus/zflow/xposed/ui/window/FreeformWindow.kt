@@ -45,6 +45,7 @@ import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.databinding.ViewFreeformFlymeBinding
 import io.relimus.zflow.xposed.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.utils.cast
 import io.relimus.zflow.xposed.services.FreeformManager
 import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.utils.Instances
@@ -1647,15 +1648,15 @@ class FreeformWindow(
      */
     private fun reorderWindowInWms(view: View) {
         val wms = Instances.iWindowManager
-        val viewRootImpl = XposedHelpers.callMethod(view, "getViewRootImpl") ?: return
-        val iWindow = XposedHelpers.getObjectField(viewRootImpl, "mWindow") as? IBinder ?: return
-        val globalLock = XposedHelpers.getObjectField(wms, "mGlobalLock") ?: return
+        val viewRootImpl = XposedHelpers.callMethod(view, "getViewRootImpl")
+        val iWindow = XposedHelpers.getObjectField(viewRootImpl, "mWindow").cast<IBinder>()
+        val globalLock = XposedHelpers.getObjectField(wms, "mGlobalLock")
         try {
             synchronized(globalLock) {
-                val windowMap = XposedHelpers.getObjectField(wms, "mWindowMap") as? HashMap<*, *> ?: return
-                val windowState = windowMap[iWindow] ?: return
-                val windowToken = XposedHelpers.callMethod(windowState, "getParent") ?: return
-                val displayArea = XposedHelpers.callMethod(windowToken, "getParent") ?: return
+                val windowMap = XposedHelpers.getObjectField(wms, "mWindowMap").cast<HashMap<*, *>>()
+                val windowState = windowMap[iWindow]
+                val windowToken = XposedHelpers.callMethod(windowState, "getParent")
+                val displayArea = XposedHelpers.callMethod(windowToken, "getParent")
                 XposedHelpers.callMethod(displayArea, "positionChildAt", Int.MAX_VALUE, windowToken, false)
                 XposedHelpers.callMethod(
                     XposedHelpers.getObjectField(wms, "mWindowPlacerLocked"),
