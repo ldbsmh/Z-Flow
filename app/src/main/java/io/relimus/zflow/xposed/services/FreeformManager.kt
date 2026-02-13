@@ -21,10 +21,10 @@ import io.github.kyuubiran.ezxhelper.core.util.ClassUtil
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.bean.MotionEventBean
-import io.relimus.zflow.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.IFreeformManager
+import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.ui.window.FreeformWindow
-import io.relimus.zflow.xposed.ui.window.FreeformWindowConfig
 import io.relimus.zflow.xposed.utils.Instances
 
 /**
@@ -249,7 +249,7 @@ object FreeformManager : IFreeformManager.Stub() {
                 closeAllNormalWindows()
 
                 // Build config from parameters
-                val config = FreeformWindowConfig(
+                val config = FreeformConfig(
                     freeformDpi = freeformDpi,
                     freeformSize = freeformSize / 100f,
                     floatViewSize = floatViewSize / 100f,

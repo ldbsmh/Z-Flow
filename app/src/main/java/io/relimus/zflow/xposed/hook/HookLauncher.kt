@@ -1,4 +1,4 @@
-package io.relimus.zflow.hook
+package io.relimus.zflow.xposed.hook
 
 import android.app.Activity
 import android.app.AndroidAppHelper
@@ -13,13 +13,14 @@ import android.graphics.drawable.Icon
 import android.view.View
 import java.lang.ref.WeakReference
 import io.relimus.zflow.R
-import io.relimus.zflow.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.utils.XLog
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHooks
 import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.xposed.hook.utils.cast
 
 object HookLauncher {
 
@@ -41,9 +42,8 @@ object HookLauncher {
             .toList()
             .createHooks {
                 after {
-                    val taskView = it.args[0] as View
-                    @Suppress("UNCHECKED_CAST")
-                    val shortcuts = it.result as MutableList<Any>
+                    val taskView = it.args[0].cast<View>()
+                    val shortcuts = it.result.cast<MutableList<Any>>()
                     if (shortcuts.isEmpty()) return@after
 
                     val itemInfo = XposedHelpers.getObjectField(shortcuts[0], "mItemInfo")

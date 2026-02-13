@@ -1,7 +1,7 @@
-package io.relimus.zflow.hook
+package io.relimus.zflow.xposed.hook
 
 import android.content.pm.IPackageManager
-import io.relimus.zflow.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.services.FreeformManager
 import io.relimus.zflow.xposed.services.UserService
 import de.robv.android.xposed.XC_MethodHook

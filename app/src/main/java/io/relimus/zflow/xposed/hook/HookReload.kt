@@ -1,4 +1,4 @@
-package io.relimus.zflow.hook
+package io.relimus.zflow.xposed.hook
 
 import android.content.pm.ActivityInfo
 import de.robv.android.xposed.XposedHelpers

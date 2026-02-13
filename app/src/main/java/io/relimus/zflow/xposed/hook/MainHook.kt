@@ -1,6 +1,6 @@
-package io.relimus.zflow.hook
+package io.relimus.zflow.xposed.hook
 
-import io.relimus.zflow.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.utils.XLog
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
 import de.robv.android.xposed.callbacks.XC_LoadPackage

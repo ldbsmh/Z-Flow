@@ -1,6 +1,6 @@
-package io.relimus.zflow.hook
+package io.relimus.zflow.xposed.hook
 
-import io.relimus.zflow.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.utils.XLog
 import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
@@ -9,7 +9,7 @@ object HookMyself {
 
     fun init() {
         runCatching {
-            val hookTestClazz = loadClass("io.relimus.zflow.hook.utils.HookTest")
+            val hookTestClazz = loadClass("io.relimus.zflow.xposed.hook.utils.HookTest")
 
             MethodFinder.fromClass(hookTestClazz)
                 .filterByName("checkXposed")

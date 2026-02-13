@@ -6,7 +6,7 @@ import android.content.pm.IPackageManager
 import android.os.Bundle
 import android.os.ServiceManager
 import io.relimus.zflow.BuildConfig
-import io.relimus.zflow.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.utils.XLog
 import rikka.hidden.compat.ActivityManagerApis
 import rikka.hidden.compat.adapter.UidObserverAdapter
 

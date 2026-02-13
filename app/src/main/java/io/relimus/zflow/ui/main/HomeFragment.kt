@@ -19,7 +19,7 @@ import com.google.android.material.snackbar.Snackbar
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.databinding.FragmentHomeBinding
-import io.relimus.zflow.hook.utils.HookTest
+import io.relimus.zflow.xposed.hook.utils.HookTest
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.utils.PermissionUtils
 
@@ -33,7 +33,6 @@ class HomeFragment : Fragment(), View.OnClickListener {
     private lateinit var sp: SharedPreferences
 
     companion object {
-        private const val TAG = "HomeFragment"
         private const val COMMON_QUESTION_ZH = "https://github.com/relimus/Z-Flow/blob/master/qa_zh-Hans.md"
         private const val OPEN_API_ZH = "https://github.com/relimus/Z-Flow/blob/master/open_api_zh-Hans.md"
     }

@@ -1,4 +1,4 @@
-package io.relimus.zflow.hook.utils;
+package io.relimus.zflow.xposed.hook.utils;
 
 public class HookTest {
     public static boolean checkXposed() {

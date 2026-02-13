@@ -1,1 +1,1 @@
-io.relimus.zflow.hook.MainHook
+io.relimus.zflow.xposed.hook.MainHook

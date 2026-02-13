@@ -1,4 +1,4 @@
-package io.relimus.zflow.hook.utils
+package io.relimus.zflow.xposed.hook.utils
 
 import android.util.Log
 import de.robv.android.xposed.XposedBridge

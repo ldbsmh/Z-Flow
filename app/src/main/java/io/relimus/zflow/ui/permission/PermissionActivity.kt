@@ -15,7 +15,7 @@ import com.google.android.material.snackbar.Snackbar
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.databinding.ActivityPermissionBinding
-import io.relimus.zflow.hook.utils.HookTest
+import io.relimus.zflow.xposed.hook.utils.HookTest
 import io.relimus.zflow.ui.splash.SplashActivity
 import io.relimus.zflow.utils.PermissionUtils
 

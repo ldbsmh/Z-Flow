@@ -44,8 +44,9 @@ import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.databinding.ViewFreeformFlymeBinding
-import io.relimus.zflow.hook.utils.XLog
+import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.services.FreeformManager
+import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.utils.Instances
 import java.lang.reflect.Field
 import kotlin.math.abs
@@ -64,7 +65,7 @@ class FreeformWindow(
     val componentName: ComponentName?,
     private val userId: Int,
     private val taskId: Int,
-    private val config: FreeformWindowConfig = FreeformWindowConfig()
+    private val config: FreeformConfig = FreeformConfig()
 ) : TextureView.SurfaceTextureListener {
     companion object {
         private const val TAG = "FreeformWindow"
@@ -1971,15 +1972,3 @@ class FreeformWindow(
         }
     }
 }
-
-/**
- * 窗口配置类 - 从 SharedPreferences 读取
- */
-data class FreeformWindowConfig(
-    var freeformDpi: Int = 320,
-    var freeformSize: Float = 0.75f,
-    var freeformSizeLand: Float = 0.9f,
-    var floatViewSize: Float = 0.33f,
-    var dimAmount: Float = 0.2f,
-    var manualAdjustFreeformRotation: Boolean = false,
-)
