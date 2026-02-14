@@ -166,6 +166,14 @@ object FreeformManager : IFreeformManager.Stub() {
 
     fun getWindow(displayId: Int): FreeformWindow? = windowList.find { it.displayId == displayId }
 
+    fun isManagedDisplay(displayId: Int): Boolean {
+        return displayIdList.contains(displayId)
+    }
+
+    fun getManagedDisplayIds(): IntArray {
+        return displayIdList.toIntArray()
+    }
+
     /**
      * 检查指定 displayId 上是否有任务
      */

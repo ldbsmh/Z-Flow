@@ -21,6 +21,10 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
                 HookFramework.init()
                 // Initialize system_server hooks for FreeformManager
                 HookSystem.init()
+                // 传主屏幕 IME 到 Virtual Display
+                HookImeInsetsBridge.init()
+                // 监测 IME 并令 Virtual Display 调用 adjustResize
+                HookImeAdjustResize.init()
                 HookReload.init()
                 HookPredictiveBack.init()
             }

@@ -68,6 +68,14 @@ class FreeformWindow(
     private val taskId: Int,
     private val config: FreeformConfig = FreeformConfig()
 ) : TextureView.SurfaceTextureListener {
+    data class ImeInsetsMetrics(
+        val layoutParams: WindowManager.LayoutParams,
+        val freeformScreenHeight: Int,
+        val scaleY: Float,
+        val topDecorRaw: Float,
+        val bottomDecorRaw: Float
+    )
+
     companion object {
         private const val TAG = "FreeformWindow"
         private const val WIDTH_HEIGHT_RATIO = 20f / 35f
@@ -267,6 +275,23 @@ class FreeformWindow(
      */
     private fun screenIsPortrait(): Boolean {
         return screenRotation == Surface.ROTATION_0 || screenRotation == Surface.ROTATION_180
+    }
+
+    fun getImeInsetsMetrics(): ImeInsetsMetrics {
+        val lpSnapshot = WindowManager.LayoutParams().apply {
+            copyFrom(windowLayoutParams)
+        }
+        val isPortrait = screenIsPortrait()
+        val bottomDecor = if (isPortrait) barHeight else 0f
+        val topDecor = (cardHeightMargin - bottomDecor).coerceAtLeast(0f)
+
+        return ImeInsetsMetrics(
+            layoutParams = lpSnapshot,
+            freeformScreenHeight = freeformScreenHeight,
+            scaleY = mScaleY,
+            topDecorRaw = topDecor,
+            bottomDecorRaw = bottomDecor
+        )
     }
 
     private fun initConfig() {
