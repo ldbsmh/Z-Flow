@@ -28,7 +28,7 @@ object HookPredictiveBack {
                     val focusedDisplayId = resolveTopFocusedDisplayId(it.thisObject)
                     if (!isVirtualDisplay(focusedDisplayId)) return@before
 
-                    clearBackAnimationAdapter(it.args, focusedDisplayId)
+                    clearBackAnimationAdapter(it.args)
                 }
 
                 after {
@@ -46,14 +46,13 @@ object HookPredictiveBack {
         return displayId >= 0 && displayId != Display.DEFAULT_DISPLAY
     }
 
-    private fun clearBackAnimationAdapter(args: Array<Any?>, displayId: Int) {
+    private fun clearBackAnimationAdapter(args: Array<Any?>) {
         if (args.size < 2) return
 
         val adapterArg = args[1]
         if (!backAnimationAdapterClass.isInstance(adapterArg)) return
 
         args[1] = null
-        XLog.w("$TAG: clear BackAnimationAdapter on virtual displayId=$displayId")
     }
 
     private fun disablePredictiveBackAnimation(backNavigationInfo: Any?, displayId: Int) {
@@ -67,8 +66,6 @@ object HookPredictiveBack {
             XLog.e("$TAG: failed to patch BackNavigationInfo on displayId=$displayId", e)
             return
         }
-
-        XLog.w("$TAG: patched BackNavigationInfo to disable predictive animation on virtual display")
     }
 
     private fun resolveTopFocusedDisplayId(controller: Any): Int {
