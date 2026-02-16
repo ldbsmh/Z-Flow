@@ -12,7 +12,6 @@ object HookPredictiveBack {
     private const val TAG = "HookPredictiveBack"
 
     private val backNavigationControllerClass = loadClass("com.android.server.wm.BackNavigationController")
-    private val backAnimationAdapterClass = loadClass("android.window.BackAnimationAdapter")
 
     fun init() {
         hookStartBackNavigation()
@@ -24,48 +23,28 @@ object HookPredictiveBack {
             .filterByParamCount(2)
             .first()
             .createHook {
-                before {
-                    val focusedDisplayId = resolveTopFocusedDisplayId(it.thisObject)
-                    if (!isVirtualDisplay(focusedDisplayId)) return@before
-
-                    clearBackAnimationAdapter(it.args)
-                }
-
                 after {
                     val focusedDisplayId = resolveTopFocusedDisplayId(it.thisObject)
                     if (!isVirtualDisplay(focusedDisplayId)) return@after
 
-                    disablePredictiveBackAnimation(it.result, focusedDisplayId)
+                    disablePredictiveBackAnimation(it.result)
                 }
             }
 
         XLog.d("$TAG: hook BackNavigationController.startBackNavigation success")
     }
 
+    private fun disablePredictiveBackAnimation(info: Any?) {
+        if (info == null) return
+        try {
+            XposedHelpers.setBooleanField(info, "mPrepareRemoteAnimation", false)
+        } catch (e: Throwable) {
+            XLog.e("$TAG: failed to patch BackNavigationInfo", e)
+        }
+    }
+
     private fun isVirtualDisplay(displayId: Int): Boolean {
         return displayId >= 0 && displayId != Display.DEFAULT_DISPLAY
-    }
-
-    private fun clearBackAnimationAdapter(args: Array<Any?>) {
-        if (args.size < 2) return
-
-        val adapterArg = args[1]
-        if (!backAnimationAdapterClass.isInstance(adapterArg)) return
-
-        args[1] = null
-    }
-
-    private fun disablePredictiveBackAnimation(backNavigationInfo: Any?, displayId: Int) {
-        if (backNavigationInfo == null) return
-
-        try {
-            XposedHelpers.setBooleanField(backNavigationInfo, "mPrepareRemoteAnimation", false)
-            XposedHelpers.setBooleanField(backNavigationInfo, "mAnimationCallback", false)
-            XposedHelpers.setBooleanField(backNavigationInfo, "mAppProgressGenerationAllowed", false)
-        } catch (e: Throwable) {
-            XLog.e("$TAG: failed to patch BackNavigationInfo on displayId=$displayId", e)
-            return
-        }
     }
 
     private fun resolveTopFocusedDisplayId(controller: Any): Int {
