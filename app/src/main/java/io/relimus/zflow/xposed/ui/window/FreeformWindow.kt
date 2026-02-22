@@ -25,7 +25,9 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
+import android.view.VelocityTracker
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.WindowManagerHidden
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -83,6 +85,9 @@ class FreeformWindow(
         // 虚拟显示屏方向常量
         private const val VIRTUAL_DISPLAY_ROTATION_PORTRAIT = 1
         private const val VIRTUAL_DISPLAY_ROTATION_LANDSCAPE = 0
+
+        // 速度预测阈值 (px/s)
+        private const val VELOCITY_THRESHOLD = 3000f
     }
 
     private val context: Context = CommonContextWrapper.createAppCompatContext(baseContext)
@@ -222,6 +227,17 @@ class FreeformWindow(
     var isHidden = false
         private set
     private var isAnimating = false
+
+    // 弹簧动画实例
+    private var springAnimX: SpringAnimator? = null
+    private var springAnimY: SpringAnimator? = null
+
+    private fun cancelSpringAnimations() {
+        springAnimX?.cancel()
+        springAnimY?.cancel()
+        springAnimX = null
+        springAnimY = null
+    }
 
     // 挂起位置，0：是否在左，1：是否在上
     private val hangUpPosition = booleanArrayOf(false, true)
@@ -384,6 +400,10 @@ class FreeformWindow(
     private fun initWindow() {
         val wrappedContext = CommonContextWrapper.createAppCompatContext(context)
         binding = ViewFreeformFlymeBinding.inflate(LayoutInflater.from(wrappedContext))
+        binding.root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) { cancelSpringAnimations() }
+        })
 
         // 创建背景 View (点击关闭)
         backgroundView = View(context).apply {
@@ -1129,6 +1149,15 @@ class FreeformWindow(
 
         private var minLong = 1.1
         private var isMoved = false
+        private var velocityTracker: VelocityTracker? = null
+
+        private fun trackMovement(event: MotionEvent) {
+            val dx = event.rawX - event.x
+            val dy = event.rawY - event.y
+            event.offsetLocation(dx, dy)
+            velocityTracker?.addMovement(event)
+            event.offsetLocation(-dx, -dy)
+        }
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouch(v: View?, event: MotionEvent): Boolean {
@@ -1138,13 +1167,21 @@ class FreeformWindow(
                 return true
             }
 
-            when (event.action) {
+            when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    cancelSpringAnimations()
+
+                    velocityTracker?.recycle()
+                    velocityTracker = VelocityTracker.obtain()
+                    trackMovement(event)
+
                     moveStartX = event.rawX
                     moveStartY = event.rawY
                     hangUpGestureDetector.onTouchEvent(event)
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    trackMovement(event)
+
                     movedX = event.rawX - moveStartX
                     movedY = event.rawY - moveStartY
 
@@ -1162,8 +1199,15 @@ class FreeformWindow(
                     }
                 }
                 MotionEvent.ACTION_UP -> {
+                    trackMovement(event)
+                    velocityTracker?.computeCurrentVelocity(1000,
+                        ViewConfiguration.get(context).scaledMaximumFlingVelocity.toFloat())
+                    val xVelocity = velocityTracker?.xVelocity ?: 0f
+                    val yVelocity = velocityTracker?.yVelocity ?: 0f
+                    velocityTracker?.recycle()
+                    velocityTracker = null
+
                     if (isMoved) {
-                        event.rawX
                         val nowY = event.rawY
 
                         val windowCoordinate = intArrayOf(
@@ -1178,19 +1222,31 @@ class FreeformWindow(
                             return true
                         }
 
-                        // 更新挂起位置
-                        hangUpPosition[0] = windowCoordinate[0] <= 0
+                        // 更新挂起位置 - 速度预测
+                        if (abs(xVelocity) > VELOCITY_THRESHOLD) {
+                            hangUpPosition[0] = xVelocity < 0
+                        } else {
+                            hangUpPosition[0] = windowCoordinate[0] <= 0
+                        }
                         hangUpPosition[1] = windowCoordinate[1] <= 0
 
                         val location = genFloatViewLocation()
-                        location[1] = windowLayoutParams.y
 
-                        // 限制 Y 范围
-                        if (nowY < realScreenHeight * 0.1f) {
-                            location[1] = (hangUpViewHeight - realScreenHeight + screenPaddingY) / 2
-                        }
-                        if (nowY > realScreenHeight - realScreenHeight * 0.1f) {
-                            location[1] = (realScreenHeight - hangUpViewHeight - screenPaddingY) / 2
+                        // Y 位置 - 速度预测
+                        if (abs(yVelocity) > VELOCITY_THRESHOLD) {
+                            location[1] = if (yVelocity < 0) {
+                                (hangUpViewHeight - realScreenHeight + screenPaddingY) / 2
+                            } else {
+                                (realScreenHeight - hangUpViewHeight - screenPaddingY) / 2
+                            }
+                        } else {
+                            location[1] = windowLayoutParams.y
+                            if (nowY < realScreenHeight * 0.1f) {
+                                location[1] = (hangUpViewHeight - realScreenHeight + screenPaddingY) / 2
+                            }
+                            if (nowY > realScreenHeight - realScreenHeight * 0.1f) {
+                                location[1] = (realScreenHeight - hangUpViewHeight - screenPaddingY) / 2
+                            }
                         }
 
                         var position = 0
@@ -1205,12 +1261,12 @@ class FreeformWindow(
                             position = 1
                         }
 
-                        AnimatorSet().apply {
-                            playTogether(moveViewAnim(windowCoordinate, location))
-                            addListener(
-                                onStart = {
-                                    if (position != 0) {
-                                        // 进入侧边栏模式
+                        if (position != 0) {
+                            // 进入侧边栏 - 保留原始动画
+                            AnimatorSet().apply {
+                                playTogether(moveViewAnim(windowCoordinate, location))
+                                addListener(
+                                    onStart = {
                                         isHidden = true
                                         val inflateContext = try {
                                             val moduleContext = context.createPackageContext(
@@ -1242,22 +1298,60 @@ class FreeformWindow(
                                                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                                                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                                         })
+                                    },
+                                    onEnd = {
+                                        isMoved = false
                                     }
-                                },
-                                onEnd = {
-                                    if (!isHidden) {
-                                        lastFloatViewLocation = location
-                                    }
+                                )
+                                duration = 300
+                                interpolator = OvershootInterpolator(0.4f)
+                                start()
+                            }
+                        } else {
+                            // 正常吸边 - 弹簧动画
+                            val targetLocation = location.copyOf()
+                            var springEndCount = 0
+                            val onSpringEnd = {
+                                springEndCount++
+                                if (springEndCount >= 2) {
+                                    lastFloatViewLocation = targetLocation
                                     isMoved = false
                                 }
-                            )
-                            duration = 300
-                            interpolator = OvershootInterpolator(0.4f)
-                            start()
+                            }
+
+                            springAnimX = SpringAnimator(
+                                onUpdate = { x ->
+                                    windowLayoutParams.x = x.roundToInt()
+                                    if (binding.root.isAttachedToWindow) {
+                                        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                                    }
+                                },
+                                onEnd = onSpringEnd
+                            ).also {
+                                it.start(windowCoordinate[0].toFloat(), location[0].toFloat(), xVelocity)
+                            }
+
+                            springAnimY = SpringAnimator(
+                                onUpdate = { y ->
+                                    windowLayoutParams.y = y.roundToInt()
+                                    if (binding.root.isAttachedToWindow) {
+                                        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                                    }
+                                },
+                                onEnd = onSpringEnd
+                            ).also {
+                                it.start(windowCoordinate[1].toFloat(), location[1].toFloat(), yVelocity)
+                            }
                         }
                     } else {
                         hangUpGestureDetector.onTouchEvent(event)
                     }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    velocityTracker?.recycle()
+                    velocityTracker = null
+                    isMoved = false
+                    cancelSpringAnimations()
                 }
             }
             return true
@@ -1526,6 +1620,7 @@ class FreeformWindow(
 
     @SuppressLint("ClickableViewAccessibility")
     private fun floatViewToNormalViewInternal() {
+        cancelSpringAnimations()
         if (isAnimating || isDestroyed || isClosedToBack || !binding.root.isAttachedToWindow) return
 
         // 恢复普通模式时，关闭其他普通窗口（退到后台）
@@ -1699,6 +1794,7 @@ class FreeformWindow(
     fun closeToBack() {
         if (isDestroyed || isClosedToBack) return
         isClosedToBack = true
+        cancelSpringAnimations()
 
         try {
             // 取消注册屏幕方向监听
