@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.Matrix
+import java.lang.reflect.Method
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
 import android.hardware.display.DisplayManager
@@ -40,9 +41,6 @@ import androidx.core.content.ContextCompat
 import com.qauxv.ui.CommonContextWrapper
 import de.robv.android.xposed.XposedHelpers
 import dev.rikka.tools.refine.Refine
-import io.github.kyuubiran.ezxhelper.core.misc.paramTypes
-import io.github.kyuubiran.ezxhelper.core.misc.params
-import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.databinding.ViewFreeformFlymeBinding
@@ -189,6 +187,12 @@ class FreeformWindow(
             binding.freeformRoot.scaleY = value
         }
 
+    // 触摸事件转发 - 缓存实例避免每次分配
+    private val touchMatrix = Matrix()
+    private val setDisplayIdMethod: Method by lazy {
+        MotionEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
+    }
+
     // 触摸坐标缩放
     private var scaleX = 1f
     private var scaleY = 1f
@@ -229,14 +233,11 @@ class FreeformWindow(
     private var isAnimating = false
 
     // 弹簧动画实例
-    private var springAnimX: SpringAnimator? = null
-    private var springAnimY: SpringAnimator? = null
+    private var springAnim: SpringAnimator? = null
 
     private fun cancelSpringAnimations() {
-        springAnimX?.cancel()
-        springAnimY?.cancel()
-        springAnimX = null
-        springAnimY = null
+        springAnim?.cancel()
+        springAnim = null
     }
 
     // 挂起位置，0：是否在左，1：是否在上
@@ -1310,37 +1311,24 @@ class FreeformWindow(
                         } else {
                             // 正常吸边 - 弹簧动画
                             val targetLocation = location.copyOf()
-                            var springEndCount = 0
-                            val onSpringEnd = {
-                                springEndCount++
-                                if (springEndCount >= 2) {
-                                    lastFloatViewLocation = targetLocation
-                                    isMoved = false
-                                }
-                            }
 
-                            springAnimX = SpringAnimator(
-                                onUpdate = { x ->
+                            springAnim = SpringAnimator(
+                                onUpdate = { x, y ->
                                     windowLayoutParams.x = x.roundToInt()
-                                    if (binding.root.isAttachedToWindow) {
-                                        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
-                                    }
-                                },
-                                onEnd = onSpringEnd
-                            ).also {
-                                it.start(windowCoordinate[0].toFloat(), location[0].toFloat(), xVelocity)
-                            }
-
-                            springAnimY = SpringAnimator(
-                                onUpdate = { y ->
                                     windowLayoutParams.y = y.roundToInt()
                                     if (binding.root.isAttachedToWindow) {
                                         Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
                                     }
                                 },
-                                onEnd = onSpringEnd
+                                onEnd = {
+                                    lastFloatViewLocation = targetLocation
+                                    isMoved = false
+                                }
                             ).also {
-                                it.start(windowCoordinate[1].toFloat(), location[1].toFloat(), yVelocity)
+                                it.start(
+                                    windowCoordinate[0].toFloat(), location[0].toFloat(), xVelocity,
+                                    windowCoordinate[1].toFloat(), location[1].toFloat(), yVelocity
+                                )
                             }
                         }
                     } else {
@@ -1392,38 +1380,19 @@ class FreeformWindow(
      * 移动视图动画
      */
     private fun moveViewAnim(startCoordinate: IntArray, endCoordinate: IntArray): Animator {
-        val moveAnim = AnimatorSet()
-        if (endCoordinate[0] != -1) {
-            moveAnim.play(
-                ValueAnimator.ofInt(startCoordinate[0], endCoordinate[0]).apply {
-                    addUpdateListener {
-                        if (!binding.root.isAttachedToWindow) return@addUpdateListener
-                        Instances.windowManager.updateViewLayout(
-                            binding.root,
-                            windowLayoutParams.apply {
-                                x = it.animatedValue as Int
-                            }
-                        )
-                    }
-                }
-            )
+        val animateX = endCoordinate[0] != -1
+        val animateY = endCoordinate[1] != -1
+        val sx = startCoordinate[0]; val sy = startCoordinate[1]
+        val ex = endCoordinate[0]; val ey = endCoordinate[1]
+        return ValueAnimator.ofFloat(0f, 1f).apply {
+            addUpdateListener {
+                if (!binding.root.isAttachedToWindow) return@addUpdateListener
+                val f = it.animatedValue as Float
+                if (animateX) windowLayoutParams.x = (sx + (ex - sx) * f).roundToInt()
+                if (animateY) windowLayoutParams.y = (sy + (ey - sy) * f).roundToInt()
+                Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+            }
         }
-        if (endCoordinate[1] != -1) {
-            moveAnim.play(
-                ValueAnimator.ofInt(startCoordinate[1], endCoordinate[1]).apply {
-                    addUpdateListener {
-                        if (!binding.root.isAttachedToWindow) return@addUpdateListener
-                        Instances.windowManager.updateViewLayout(
-                            binding.root,
-                            windowLayoutParams.apply {
-                                y = it.animatedValue as Int
-                            }
-                        )
-                    }
-                }
-            )
-        }
-        return moveAnim
     }
 
     /**
@@ -1433,30 +1402,16 @@ class FreeformWindow(
         topStartMargin: Int, bottomStartMargin: Int, rightStartMargin: Int,
         topEndMargin: Int, bottomEndMargin: Int, rightEndMargin: Int
     ): Animator {
-        return AnimatorSet().apply {
-            playTogether(
-                ValueAnimator.ofInt(topStartMargin, topEndMargin).apply {
-                    addUpdateListener {
-                        binding.cardRoot.layoutParams = (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
-                            topMargin = it.animatedValue as Int
-                        }
-                    }
-                },
-                ValueAnimator.ofInt(bottomStartMargin, bottomEndMargin).apply {
-                    addUpdateListener {
-                        binding.cardRoot.layoutParams = (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
-                            bottomMargin = it.animatedValue as Int
-                        }
-                    }
-                },
-                ValueAnimator.ofInt(rightStartMargin, rightEndMargin).apply {
-                    addUpdateListener {
-                        binding.cardRoot.layoutParams = (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
-                            rightMargin = it.animatedValue as Int
-                        }
-                    }
+        return ValueAnimator.ofFloat(0f, 1f).apply {
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
+                    topMargin = (topStartMargin + (topEndMargin - topStartMargin) * f).roundToInt()
+                    bottomMargin = (bottomStartMargin + (bottomEndMargin - bottomStartMargin) * f).roundToInt()
+                    rightMargin = (rightStartMargin + (rightEndMargin - rightStartMargin) * f).roundToInt()
                 }
-            )
+                binding.cardRoot.requestLayout()
+            }
         }
     }
 
@@ -1724,19 +1679,11 @@ class FreeformWindow(
         if (isDestroyed || displayId < 0) return
 
         try {
-            // 使用 MotionEvent.obtain(event) 复制事件，保留 Android 13+ 的惯性滚动所需的内部状态
             val newEvent = MotionEvent.obtain(event)
-            // 使用 Matrix 进行坐标变换
-            val matrix = Matrix()
-            matrix.setScale(1f / scaleX, 1f / scaleY)
-            newEvent.transform(matrix)
-
-            ObjectUtil.invokeMethod(
-                obj = newEvent,
-                methodName = "setDisplayId",
-                paramTypes = paramTypes(Int::class.javaPrimitiveType),
-                params = params(displayId)
-            )
+            touchMatrix.reset()
+            touchMatrix.setScale(1f / scaleX, 1f / scaleY)
+            newEvent.transform(touchMatrix)
+            setDisplayIdMethod.invoke(newEvent, displayId)
             Instances.inputManager.injectInputEvent(newEvent, 0)
             newEvent.recycle()
         } catch (e: Exception) {
