@@ -7,7 +7,7 @@ import kotlin.math.sqrt
 class SpringAnimator(
     private val stiffness: Float = 200f,
     private val dampingRatio: Float = 0.75f,
-    private val onUpdate: (Float) -> Unit,
+    private val onUpdate: (Float, Float) -> Unit,
     private val onEnd: () -> Unit = {}
 ) {
     companion object {
@@ -16,9 +16,15 @@ class SpringAnimator(
         private const val MAX_DURATION_NS = 3_000_000_000L
     }
 
-    private var value = 0f
-    private var velocity = 0f
-    private var target = 0f
+    private var xValue = 0f
+    private var yValue = 0f
+    private var xVelocity = 0f
+    private var yVelocity = 0f
+    private var xTarget = 0f
+    private var yTarget = 0f
+    private var xSettled = false
+    private var ySettled = false
+
     var isRunning = false
         private set
     private var startNanos = 0L
@@ -50,26 +56,41 @@ class SpringAnimator(
                 return
             }
 
-            val x = value - target
-            val a = -stiffness * x - damping * velocity
-            velocity += a * dt
-            value += velocity * dt
-            onUpdate(value)
+            if (!xSettled) {
+                val ax = -stiffness * (xValue - xTarget) - damping * xVelocity
+                xVelocity += ax * dt
+                xValue += xVelocity * dt
+                if (abs(xVelocity) < REST_VELOCITY && abs(xValue - xTarget) < REST_DISPLACEMENT) {
+                    xValue = xTarget; xVelocity = 0f; xSettled = true
+                }
+            }
 
-            if (abs(velocity) < REST_VELOCITY && abs(value - target) < REST_DISPLACEMENT) {
+            if (!ySettled) {
+                val ay = -stiffness * (yValue - yTarget) - damping * yVelocity
+                yVelocity += ay * dt
+                yValue += yVelocity * dt
+                if (abs(yVelocity) < REST_VELOCITY && abs(yValue - yTarget) < REST_DISPLACEMENT) {
+                    yValue = yTarget; yVelocity = 0f; ySettled = true
+                }
+            }
+
+            if (xSettled && ySettled) {
                 settle()
                 return
             }
 
+            onUpdate(xValue, yValue)
             choreographer.postFrameCallback(this)
         }
     }
 
-    fun start(startValue: Float, endValue: Float, startVelocity: Float = 0f) {
+    fun start(
+        startX: Float, endX: Float, velocityX: Float,
+        startY: Float, endY: Float, velocityY: Float
+    ) {
         cancel()
-        value = startValue
-        target = endValue
-        velocity = startVelocity
+        xValue = startX; xTarget = endX; xVelocity = velocityX; xSettled = false
+        yValue = startY; yTarget = endY; yVelocity = velocityY; ySettled = false
         isRunning = true
         prevNanos = 0L
         startNanos = 0L
@@ -88,8 +109,9 @@ class SpringAnimator(
         isRunning = false
         prevNanos = 0L
         startNanos = 0L
-        value = target
-        onUpdate(value)
+        xValue = xTarget
+        yValue = yTarget
+        onUpdate(xValue, yValue)
         onEnd()
     }
 }
