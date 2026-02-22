@@ -182,6 +182,10 @@ object FreeformManager : IFreeformManager.Stub() {
         return !taskList.isNullOrEmpty()
     }
 
+    fun getFirstTaskOnDisplay(displayId: Int): Int {
+        return displayTaskMap[displayId]?.firstOrNull() ?: -1
+    }
+
     /**
      * 查找指定应用的任意可用窗口（包括后台窗口）
      */

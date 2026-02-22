@@ -36,6 +36,7 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import android.view.animation.PathInterpolator
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.animation.addListener
 import androidx.core.content.ContextCompat
@@ -87,6 +88,10 @@ class FreeformWindow(
 
         // 速度预测阈值 (px/s)
         private const val VELOCITY_THRESHOLD = 3000f
+
+        // SunOS mode changing 动画参数
+        private val INTERPOLATOR_MODE_CHANGING = PathInterpolator(0.2f, 0.0f, 0.0f, 1.0f)
+        private const val DURATION_MODE_CHANGING = 320L
     }
 
     private val context: Context = CommonContextWrapper.createAppCompatContext(baseContext)
@@ -1070,45 +1075,49 @@ class FreeformWindow(
                 mScaleY >= goFullScale -> {
                     isAnimating = true
                     binding.freeformRoot.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                    val landscapeOnPortrait = virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
-                        && screenIsPortrait()
                     AnimatorSet().apply {
-                        if (landscapeOnPortrait) {
-                            playTogether(
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, mScaleX * 1.05f),
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, mScaleY * 1.05f),
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f),
-                                ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
-                                cardViewMarginAnim(
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
-                                    0, 0, 0
-                                )
-                            )
-                        } else {
-                            playTogether(
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, 1f),
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, 1f),
-                                ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
-                                cardViewMarginAnim(
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
-                                    0, 0, 0
-                                )
-                            )
-                        }
-                        duration = 300
-                        addListener(object : AnimatorListenerAdapter() {
-                            override fun onAnimationEnd(animation: Animator) {
+                        playTogether(
+                            ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, mScaleX * 1.05f),
+                            ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, mScaleY * 1.05f),
+                            ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f),
+                            ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
+                            cardViewMarginAnim(
+                                (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
+                                (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
+                                (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
+                                0, 0, 0
+                            ),
+                            ValueAnimator.ofFloat(config.dimAmount, 0f).apply {
+                                addUpdateListener {
+                                    if (!backgroundView.isAttachedToWindow) return@addUpdateListener
+                                    Instances.windowManager.updateViewLayout(
+                                        backgroundView,
+                                        backgroundLayoutParams.apply {
+                                            dimAmount = it.animatedValue as Float
+                                        }
+                                    )
+                                }
+                            },
+                            ValueAnimator.ofFloat(cardCornerRadius, 0f).apply {
+                                addUpdateListener {
+                                    binding.cardRoot.radius = it.animatedValue as Float
+                                }
+                            }
+                        )
+                        duration = DURATION_MODE_CHANGING
+                        interpolator = INTERPOLATOR_MODE_CHANGING
+                        addListener(
+                            onStart = {
+                                moveToDefaultDisplay()
+                            },
+                            onEnd = {
                                 isAnimating = false
                                 binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
-                                if (landscapeOnPortrait) binding.freeformRoot.alpha = 1f
-                                moveToDefaultDisplay()
+                                binding.freeformRoot.alpha = 1f
+                                binding.cardRoot.radius = cardCornerRadius
                                 closeToBack()
                             }
-                        })
+                        )
                         start()
                     }
                 }
@@ -1147,7 +1156,10 @@ class FreeformWindow(
      * 移动应用到主屏幕
      */
     private fun moveToDefaultDisplay() {
-        if (componentName != null) {
+        val taskId = FreeformManager.getFirstTaskOnDisplay(displayId)
+        if (taskId > 0) {
+            FreeformManager.moveTaskToDisplay(taskId, 0)
+        } else if (componentName != null) {
             FreeformManager.startActivityOnDisplay(componentName, userId, 0)
         }
     }
