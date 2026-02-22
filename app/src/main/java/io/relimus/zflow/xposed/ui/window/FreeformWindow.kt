@@ -29,6 +29,7 @@ import android.view.TextureView
 import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.WindowManagerHidden
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -490,6 +491,7 @@ class FreeformWindow(
                 isAnimating = false
                 return@post
             }
+            binding.freeformRoot.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             AnimatorSet().apply {
                 playTogether(
                     ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f),
@@ -500,6 +502,7 @@ class FreeformWindow(
                 interpolator = AccelerateDecelerateInterpolator()
                 addListener(object : AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: Animator) {
+                        binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
                         isAnimating = false
                     }
                 })
@@ -971,6 +974,7 @@ class FreeformWindow(
                 // 缩小到悬浮模式阈值 -> 进入 mini 悬浮状态
                 mScaleY <= goFloatScale -> {
                     isAnimating = true
+                    binding.freeformRoot.setLayerType(View.LAYER_TYPE_HARDWARE, null)
                     AnimatorSet().apply {
                         playTogether(
                             ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, scaleX),
@@ -1031,8 +1035,14 @@ class FreeformWindow(
                                                             height = hangUpViewHeight
                                                             width = hangUpViewWidth
                                                         })
-                                                        binding.freeformRoot.scaleY = 1f
-                                                        binding.freeformRoot.scaleX = 1f
+                                                        binding.root.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+                                                            override fun onPreDraw(): Boolean {
+                                                                binding.root.viewTreeObserver.removeOnPreDrawListener(this)
+                                                                binding.freeformRoot.scaleX = 1f
+                                                                binding.freeformRoot.scaleY = 1f
+                                                                return true
+                                                            }
+                                                        })
                                                     }
                                                 )
                                                 start()
@@ -1042,6 +1052,9 @@ class FreeformWindow(
                                         onEnd = {
                                             binding.textureView.setOnTouchListener(floatViewTouchListener)
                                             setWindowEnableUpdateAnimation()
+                                            binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
+                                            binding.cardRoot.translationX = 0f
+                                            binding.cardRoot.translationY = 0f
                                             isAnimating = false
                                         }
                                     )
@@ -1056,6 +1069,7 @@ class FreeformWindow(
                 // 放大到全屏阈值 -> 移动到主屏幕
                 mScaleY >= goFullScale -> {
                     isAnimating = true
+                    binding.freeformRoot.setLayerType(View.LAYER_TYPE_HARDWARE, null)
                     val landscapeOnPortrait = virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
                         && screenIsPortrait()
                     AnimatorSet().apply {
@@ -1089,6 +1103,7 @@ class FreeformWindow(
                         addListener(object : AnimatorListenerAdapter() {
                             override fun onAnimationEnd(animation: Animator) {
                                 isAnimating = false
+                                binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
                                 if (landscapeOnPortrait) binding.freeformRoot.alpha = 1f
                                 moveToDefaultDisplay()
                                 closeToBack()
@@ -1402,15 +1417,26 @@ class FreeformWindow(
         topStartMargin: Int, bottomStartMargin: Int, rightStartMargin: Int,
         topEndMargin: Int, bottomEndMargin: Int, rightEndMargin: Int
     ): Animator {
-        return ValueAnimator.ofFloat(0f, 1f).apply {
+        val compensateY = ((topStartMargin - topEndMargin) - (bottomStartMargin - bottomEndMargin)) / 2f
+        val compensateX = (rightEndMargin - rightStartMargin) / 2f
+
+        return ValueAnimator.ofFloat(1f, 0f).apply {
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationStart(animation: Animator) {
+                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
+                        topMargin = topEndMargin
+                        bottomMargin = bottomEndMargin
+                        rightMargin = rightEndMargin
+                    }
+                    binding.cardRoot.requestLayout()
+                    binding.cardRoot.translationY = compensateY
+                    binding.cardRoot.translationX = compensateX
+                }
+            })
             addUpdateListener {
                 val f = it.animatedValue as Float
-                (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
-                    topMargin = (topStartMargin + (topEndMargin - topStartMargin) * f).roundToInt()
-                    bottomMargin = (bottomStartMargin + (bottomEndMargin - bottomStartMargin) * f).roundToInt()
-                    rightMargin = (rightStartMargin + (rightEndMargin - rightStartMargin) * f).roundToInt()
-                }
-                binding.cardRoot.requestLayout()
+                binding.cardRoot.translationY = compensateY * f
+                binding.cardRoot.translationX = compensateX * f
             }
         }
     }
@@ -1652,18 +1678,21 @@ class FreeformWindow(
             addListener(
                 onStart = {
                     isAnimating = true
+                    binding.freeformRoot.setLayerType(View.LAYER_TYPE_HARDWARE, null)
                     backgroundView.visibility = View.VISIBLE
+                    binding.freeformRoot.scaleX = mScaleX
+                    binding.freeformRoot.scaleY = mScaleY
                     Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
                         height = rootHeight
                         width = rootWidth
                     })
-                    binding.freeformRoot.scaleX = mScaleX
-                    binding.freeformRoot.scaleY = mScaleY
                     binding.cardRoot.radius = cardCornerRadius
                 },
                 onEnd = {
                     isAnimating = false
-                    // 更新 mScaleX/Y 为恢复后的正常尺寸比例
+                    binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
+                    binding.cardRoot.translationX = 0f
+                    binding.cardRoot.translationY = 0f
                     refreshScale()
                 }
             )
@@ -1835,6 +1864,7 @@ class FreeformWindow(
                     isAnimating = false
                     return@post
                 }
+                binding.freeformRoot.setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 AnimatorSet().apply {
                     playTogether(
                         ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f),
@@ -1845,6 +1875,7 @@ class FreeformWindow(
                     interpolator = AccelerateDecelerateInterpolator()
                     addListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
+                            binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
                             isAnimating = false
                         }
                     })
@@ -1928,6 +1959,7 @@ class FreeformWindow(
         if (isDestroyed || isClosedToBack || isAnimating) return
 
         isAnimating = true
+        binding.freeformRoot.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         AnimatorSet().apply {
             playTogether(
                 ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, mScaleX * 0.9f),
@@ -1937,6 +1969,7 @@ class FreeformWindow(
             duration = 175
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
+                    binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
                     isAnimating = false
                     closeToBack()
                 }
