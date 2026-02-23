@@ -220,7 +220,7 @@ class FreeformWindow(
     // Bar 高度
     private val barHeight: Float = context.resources.getDimension(R.dimen.bottom_bar_height_flyme)
     private val freeformShadow: Float = context.resources.getDimension(R.dimen.freeform_shadow)
-    private val cardCornerRadius: Float = context.resources.getDimension(R.dimen.card_corner_radius)
+    private val freeformCornerRadius: Float = context.resources.getDimension(R.dimen.freeform_corner_radius)
 
     // 侧边栏按钮尺寸 - 缓存避免在动画回调中访问资源导致崩溃
     private val floatingButtonWidth: Int = context.resources.getDimension(R.dimen.floating_button_width).toInt()
@@ -1044,7 +1044,7 @@ class FreeformWindow(
                                                         if (!binding.root.isAttachedToWindow) return@addListener
                                                         mScaleX = scaleX
                                                         mScaleY = scaleY
-                                                        binding.cardRoot.radius = cardCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
+                                                        binding.cardRoot.radius = freeformCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
                                                         Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
                                                             height = hangUpViewHeight
                                                             width = hangUpViewWidth
@@ -1611,34 +1611,34 @@ class FreeformWindow(
         }
     }
 
-    /**
-     * CardView margin 动画 - 复刻自 FreeformView
-     */
     private fun cardViewMarginAnim(
         topStartMargin: Int, bottomStartMargin: Int, rightStartMargin: Int,
         topEndMargin: Int, bottomEndMargin: Int, rightEndMargin: Int
     ): Animator {
-        val compensateY = ((topStartMargin - topEndMargin) - (bottomStartMargin - bottomEndMargin)) / 2f
-        val compensateX = (rightEndMargin - rightStartMargin) / 2f
-
-        return ValueAnimator.ofFloat(1f, 0f).apply {
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationStart(animation: Animator) {
-                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
-                        topMargin = topEndMargin
-                        bottomMargin = bottomEndMargin
-                        rightMargin = rightEndMargin
+        return AnimatorSet().apply {
+            playTogether(
+                ValueAnimator.ofInt(topStartMargin, topEndMargin).apply {
+                    addUpdateListener {
+                        binding.cardRoot.layoutParams = (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
+                            topMargin = it.animatedValue as Int
+                        }
                     }
-                    binding.cardRoot.requestLayout()
-                    binding.cardRoot.translationY = compensateY
-                    binding.cardRoot.translationX = compensateX
-                }
-            })
-            addUpdateListener {
-                val f = it.animatedValue as Float
-                binding.cardRoot.translationY = compensateY * f
-                binding.cardRoot.translationX = compensateX * f
-            }
+                },
+                ValueAnimator.ofInt(bottomStartMargin, bottomEndMargin).apply {
+                    addUpdateListener {
+                        binding.cardRoot.layoutParams = (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
+                            bottomMargin = it.animatedValue as Int
+                        }
+                    }
+                },
+                ValueAnimator.ofInt(rightStartMargin, rightEndMargin).apply {
+                    addUpdateListener {
+                        binding.cardRoot.layoutParams = (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
+                            rightMargin = it.animatedValue as Int
+                        }
+                    }
+                },
+            )
         }
     }
 
@@ -1887,7 +1887,7 @@ class FreeformWindow(
                         height = rootHeight
                         width = rootWidth
                     })
-                    binding.cardRoot.radius = cardCornerRadius
+                    binding.cardRoot.radius = freeformCornerRadius
                 },
                 onEnd = {
                     isAnimating = false
@@ -2035,7 +2035,7 @@ class FreeformWindow(
                     rightMargin = barHeight.roundToInt()
                 }
             }
-            binding.cardRoot.radius = cardCornerRadius
+            binding.cardRoot.radius = freeformCornerRadius
 
             // 重新初始化控制栏布局
             initFloatBar()
