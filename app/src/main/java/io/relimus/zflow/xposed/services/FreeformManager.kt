@@ -12,9 +12,11 @@ import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.os.UserHandle
+import android.view.Display
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.SurfaceControl
 import io.github.kyuubiran.ezxhelper.core.misc.paramTypes
 import io.github.kyuubiran.ezxhelper.core.misc.params
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil
@@ -27,6 +29,7 @@ import io.relimus.zflow.xposed.IFreeformManager
 import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.ui.window.FreeformWindow
 import io.relimus.zflow.xposed.utils.Instances
+import de.robv.android.xposed.XposedHelpers
 
 /**
  * Core FreeformManager service running in system_server.
@@ -180,6 +183,86 @@ object FreeformManager : IFreeformManager.Stub() {
     fun hasTaskOnDisplay(displayId: Int): Boolean {
         val taskList = displayTaskMap[displayId]
         return !taskList.isNullOrEmpty()
+    }
+
+    fun getTopTaskIdOnDisplay(displayId: Int): Int {
+        return displayTaskMap[displayId]?.lastOrNull() ?: -1
+    }
+
+    /**
+     * 将指定 display 上的前台 task 移到默认屏幕。
+     * 优先使用 displayTaskMap 中最后一个 task（最新映射），fallback 到传入 taskId。
+     */
+    fun moveTaskFromDisplayToDefault(displayId: Int, fallbackTaskId: Int): Boolean {
+        val taskIdToMove = displayTaskMap[displayId]?.lastOrNull() ?: fallbackTaskId
+        if (taskIdToMove <= 0) return false
+        return try {
+            Instances.activityTaskManager.moveRootTaskToDisplay(taskIdToMove, Display.DEFAULT_DISPLAY)
+            Instances.activityManager.moveTaskToFront(taskIdToMove, 0)
+            HookReload.trackedTaskIds.add(taskIdToMove)
+            true
+        } catch (e: Exception) {
+            XLog.e("$TAG: Failed to move task $taskIdToMove from display $displayId to default", e)
+            false
+        }
+    }
+
+    /**
+     * 通过 framework 内部 RootWindowContainer 查找 Task SurfaceControl。
+     * 用于 SunOS 风格的 SurfaceControl 过渡动画。
+     */
+    fun getTaskSurfaceForAnimation(taskId: Int): SurfaceControl? {
+        if (taskId <= 0) return null
+        return try {
+            val wms = XposedHelpers.getObjectField(activityManagerService, "mWindowManager")
+            val globalLock = XposedHelpers.getObjectField(wms, "mGlobalLock")
+            synchronized(globalLock) {
+                val root = XposedHelpers.getObjectField(wms, "mRoot")
+                val task = findTaskInRoot(root, taskId) ?: return null
+
+                val surfaceFromMethod = try {
+                    XposedHelpers.callMethod(task, "getSurfaceControl") as? SurfaceControl
+                } catch (_: Throwable) {
+                    null
+                }
+                if (surfaceFromMethod != null && surfaceFromMethod.isValid) {
+                    return surfaceFromMethod
+                }
+
+                val surfaceFromField = try {
+                    XposedHelpers.getObjectField(task, "mSurfaceControl") as? SurfaceControl
+                } catch (_: Throwable) {
+                    null
+                }
+                if (surfaceFromField != null && surfaceFromField.isValid) {
+                    return surfaceFromField
+                }
+                null
+            }
+        } catch (e: Throwable) {
+            XLog.e("$TAG: Failed to get task surface for taskId=$taskId", e)
+            null
+        }
+    }
+
+    private fun findTaskInRoot(root: Any, taskId: Int): Any? {
+        try {
+            return XposedHelpers.callMethod(root, "anyTaskForId", taskId)
+        } catch (_: Throwable) {
+        }
+        try {
+            return XposedHelpers.callMethod(root, "anyTaskForId", taskId, 0)
+        } catch (_: Throwable) {
+        }
+        try {
+            return XposedHelpers.callMethod(root, "anyTaskForId", taskId, 0, null, false)
+        } catch (_: Throwable) {
+        }
+        try {
+            return XposedHelpers.callMethod(root, "getTask", taskId)
+        } catch (_: Throwable) {
+        }
+        return null
     }
 
     /**

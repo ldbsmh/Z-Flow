@@ -9,11 +9,14 @@ import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Rect
 import java.lang.reflect.Method
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
+import android.graphics.drawable.BitmapDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.os.Handler
@@ -25,6 +28,7 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.Surface
+import android.view.SurfaceControl
 import android.view.TextureView
 import android.view.VelocityTracker
 import android.view.View
@@ -36,6 +40,7 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
+import android.view.animation.PathInterpolator
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.animation.addListener
 import androidx.core.content.ContextCompat
@@ -55,6 +60,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import androidx.core.graphics.drawable.toDrawable
 
 /**
  * FreeformWindow runs in system_server with elevated privileges.
@@ -87,6 +93,11 @@ class FreeformWindow(
 
         // 速度预测阈值 (px/s)
         private const val VELOCITY_THRESHOLD = 3000f
+        private const val SUNOS_EXPAND_DURATION = 320L
+        private const val SUNOS_LEASH_RETRY_MAX = 8
+        private const val SUNOS_LEASH_RETRY_DELAY = 16L
+        private const val SUNOS_FINISH_HOLD_DELAY = 64L
+        private val SUNOS_EXPAND_INTERPOLATOR = PathInterpolator(0.2f, 0f, 0f, 1f)
     }
 
     private val context: Context = CommonContextWrapper.createAppCompatContext(baseContext)
@@ -232,6 +243,9 @@ class FreeformWindow(
     var isHidden = false
         private set
     private var isAnimating = false
+    private var isSurfaceExpandFinishing = false
+    private var expandFreezeBitmap: Bitmap? = null
+    private var expandFreezeDrawable: BitmapDrawable? = null
 
     // 弹簧动画实例
     private var springAnim: SpringAnimator? = null
@@ -1070,47 +1084,7 @@ class FreeformWindow(
                 mScaleY >= goFullScale -> {
                     isAnimating = true
                     binding.freeformRoot.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                    val landscapeOnPortrait = virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE
-                        && screenIsPortrait()
-                    AnimatorSet().apply {
-                        if (landscapeOnPortrait) {
-                            playTogether(
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, mScaleX * 1.05f),
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, mScaleY * 1.05f),
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 1f, 0f),
-                                ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
-                                cardViewMarginAnim(
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
-                                    0, 0, 0
-                                )
-                            )
-                        } else {
-                            playTogether(
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_X, mScaleX, 1f),
-                                ObjectAnimator.ofFloat(binding.freeformRoot, View.SCALE_Y, mScaleY, 1f),
-                                ObjectAnimator.ofFloat(binding.bottomBar.root, View.ALPHA, 0f),
-                                cardViewMarginAnim(
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).topMargin,
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).bottomMargin,
-                                    (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).rightMargin,
-                                    0, 0, 0
-                                )
-                            )
-                        }
-                        duration = 300
-                        addListener(object : AnimatorListenerAdapter() {
-                            override fun onAnimationEnd(animation: Animator) {
-                                isAnimating = false
-                                binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
-                                if (landscapeOnPortrait) binding.freeformRoot.alpha = 1f
-                                moveToDefaultDisplay()
-                                closeToBack()
-                            }
-                        })
-                        start()
-                    }
+                    startSunOsSurfaceControlledExpand()
                 }
                 // 恢复原始大小
                 else -> {
@@ -1144,11 +1118,238 @@ class FreeformWindow(
     }
 
     /**
-     * 移动应用到主屏幕
+     * SunOS 风格放大全屏：使用 framework SurfaceControl 直接接管 task leash。
+     * 时序：moveRootTaskToDisplay -> 获取 leash -> setMatrix/setPosition 逐帧过渡。
      */
-    private fun moveToDefaultDisplay() {
-        if (componentName != null) {
-            FreeformManager.startActivityOnDisplay(componentName, userId, 0)
+    private fun startSunOsSurfaceControlledExpand() {
+        isSurfaceExpandFinishing = false
+        val activeTaskId = FreeformManager.getTopTaskIdOnDisplay(displayId).let {
+            if (it > 0) it else taskId
+        }
+        if (activeTaskId <= 0) {
+            XLog.w("$TAG: Invalid taskId for full expand, displayId=$displayId")
+            finishAfterSurfaceExpand()
+            return
+        }
+
+        val startRect = resolveExpandStartRect()
+        val endRect = Rect(0, 0, realScreenWidth, realScreenHeight)
+        val startCornerRadius = binding.cardRoot.radius
+        prepareExpandFreezeLayer()
+
+        val moved = FreeformManager.moveTaskFromDisplayToDefault(displayId, activeTaskId)
+        if (!moved) {
+            if (componentName != null) {
+                FreeformManager.startActivityOnDisplay(componentName, userId, Display.DEFAULT_DISPLAY)
+            }
+            finishAfterSurfaceExpand()
+            return
+        }
+
+        binding.textureView.setOnTouchListener(null)
+        binding.bottomBar.root.alpha = 0f
+        if (backgroundView.isAttachedToWindow) {
+            try {
+                Instances.windowManager.updateViewLayout(
+                    backgroundView,
+                    backgroundLayoutParams.apply { dimAmount = 0f }
+                )
+            } catch (e: Throwable) {
+                XLog.w("$TAG: Failed to clear dim before full expand", e)
+            }
+        }
+
+        startSunOsLeashAnimationWhenReady(
+            activeTaskId,
+            startRect,
+            endRect,
+            startCornerRadius,
+            attempt = 0
+        )
+    }
+
+    private fun startSunOsLeashAnimationWhenReady(
+        activeTaskId: Int,
+        startRect: Rect,
+        endRect: Rect,
+        startCornerRadius: Float,
+        attempt: Int
+    ) {
+        val leash = FreeformManager.getTaskSurfaceForAnimation(activeTaskId)
+        if (leash == null || !leash.isValid) {
+            if (attempt >= SUNOS_LEASH_RETRY_MAX) {
+                XLog.w("$TAG: Failed to get task leash, taskId=$activeTaskId")
+                finishAfterSurfaceExpand()
+                return
+            }
+            mainHandler.postDelayed(
+                {
+                    startSunOsLeashAnimationWhenReady(
+                        activeTaskId,
+                        startRect,
+                        endRect,
+                        startCornerRadius,
+                        attempt + 1
+                    )
+                },
+                SUNOS_LEASH_RETRY_DELAY
+            )
+            return
+        }
+
+        runSunOsSurfaceAnimator(leash, startRect, endRect, startCornerRadius)
+    }
+
+    private fun runSunOsSurfaceAnimator(
+        leash: SurfaceControl,
+        startRect: Rect,
+        endRect: Rect,
+        startCornerRadius: Float
+    ) {
+        applySunOsSurfaceTransform(leash, startRect, endRect, startCornerRadius, 0f)
+
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = SUNOS_EXPAND_DURATION
+            interpolator = SUNOS_EXPAND_INTERPOLATOR
+            addUpdateListener {
+                val fraction = (it.animatedValue as Float).coerceIn(0f, 1f)
+                applySunOsSurfaceTransform(leash, startRect, endRect, startCornerRadius, fraction)
+
+                val overlayFadeFraction = ((fraction - 0.18f) / 0.82f).coerceIn(0f, 1f)
+                val overlayAlpha = 1f - overlayFadeFraction
+                binding.freeformRoot.alpha = overlayAlpha
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    applySunOsSurfaceTransform(leash, startRect, endRect, startCornerRadius, 1f)
+                    finishAfterSurfaceExpand()
+                }
+
+                override fun onAnimationCancel(animation: Animator) {
+                    finishAfterSurfaceExpand()
+                }
+            })
+            start()
+        }
+    }
+
+    private fun applySunOsSurfaceTransform(
+        leash: SurfaceControl,
+        startRect: Rect,
+        endRect: Rect,
+        startCornerRadius: Float,
+        fraction: Float
+    ) {
+        if (!leash.isValid) return
+
+        val clamped = fraction.coerceIn(0f, 1f)
+        val endWidth = endRect.width().coerceAtLeast(1)
+        val endHeight = endRect.height().coerceAtLeast(1)
+        val startScaleX = startRect.width().coerceAtLeast(1).toFloat() / endWidth.toFloat()
+        val startScaleY = startRect.height().coerceAtLeast(1).toFloat() / endHeight.toFloat()
+
+        val currentScaleX = lerp(startScaleX, 1f, clamped)
+        val currentScaleY = lerp(startScaleY, 1f, clamped)
+        val currentX = lerp(startRect.left.toFloat(), endRect.left.toFloat(), clamped)
+        val currentY = lerp(startRect.top.toFloat(), endRect.top.toFloat(), clamped)
+        val currentCorner = lerp(startCornerRadius, 0f, clamped).coerceAtLeast(0f)
+
+        try {
+            SurfaceControl.Transaction().apply {
+                setPosition(leash, currentX, currentY)
+                setAlpha(leash, 1f)
+                setLayer(leash, Int.MAX_VALUE)
+                callTransactionMethod(this, "setMatrix", leash, currentScaleX, 0f, 0f, currentScaleY)
+                if (!callTransactionMethod(this, "setWindowCrop", leash, endWidth, endHeight)) {
+                    callTransactionMethod(this, "setCrop", leash, Rect(0, 0, endWidth, endHeight))
+                }
+                callTransactionMethod(this, "setCornerRadius", leash, currentCorner)
+                callTransactionMethod(this, "show", leash)
+                apply()
+            }
+        } catch (e: Throwable) {
+            XLog.e("$TAG: Failed to apply SunOS surface transform", e)
+        }
+    }
+
+    private fun resolveExpandStartRect(): Rect {
+        val width = (rootWidth * mScaleX).roundToInt().coerceAtLeast(1)
+        val height = (rootHeight * mScaleY).roundToInt().coerceAtLeast(1)
+        val centerX = (realScreenWidth / 2f) + windowLayoutParams.x
+        val centerY = (realScreenHeight / 2f) + windowLayoutParams.y
+        val left = (centerX - width / 2f).roundToInt()
+        val top = (centerY - height / 2f).roundToInt()
+        return Rect(left, top, left + width, top + height)
+    }
+
+    private fun finishAfterSurfaceExpand() {
+        if (isSurfaceExpandFinishing) return
+        isSurfaceExpandFinishing = true
+        mainHandler.postDelayed({
+            if (isDestroyed || isClosedToBack) {
+                clearExpandFreezeLayer()
+                isAnimating = false
+                return@postDelayed
+            }
+            clearExpandFreezeLayer()
+            binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
+            isAnimating = false
+            closeToBack()
+        }, SUNOS_FINISH_HOLD_DELAY)
+    }
+
+    private fun lerp(start: Float, end: Float, fraction: Float): Float {
+        return start + (end - start) * fraction
+    }
+
+    private fun callTransactionMethod(
+        transaction: SurfaceControl.Transaction,
+        methodName: String,
+        vararg args: Any?
+    ): Boolean {
+        return try {
+            XposedHelpers.callMethod(transaction, methodName, *args)
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun prepareExpandFreezeLayer() {
+        clearExpandFreezeLayer()
+        if (!binding.textureView.isAvailable) return
+        val bitmap = try {
+            binding.textureView.bitmap
+        } catch (e: Throwable) {
+            XLog.w("$TAG: Failed to snapshot texture for expand freeze", e)
+            null
+        } ?: return
+
+        if (bitmap.width <= 0 || bitmap.height <= 0 || binding.cardRoot.width <= 0 || binding.cardRoot.height <= 0) {
+            if (!bitmap.isRecycled) bitmap.recycle()
+            return
+        }
+
+        val drawable = bitmap.toDrawable(context.resources).apply {
+            setBounds(0, 0, binding.cardRoot.width, binding.cardRoot.height)
+        }
+        binding.cardRoot.overlay.add(drawable)
+        binding.textureView.alpha = 0f
+        expandFreezeBitmap = bitmap
+        expandFreezeDrawable = drawable
+    }
+
+    private fun clearExpandFreezeLayer() {
+        expandFreezeDrawable?.let { drawable ->
+            runCatching { binding.cardRoot.overlay.remove(drawable) }
+        }
+        expandFreezeDrawable = null
+        expandFreezeBitmap?.let { bitmap ->
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        expandFreezeBitmap = null
+        if (::binding.isInitialized && binding.textureView.isAttachedToWindow) {
+            binding.textureView.alpha = 1f
         }
     }
 
