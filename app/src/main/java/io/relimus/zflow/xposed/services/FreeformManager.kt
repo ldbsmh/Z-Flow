@@ -88,21 +88,13 @@ object FreeformManager : IFreeformManager.Stub() {
                 }
 
                 // task 从 VirtualDisplay 移到默认屏幕（用户在桌面点击了同一个 App）
-                // 且对应窗口处于 mini/hidden 状态 → 恢复 normalView 并把 task 移回
+                // 窗口处于 mini/hidden/closedToBack 状态 → 销毁小窗，让 task 在默认屏幕打开
                 if (previousDisplayId != null && newDisplayId == 0) {
                     val window = getWindow(previousDisplayId)
                     if (window != null && !window.isDestroyed
-                        && (window.isFloating || window.isHidden)
+                        && (window.isClosedToBack || window.isFloating || window.isHidden)
                     ) {
-                        closeAllNormalWindows()
-                        window.restoreToNormalView()
-                        try {
-                            Instances.activityTaskManager.moveRootTaskToDisplay(
-                                taskId, previousDisplayId
-                            )
-                        } catch (e: Exception) {
-                            XLog.e("$TAG: Failed to move task $taskId back to display $previousDisplayId", e)
-                        }
+                        window.realDestroy()
                     }
                 }
             }
