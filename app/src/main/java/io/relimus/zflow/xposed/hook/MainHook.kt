@@ -38,9 +38,11 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
             }
             "com.android.launcher3" -> {
                 HookLauncher.init()
+                HookSwipeGesture.init()
             }
             "com.google.android.apps.nexuslauncher" -> {
                 HookLauncher.init()
+                HookSwipeGesture.init()
             }
         }
     }
