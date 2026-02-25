@@ -1915,6 +1915,10 @@ class FreeformWindow(
             forwardMotionEvent(motionEvent)
             true
         }
+        binding.root.setOnTouchListener { _, event ->
+            backgroundGestureDetector.onTouchEvent(event)
+            true
+        }
 
         val windowCoordinate = intArrayOf(
             windowLayoutParams.x,
