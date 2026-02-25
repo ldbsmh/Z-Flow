@@ -356,6 +356,50 @@ object FreeformManager : IFreeformManager.Stub() {
         }
     }
 
+    override fun createMiniWindow(componentName: ComponentName?, userId: Int, taskId: Int, freeformDpi: Int, freeformSize: Int, floatViewSize: Int, dimAmount: Int) {
+        if (!isReady) {
+            XLog.e("$TAG: Service not ready")
+            return
+        }
+        runOnMainThread {
+            try {
+                Instances.iStatusBarService.collapsePanels()
+
+                // 同应用已有可见 mini/hidden 窗口 → 直接提到前台
+                val existing = findAnyWindow(componentName?.packageName)
+                if (existing != null && !existing.isDestroyed) {
+                    if (!existing.isClosedToBack && (existing.isFloating || existing.isHidden)) {
+                        existing.moveToTop()
+                        return@runOnMainThread
+                    }
+                    existing.realDestroy()
+                }
+
+                // 继承已有 mini 窗口位置
+                val inheritedLocation = windowList.find {
+                    (it.isFloating || it.isHidden) && !it.isDestroyed && !it.isClosedToBack
+                }?.getMiniLocation()
+
+                closeAllMiniWindows()
+                closeAllNormalWindows()
+
+                val config = FreeformConfig(
+                    freeformDpi = freeformDpi,
+                    freeformSize = freeformSize / 100f,
+                    floatViewSize = floatViewSize / 100f,
+                    dimAmount = dimAmount / 100f
+                )
+                FreeformWindow(
+                    Instances.systemUiContext, componentName, userId, taskId, config,
+                    directToMini = true,
+                    inheritedMiniLocation = inheritedLocation
+                )
+            } catch (e: Exception) {
+                XLog.e("$TAG: Failed to create mini window", e)
+            }
+        }
+    }
+
     override fun destroyWindow(displayId: Int) {
         runOnMainThread {
             getWindow(displayId)?.closeToBack()

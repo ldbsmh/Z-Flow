@@ -68,6 +68,10 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         service?.createWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
     }
 
+    override fun createMiniWindow(componentName: ComponentName?, userId: Int, taskId: Int, freeformDpi: Int, freeformSize: Int, floatViewSize: Int, dimAmount: Int) {
+        service?.createMiniWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
+    }
+
     override fun destroyWindow(displayId: Int) {
         service?.destroyWindow(displayId)
     }

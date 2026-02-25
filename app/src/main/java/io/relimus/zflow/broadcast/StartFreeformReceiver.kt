@@ -13,6 +13,7 @@ class StartFreeformReceiver : BroadcastReceiver() {
         val activityName = intent.getStringExtra("activityName")
         val userId = intent.getIntExtra("userId", -1)
         val extras = intent.getStringExtra("extras")
+        val miniMode = intent.getBooleanExtra("miniMode", false)
         val parcelable = intent.getParcelableExtra(Intent.EXTRA_INTENT, Parcelable::class.java)
         var target = Intent()
         if (packageName != null && activityName != null)
@@ -28,6 +29,11 @@ class StartFreeformReceiver : BroadcastReceiver() {
                 .putExtra(Intent.EXTRA_INTENT, target)
                 .putExtra(Intent.EXTRA_COMPONENT_NAME, target.component)
                 .putExtra(Intent.EXTRA_USER, userId)
+                .putExtra(EXTRA_MINI_MODE, miniMode)
         )
+    }
+
+    companion object {
+        const val EXTRA_MINI_MODE = "mini_mode"
     }
 }

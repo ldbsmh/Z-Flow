@@ -73,7 +73,9 @@ class FreeformWindow(
     val componentName: ComponentName?,
     private val userId: Int,
     private val taskId: Int,
-    private val config: FreeformConfig = FreeformConfig()
+    private val config: FreeformConfig = FreeformConfig(),
+    private val directToMini: Boolean = false,
+    private val inheritedMiniLocation: IntArray? = null
 ) : TextureView.SurfaceTextureListener {
     data class ImeInsetsMetrics(
         val layoutParams: WindowManager.LayoutParams,
@@ -304,7 +306,7 @@ class FreeformWindow(
     init {
         try {
             initConfig()
-            initWindow()
+            if (directToMini) initWindowAsMini() else initWindow()
         } catch (e: Exception) {
             XLog.e("$TAG: Failed to initialize FreeformWindow", e)
         }
@@ -548,6 +550,99 @@ class FreeformWindow(
 
         // 禁用窗口移动动画
         setWindowNoUpdateAnimation()
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun initWindowAsMini() {
+        val wrappedContext = CommonContextWrapper.createAppCompatContext(context)
+        binding = ViewFreeformFlymeBinding.inflate(LayoutInflater.from(wrappedContext))
+        binding.root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) { cancelSpringAnimations() }
+        })
+
+        backgroundView = View(context).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
+                        backgroundGestureDetector.onTouchEvent(event)
+                    }
+                }
+                true
+            }
+        }
+
+        backgroundLayoutParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_DIM_BEHIND or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            dimAmount = 0f
+        }
+
+        val location = inheritedMiniLocation
+            ?.takeIf { it.size >= 2 }
+            ?.let { intArrayOf(it[0], it[1]) }
+            ?: genFloatViewLocation()
+        hangUpPosition[0] = location[0] <= 0
+        hangUpPosition[1] = location[1] <= 0
+        lastFloatViewLocation = location.copyOf()
+
+        windowLayoutParams = WindowManager.LayoutParams(
+            hangUpViewWidth,
+            hangUpViewHeight,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                    WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+            x = location[0]
+            y = location[1]
+        }
+
+        (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
+            topMargin = 0
+            bottomMargin = 0
+            rightMargin = 0
+        }
+        binding.cardRoot.radius = freeformCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
+
+        initFloatBar()
+        binding.bottomBar.root.alpha = 0f
+        binding.lottieView.alpha = 0f
+        binding.textureView.alpha = 0f
+        binding.freeformRoot.alpha = 1f
+        binding.freeformRoot.scaleX = 1f
+        binding.freeformRoot.scaleY = 1f
+        backgroundView.visibility = View.GONE
+        refreshTouchScale()
+
+        Instances.windowManager.addView(backgroundView, backgroundLayoutParams)
+        Instances.windowManager.addView(binding.root, windowLayoutParams)
+
+        binding.textureView.surfaceTextureListener = this
+        binding.textureView.setOnTouchListener(FloatViewTouchListener())
+        setupControlBar()
+        Instances.displayManager.registerDisplayListener(displayListener, mainHandler)
+
+        isFloating = true
+        mScaleX = hangUpViewWidth / rootWidth.toFloat()
+        mScaleY = hangUpViewHeight / rootHeight.toFloat()
+        binding.freeformRoot.scaleX = 1f
+        binding.freeformRoot.scaleY = 1f
+        setWindowEnableUpdateAnimation()
     }
 
     /**
@@ -2243,6 +2338,10 @@ class FreeformWindow(
             surface.setDefaultBufferSize(freeformScreenWidth, freeformScreenHeight)
             virtualDisplay.surface = Surface(surface)
 
+            if (directToMini) {
+                binding.freeformRoot.scaleX = 1f
+                binding.freeformRoot.scaleY = 1f
+            }
             binding.textureView.postDelayed(initTimeoutRunnable, 1000)
 
             // Register with manager

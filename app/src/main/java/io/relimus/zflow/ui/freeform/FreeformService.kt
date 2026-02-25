@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.os.IBinder
 import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.broadcast.StartFreeformReceiver
 
 /**
  * FreeformService - now delegates to FreeformManagerProxy for window creation in system_server.
@@ -33,6 +34,7 @@ class FreeformService: Service() {
                     componentName = innerIntent?.component
                 }
                 val taskId = intent.getIntExtra(EXTRA_TASK_ID, -1)
+                val miniMode = intent.getBooleanExtra(StartFreeformReceiver.EXTRA_MINI_MODE, false)
 
                 // 从 SharedPreferences 读取配置
                 val sp = getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
@@ -41,7 +43,11 @@ class FreeformService: Service() {
                 val floatViewSize = sp.getInt("freeform_float_view_size", 25)
                 val dimAmount = sp.getInt("freeform_dimming_amount", 20)
 
-                proxy.createWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
+                if (miniMode) {
+                    proxy.createMiniWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
+                } else {
+                    proxy.createWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
+                }
             }
             ACTION_DESTROY_FREEFORM -> {
                 val displayId = intent.getIntExtra(EXTRA_DISPLAY_ID, -1)
