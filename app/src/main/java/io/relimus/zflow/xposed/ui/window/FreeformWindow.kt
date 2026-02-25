@@ -1325,10 +1325,12 @@ class FreeformWindow(
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     applySunOsSurfaceTransform(leash, startRect, endRect, startCornerRadius, 1f)
+                    clearSunOsSurfaceOverrides(leash)
                     finishAfterSurfaceExpand()
                 }
 
                 override fun onAnimationCancel(animation: Animator) {
+                    clearSunOsSurfaceOverrides(leash)
                     finishAfterSurfaceExpand()
                 }
             })
@@ -1356,6 +1358,7 @@ class FreeformWindow(
         val currentX = lerp(startRect.left.toFloat(), endRect.left.toFloat(), clamped)
         val currentY = lerp(startRect.top.toFloat(), endRect.top.toFloat(), clamped)
         val currentCorner = lerp(startCornerRadius, 0f, clamped).coerceAtLeast(0f)
+        val shouldApplyExplicitCrop = shouldApplySunOsExplicitCrop()
 
         try {
             SurfaceControl.Transaction().apply {
@@ -1363,8 +1366,12 @@ class FreeformWindow(
                 setAlpha(leash, 1f)
                 setLayer(leash, Int.MAX_VALUE)
                 callTransactionMethod(this, "setMatrix", leash, currentScaleX, 0f, 0f, currentScaleY)
-                if (!callTransactionMethod(this, "setWindowCrop", leash, endWidth, endHeight)) {
-                    callTransactionMethod(this, "setCrop", leash, Rect(0, 0, endWidth, endHeight))
+                if (shouldApplyExplicitCrop) {
+                    if (!callTransactionMethod(this, "setWindowCrop", leash, endWidth, endHeight)) {
+                        callTransactionMethod(this, "setCrop", leash, Rect(0, 0, endWidth, endHeight))
+                    }
+                } else {
+                    clearTransactionCrop(this, leash)
                 }
                 callTransactionMethod(this, "setCornerRadius", leash, currentCorner)
                 callTransactionMethod(this, "show", leash)
@@ -1403,6 +1410,38 @@ class FreeformWindow(
 
     private fun lerp(start: Float, end: Float, fraction: Float): Float {
         return start + (end - start) * fraction
+    }
+
+    private fun shouldApplySunOsExplicitCrop(): Boolean {
+        return !(screenIsPortrait() && virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE)
+    }
+
+    private fun clearSunOsSurfaceOverrides(leash: SurfaceControl) {
+        if (!leash.isValid) return
+        try {
+            SurfaceControl.Transaction().apply {
+                setPosition(leash, 0f, 0f)
+                callTransactionMethod(this, "setMatrix", leash, 1f, 0f, 0f, 1f)
+                callTransactionMethod(this, "setCornerRadius", leash, 0f)
+                clearTransactionCrop(this, leash)
+                callTransactionMethod(this, "show", leash)
+                apply()
+            }
+        } catch (e: Throwable) {
+            XLog.w("$TAG: Failed to clear SunOS surface overrides", e)
+        }
+    }
+
+    private fun clearTransactionCrop(
+        transaction: SurfaceControl.Transaction,
+        leash: SurfaceControl
+    ) {
+        if (callTransactionMethod(transaction, "setWindowCrop", leash, null)) return
+        if (callTransactionMethod(transaction, "setCrop", leash, null)) return
+
+        // Fallback for old signatures that only accept width/height crop.
+        val fallbackSize = max(realScreenWidth, realScreenHeight).coerceAtLeast(1)
+        callTransactionMethod(transaction, "setWindowCrop", leash, fallbackSize, fallbackSize)
     }
 
     private fun callTransactionMethod(
