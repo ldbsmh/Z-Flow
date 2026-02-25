@@ -32,10 +32,15 @@ object HookImeAdjustResize {
         val lock = getObject(service, "mGlobalLock").cast<Any>()
 
         val windowState = synchronized(lock) {
-            invokeMethodBestMatch(service, "windowForClientLocked", null, session, windowClient, false)
+            try {
+                invokeMethodBestMatch(service, "windowForClientLocked", null, session, windowClient, false)
+            } catch (_: Exception) { }
         } ?: return
 
-        val displayId = invokeMethodBestMatch(windowState, "getDisplayId").cast<Int>()
+        val displayId = try {
+            invokeMethodBestMatch(windowState, "getDisplayId").cast<Int>()
+        } catch (_: Exception) { return }
+
         if (displayId == Display.DEFAULT_DISPLAY || !FreeformManager.isManagedDisplay(displayId)) return
 
         val windowAttrs = getObject(windowState, "mAttrs").cast<WindowManager.LayoutParams>()
