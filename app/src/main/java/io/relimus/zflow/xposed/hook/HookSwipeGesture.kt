@@ -79,6 +79,7 @@ object HookSwipeGesture {
                                         putExtra("packageName", topComponent.packageName)
                                         putExtra("activityName", topComponent.className)
                                         putExtra("userId", userId)
+                                        putExtra("miniMode", true)
                                     }
                                     PendingIntent.getBroadcast(
                                         context,
