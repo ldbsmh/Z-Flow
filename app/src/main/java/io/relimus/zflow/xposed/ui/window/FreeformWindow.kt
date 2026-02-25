@@ -237,6 +237,14 @@ class FreeformWindow(
         private set
     private var updateFrameCount = 0
     private var initFinish = false
+    private var initTimeoutRunnable = Runnable {
+        if (!initFinish) {
+            binding.lottieView.cancelAnimation()
+            binding.lottieView.animate().alpha(0f).setDuration(200).start()
+            binding.textureView.animate().alpha(1f).setDuration(200).start()
+            initFinish = true
+        }
+    }
     var isFloating = false
         private set
     private var isZoomOut = false
@@ -2235,6 +2243,8 @@ class FreeformWindow(
             surface.setDefaultBufferSize(freeformScreenWidth, freeformScreenHeight)
             virtualDisplay.surface = Surface(surface)
 
+            binding.textureView.postDelayed(initTimeoutRunnable, 1000)
+
             // Register with manager
             FreeformManager.addWindow(this)
 
@@ -2260,6 +2270,7 @@ class FreeformWindow(
     }
 
     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+        binding.textureView.removeCallbacks(initTimeoutRunnable)
         return true
     }
 
