@@ -14,6 +14,7 @@ class StartFreeformReceiver : BroadcastReceiver() {
         val userId = intent.getIntExtra("userId", -1)
         val extras = intent.getStringExtra("extras")
         val miniMode = intent.getBooleanExtra("miniMode", false)
+        val taskId = intent.getIntExtra(FreeformService.EXTRA_TASK_ID, -1)
         val parcelable = intent.getParcelableExtra(Intent.EXTRA_INTENT, Parcelable::class.java)
         var target = Intent()
         if (packageName != null && activityName != null)
@@ -29,6 +30,7 @@ class StartFreeformReceiver : BroadcastReceiver() {
                 .putExtra(Intent.EXTRA_INTENT, target)
                 .putExtra(Intent.EXTRA_COMPONENT_NAME, target.component)
                 .putExtra(Intent.EXTRA_USER, userId)
+                .putExtra(FreeformService.EXTRA_TASK_ID, taskId)
                 .putExtra(EXTRA_MINI_MODE, miniMode)
         )
     }

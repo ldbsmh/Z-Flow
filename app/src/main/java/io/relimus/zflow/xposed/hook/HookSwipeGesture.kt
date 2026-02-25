@@ -10,6 +10,7 @@ import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
+import io.relimus.zflow.ui.freeform.FreeformService
 import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.hook.utils.cast
 
@@ -71,6 +72,7 @@ object HookSwipeGesture {
                                         as? ComponentName ?: return@Runnable
                                     val key = XposedHelpers.getObjectField(task, "key")
                                     val userId = XposedHelpers.getIntField(key, "userId")
+                                    val taskId = resolveTaskId(task, key)
 
                                     val recentsView = ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView")
                                     val context = XposedHelpers.callMethod(recentsView, "getContext") as Context
@@ -79,6 +81,7 @@ object HookSwipeGesture {
                                         putExtra("packageName", topComponent.packageName)
                                         putExtra("activityName", topComponent.className)
                                         putExtra("userId", userId)
+                                        putExtra(FreeformService.EXTRA_TASK_ID, taskId)
                                         putExtra("miniMode", true)
                                     }
                                     PendingIntent.getBroadcast(
@@ -115,6 +118,28 @@ object HookSwipeGesture {
             XposedHelpers.callMethod(container, "getTask")
         } else {
             XposedHelpers.callMethod(taskView, "getTask")
+        }
+    }
+
+    private fun resolveTaskId(task: Any, key: Any): Int {
+        val fromTask = try {
+            XposedHelpers.getIntField(task, "taskId")
+        } catch (_: Throwable) {
+            -1
+        }
+        if (fromTask > 0) return fromTask
+
+        val fromKeyId = try {
+            XposedHelpers.getIntField(key, "id")
+        } catch (_: Throwable) {
+            -1
+        }
+        if (fromKeyId > 0) return fromKeyId
+
+        return try {
+            XposedHelpers.getIntField(key, "taskId")
+        } catch (_: Throwable) {
+            -1
         }
     }
 }

@@ -2351,11 +2351,13 @@ class FreeformWindow(
             // Register with manager
             FreeformManager.addWindow(this)
 
-            // Start activity on the virtual display
-            if (componentName != null && userId >= 0) {
-                FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
-            } else if (taskId > 0) {
+            // Prefer migrating existing task to preserve in-app runtime state.
+            if (taskId > 0) {
+                XLog.d("$TAG: Move existing task to freeform, taskId=$taskId, displayId=$displayId")
                 FreeformManager.moveTaskToDisplay(taskId, displayId)
+            } else if (componentName != null && userId >= 0) {
+                XLog.d("$TAG: Start activity on freeform display, component=$componentName, displayId=$displayId")
+                FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
             }
         } catch (e: Exception) {
             XLog.e("$TAG: Failed to create VirtualDisplay", e)

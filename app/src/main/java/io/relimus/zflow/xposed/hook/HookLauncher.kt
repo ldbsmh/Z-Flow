@@ -20,6 +20,7 @@ import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHooks
 import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.ui.freeform.FreeformService
 import io.relimus.zflow.xposed.hook.utils.cast
 
 object HookLauncher {
@@ -53,6 +54,7 @@ object HookLauncher {
                     val task = XposedHelpers.callMethod(taskView, "getTask") ?: return@after
                     val key = XposedHelpers.getObjectField(task, "key")
                     val userId = XposedHelpers.getIntField(key, "userId")
+                    val taskId = resolveTaskId(task, key)
 
                     val remoteActionShortcutClazz = loadClass("com.android.launcher3.popup.RemoteActionShortcut")
                     val intent = Intent("io.relimus.zflow.start_freeform").apply {
@@ -60,6 +62,7 @@ object HookLauncher {
                         putExtra("packageName", topComponent.packageName)
                         putExtra("activityName", topComponent.className)
                         putExtra("userId", userId)
+                        putExtra(FreeformService.EXTRA_TASK_ID, taskId)
                     }
 
                     val userContext = getUserContext()
@@ -106,5 +109,27 @@ object HookLauncher {
         if (this is Activity) return this
         if (this is ContextWrapper) return this.baseContext.getActivity()
         return null
+    }
+
+    private fun resolveTaskId(task: Any, key: Any): Int {
+        val fromTask = try {
+            XposedHelpers.getIntField(task, "taskId")
+        } catch (_: Throwable) {
+            -1
+        }
+        if (fromTask > 0) return fromTask
+
+        val fromKeyId = try {
+            XposedHelpers.getIntField(key, "id")
+        } catch (_: Throwable) {
+            -1
+        }
+        if (fromKeyId > 0) return fromKeyId
+
+        return try {
+            XposedHelpers.getIntField(key, "taskId")
+        } catch (_: Throwable) {
+            -1
+        }
     }
 }
