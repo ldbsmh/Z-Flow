@@ -554,6 +554,9 @@ class FreeformWindow(
 
     @SuppressLint("ClickableViewAccessibility")
     private fun initWindowAsMini() {
+        // directToMini 可能与系统旋转切换并发，先同步当前物理屏幕方向
+        screenRotation = Instances.displayManager.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: screenRotation
+
         val wrappedContext = CommonContextWrapper.createAppCompatContext(context)
         binding = ViewFreeformFlymeBinding.inflate(LayoutInflater.from(wrappedContext))
         binding.root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -589,8 +592,13 @@ class FreeformWindow(
 
         val location = inheritedMiniLocation
             ?.takeIf { it.size >= 2 }
-            ?.let { intArrayOf(it[0], it[1]) }
-            ?: genFloatViewLocation()
+            ?.let { inherited ->
+                // 继承停靠象限，坐标按当前方向归一化，避免沿用旧方向绝对值
+                hangUpPosition[0] = inherited[0] <= 0
+                hangUpPosition[1] = inherited[1] <= 0
+                normalizeMiniLocation(intArrayOf(inherited[0], inherited[1]))
+            }
+            ?: normalizeMiniLocation(genFloatViewLocation())
         hangUpPosition[0] = location[0] <= 0
         hangUpPosition[1] = location[1] <= 0
         lastFloatViewLocation = location.copyOf()
@@ -643,6 +651,29 @@ class FreeformWindow(
         binding.freeformRoot.scaleX = 1f
         binding.freeformRoot.scaleY = 1f
         setWindowEnableUpdateAnimation()
+
+        // 兜底校准：覆盖初始化期间可能遗漏的旋转变化
+        binding.root.post {
+            if (isDestroyed || !isFloating || !binding.root.isAttachedToWindow) return@post
+            val latestRotation = Instances.displayManager.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: return@post
+            if (latestRotation != screenRotation) {
+                screenRotation = latestRotation
+                onScreenOrientationChanged()
+                return@post
+            }
+
+            val normalizedLocation = normalizeMiniLocation(intArrayOf(windowLayoutParams.x, windowLayoutParams.y))
+            if (normalizedLocation[0] != windowLayoutParams.x || normalizedLocation[1] != windowLayoutParams.y) {
+                hangUpPosition[0] = normalizedLocation[0] <= 0
+                hangUpPosition[1] = normalizedLocation[1] <= 0
+                lastFloatViewLocation = normalizedLocation.copyOf()
+                windowLayoutParams.apply {
+                    x = normalizedLocation[0]
+                    y = normalizedLocation[1]
+                }
+                Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+            }
+        }
     }
 
     /**
@@ -795,14 +826,10 @@ class FreeformWindow(
                         freeformScreenWidth = tempHeight
                     }
                     refreshFreeformSize()
-                    resetScale()
+                    refreshTouchScale()
+                    refreshActionScale()
                     resizeVirtualDisplay()
-                    Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
-                        width = rootWidth
-                        height = rootHeight
-                        x = genCenterLocation()[0]
-                        y = genCenterLocation()[1]
-                    })
+                    applyLayoutCurrentState()
 
                     // 淡入动画
                     ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, 0f, 1f).apply {
@@ -818,6 +845,90 @@ class FreeformWindow(
             })
             start()
         }
+    }
+
+    private fun applyLayoutCurrentState() {
+        if (isFloating || isHidden) {
+            applyMiniLayout()
+            return
+        }
+        applyNormalLayout()
+    }
+
+    private fun applyNormalLayout() {
+        refreshScale()
+        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
+            width = rootWidth
+            height = rootHeight
+            x = genCenterLocation()[0]
+            y = genCenterLocation()[1]
+        })
+    }
+
+    private fun applyMiniLayout() {
+        val miniLocation = resolveMiniLocationAfterFreeformRotation()
+        hangUpPosition[0] = miniLocation[0] <= 0
+        hangUpPosition[1] = miniLocation[1] <= 0
+        lastFloatViewLocation = miniLocation.copyOf()
+
+        mScaleX = hangUpViewWidth / rootWidth.toFloat()
+        mScaleY = hangUpViewHeight / rootHeight.toFloat()
+        binding.freeformRoot.scaleX = 1f
+        binding.freeformRoot.scaleY = 1f
+        (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
+            topMargin = 0
+            bottomMargin = 0
+            rightMargin = 0
+        }
+        binding.cardRoot.radius = freeformCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
+
+        windowLayoutParams.apply {
+            width = hangUpViewWidth
+            height = hangUpViewHeight
+            if (isHidden) {
+                val hiddenOnRight = isHiddenOnRight()
+                x = if (hiddenOnRight) {
+                    miniLocation[0] + (hangUpViewWidth + screenPaddingX)
+                } else {
+                    miniLocation[0] - (hangUpViewWidth + screenPaddingX)
+                }
+                y = miniLocation[1]
+                updateHiddenViewLayout(hiddenOnRight, miniLocation[1])
+            } else {
+                x = miniLocation[0]
+                y = miniLocation[1]
+            }
+        }
+        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+    }
+
+    private fun resolveMiniLocationAfterFreeformRotation(): IntArray {
+        val baseLocation = when {
+            lastFloatViewLocation[0] != -1 && lastFloatViewLocation[1] != -1 -> lastFloatViewLocation.copyOf()
+            isHidden -> intArrayOf(
+                if (hangUpPosition[0]) (realScreenWidth - hangUpViewWidth - screenPaddingX) / -2
+                else (realScreenWidth - hangUpViewWidth - screenPaddingX) / 2,
+                windowLayoutParams.y
+            )
+            else -> intArrayOf(windowLayoutParams.x, windowLayoutParams.y)
+        }
+        return normalizeMiniLocation(baseLocation)
+    }
+
+    private fun isHiddenOnRight(): Boolean {
+        if (::hiddenView.isInitialized && hiddenView.isAttachedToWindow) {
+            return (hiddenView.layoutParams as? WindowManager.LayoutParams)?.x?.let { it > 0 }
+                ?: !hangUpPosition[0]
+        }
+        return !hangUpPosition[0]
+    }
+
+    private fun updateHiddenViewLayout(hiddenOnRight: Boolean, targetY: Int) {
+        if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) return
+        val hiddenLp = hiddenView.layoutParams as? WindowManager.LayoutParams ?: return
+        hiddenLp.x = (realScreenWidth - floatingButtonWidth) / 2 * if (hiddenOnRight) 1 else -1
+        hiddenLp.y = targetY
+        Instances.windowManager.updateViewLayout(hiddenView, hiddenLp)
     }
 
     /**
@@ -1731,6 +1842,21 @@ class FreeformWindow(
             else (realScreenWidth - hangUpViewWidth - screenPaddingX) / 2,
             if (hangUpPosition[1]) (hangUpViewHeight - realScreenHeight + screenPaddingY) / 2
             else (realScreenHeight - hangUpViewHeight - screenPaddingY) / 2
+        )
+    }
+
+    /**
+     * 约束 mini 坐标到当前屏幕可用范围，避免旧方向坐标导致越界或偏移。
+     */
+    private fun normalizeMiniLocation(location: IntArray): IntArray {
+        val minX = (realScreenWidth - hangUpViewWidth - screenPaddingX) / -2
+        val maxX = (realScreenWidth - hangUpViewWidth - screenPaddingX) / 2
+        val topY = (hangUpViewHeight - realScreenHeight + screenPaddingY) / 2
+        val bottomY = (realScreenHeight - hangUpViewHeight - screenPaddingY) / 2
+
+        return intArrayOf(
+            location[0].coerceIn(min(minX, maxX), max(minX, maxX)),
+            location[1].coerceIn(min(topY, bottomY), max(topY, bottomY))
         )
     }
 
