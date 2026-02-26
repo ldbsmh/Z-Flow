@@ -1,6 +1,5 @@
 package io.relimus.zflow.xposed.hook
 
-import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -20,6 +19,7 @@ import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
+import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.ui.freeform.FreeformService
 import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.hook.utils.cast
@@ -30,6 +30,7 @@ object HookSwipeGesture {
     private const val PROGRESS_THRESHOLD = 3f
     private const val HINT_ANIM_DURATION = 150L
     private const val MINI_LAUNCH_DELAY_MS = 120L
+    private const val TARGET_PACKAGE = "io.relimus.zflow"
 
     private var hintViewRef: WeakReference<TextView>? = null
     private var hintDismissed = false
@@ -180,22 +181,23 @@ object HookSwipeGesture {
         pendingMiniLaunch?.let(mainHandler::removeCallbacks)
         pendingMiniLaunch = Runnable {
             try {
-                val broadcastIntent = Intent("io.relimus.zflow.start_freeform").apply {
-                    setPackage("io.relimus.zflow")
-                    putExtra("packageName", topComponent.packageName)
-                    putExtra("activityName", topComponent.className)
-                    putExtra("userId", userId)
-                    putExtra(FreeformService.EXTRA_TASK_ID, taskId)
-                    putExtra("miniMode", true)
+                val targetIntent = Intent(Intent.ACTION_MAIN).apply {
+                    setComponent(topComponent)
+                    setPackage(topComponent.packageName)
+                    addCategory(Intent.CATEGORY_LAUNCHER)
                 }
-                PendingIntent.getBroadcast(
-                    context,
-                    topComponent.hashCode(),
-                    broadcastIntent,
-                    PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-                ).send()
+                val serviceIntent = Intent().apply {
+                    setClassName(TARGET_PACKAGE, FreeformService::class.java.name)
+                    action = FreeformService.ACTION_START_INTENT
+                    putExtra(Intent.EXTRA_INTENT, targetIntent)
+                    putExtra(Intent.EXTRA_COMPONENT_NAME, topComponent)
+                    putExtra(Intent.EXTRA_USER, userId)
+                    putExtra(FreeformService.EXTRA_TASK_ID, taskId)
+                    putExtra(StartFreeformReceiver.EXTRA_MINI_MODE, true)
+                }
+                context.startService(serviceIntent)
             } catch (e: Throwable) {
-                XLog.e("$TAG: Failed to send mini launch broadcast", e)
+                XLog.e("$TAG: Direct service launch failed", e)
             } finally {
                 pendingMiniLaunch = null
             }

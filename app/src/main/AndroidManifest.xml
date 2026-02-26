@@ -98,7 +98,7 @@
         <service android:name=".ui.freeform.FreeformService"
             android:enabled="true"
             android:exported="true"
-            android:permission="EnableFreeform">
+            tools:ignore="ExportedService">
             <intent-filter>
                 <action android:name="io.relimus.zflow.ui.freeform.FreeformService"/>
             </intent-filter>
