@@ -19,6 +19,8 @@ import android.graphics.SurfaceTexture
 import android.graphics.drawable.BitmapDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.hardware.display.VirtualDisplayConfig
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -85,6 +87,11 @@ class FreeformWindow(
         val bottomDecorRaw: Float
     )
 
+    private data class HighRefreshHint(
+        val refreshRate: Float,
+        val modeId: Int
+    )
+
     companion object {
         private const val TAG = "FreeformWindow"
         private const val WIDTH_HEIGHT_RATIO = 20f / 35f
@@ -100,6 +107,10 @@ class FreeformWindow(
         private const val SUNOS_LEASH_RETRY_DELAY = 16L
         private const val SUNOS_FINISH_HOLD_DELAY = 64L
         private const val MINI_TASK_MOVE_DELAY_MS = 120L
+        private const val HIGH_REFRESH_THRESHOLD = 60.5f
+        private const val VIRTUAL_DISPLAY_FLAGS = DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION or
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
+            (1 shl 10) // VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 << 10
         private val SUNOS_EXPAND_INTERPOLATOR = PathInterpolator(0.2f, 0f, 0f, 1f)
     }
 
@@ -414,6 +425,77 @@ class FreeformWindow(
         return context.resources.displayMetrics.densityDpi
     }
 
+    private fun resolveHighRefreshHint(): HighRefreshHint? {
+        val defaultDisplay = Instances.displayManager.getDisplay(Display.DEFAULT_DISPLAY) ?: return null
+        val currentMode = defaultDisplay.mode ?: return null
+
+        val bestMode = defaultDisplay.supportedModes
+            .filter {
+                it.physicalWidth == currentMode.physicalWidth &&
+                    it.physicalHeight == currentMode.physicalHeight
+            }
+            .maxByOrNull { it.refreshRate } ?: currentMode
+
+        if (bestMode.refreshRate <= HIGH_REFRESH_THRESHOLD) return null
+        return HighRefreshHint(
+            refreshRate = bestMode.refreshRate,
+            modeId = bestMode.modeId
+        )
+    }
+
+    private fun applyWindowRefreshHint(layoutParams: WindowManager.LayoutParams) {
+        val hint = resolveHighRefreshHint() ?: return
+        layoutParams.preferredRefreshRate = hint.refreshRate
+        layoutParams.preferredDisplayModeId = hint.modeId
+    }
+
+    private fun applySurfaceRefreshHint(surface: Surface, refreshRate: Float) {
+        if (refreshRate <= HIGH_REFRESH_THRESHOLD) return
+        try {
+            surface.setFrameRate(
+                refreshRate,
+                Surface.FRAME_RATE_COMPATIBILITY_DEFAULT,
+                Surface.CHANGE_FRAME_RATE_ALWAYS
+            )
+        } catch (e: Throwable) {
+            XLog.w("$TAG: Failed to set surface frame rate hint, rate=$refreshRate", e)
+        }
+    }
+
+    @SuppressLint("WrongConstant")
+    private fun createVirtualDisplay(
+        name: String,
+        refreshRate: Float
+    ): VirtualDisplay? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                val configBuilder = VirtualDisplayConfig.Builder(
+                    name,
+                    freeformScreenWidth,
+                    freeformScreenHeight,
+                    freeformDpi
+                ).setFlags(VIRTUAL_DISPLAY_FLAGS)
+
+                if (refreshRate > HIGH_REFRESH_THRESHOLD) {
+                    configBuilder.setRequestedRefreshRate(refreshRate)
+                }
+
+                return Instances.displayManager.createVirtualDisplay(configBuilder.build())
+            } catch (e: Throwable) {
+                XLog.w("$TAG: createVirtualDisplay(config) failed, fallback to legacy API", e)
+            }
+        }
+
+        return Instances.displayManager.createVirtualDisplay(
+            name,
+            freeformScreenWidth,
+            freeformScreenHeight,
+            freeformDpi,
+            null,
+            VIRTUAL_DISPLAY_FLAGS
+        )
+    }
+
     private fun refreshScale() {
         mScaleX = freeformWidth / rootWidth.toFloat()
         mScaleY = freeformHeight / rootHeight.toFloat()
@@ -487,6 +569,7 @@ class FreeformWindow(
             x = 0
             y = 0
         }
+        applyWindowRefreshHint(windowLayoutParams)
 
         // 横屏时调整窗口位置
         if (!screenIsPortrait()) {
@@ -620,6 +703,7 @@ class FreeformWindow(
             x = location[0]
             y = location[1]
         }
+        applyWindowRefreshHint(windowLayoutParams)
 
         (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
             topMargin = 0
@@ -858,6 +942,7 @@ class FreeformWindow(
 
     private fun applyNormalLayout() {
         refreshScale()
+        applyWindowRefreshHint(windowLayoutParams)
         Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
             width = rootWidth
             height = rootHeight
@@ -883,6 +968,7 @@ class FreeformWindow(
         }
         binding.cardRoot.radius = freeformCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
 
+        applyWindowRefreshHint(windowLayoutParams)
         windowLayoutParams.apply {
             width = hangUpViewWidth
             height = hangUpViewHeight
@@ -2295,6 +2381,7 @@ class FreeformWindow(
                 x = genCenterLocation()[0]
                 y = genCenterLocation()[1]
             }
+            applyWindowRefreshHint(windowLayoutParams)
 
             // 重置 cardRoot margin
             (binding.cardRoot.layoutParams as ConstraintLayout.LayoutParams).apply {
@@ -2364,7 +2451,12 @@ class FreeformWindow(
             binding.textureView.surfaceTexture?.let { surfaceTexture ->
                 if (::virtualDisplay.isInitialized) {
                     surfaceTexture.setDefaultBufferSize(freeformScreenWidth, freeformScreenHeight)
-                    virtualDisplay.surface = Surface(surfaceTexture)
+                    val virtualSurface = Surface(surfaceTexture)
+                    applySurfaceRefreshHint(
+                        virtualSurface,
+                        resolveHighRefreshHint()?.refreshRate ?: 0f
+                    )
+                    virtualDisplay.surface = virtualSurface
                 }
             }
 
@@ -2480,17 +2572,20 @@ class FreeformWindow(
     @SuppressLint("WrongConstant")
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
         try {
-            val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION or
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
-                    (1 shl 10) // VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 << 10
-            virtualDisplay = Instances.displayManager.createVirtualDisplay(
+            val highRefreshHint = resolveHighRefreshHint()
+            if (highRefreshHint != null) {
+                XLog.d("$TAG: High refresh hint selected, rate=${highRefreshHint.refreshRate}, modeId=${highRefreshHint.modeId}")
+            } else {
+                XLog.d("$TAG: High refresh hint unavailable, fallback to system default refresh")
+            }
+            val createdDisplay = createVirtualDisplay(
                 "ZFlow@${System.currentTimeMillis()}",
-                freeformScreenWidth,
-                freeformScreenHeight,
-                freeformDpi,
-                null,
-                flags
-            )
+                highRefreshHint?.refreshRate ?: 0f
+            ) ?: run {
+                XLog.e("$TAG: DisplayManager returned null VirtualDisplay")
+                return
+            }
+            virtualDisplay = createdDisplay
             displayId = virtualDisplay.display.displayId
 
             // Configure IME policy
@@ -2506,7 +2601,12 @@ class FreeformWindow(
 
             // Attach surface
             surface.setDefaultBufferSize(freeformScreenWidth, freeformScreenHeight)
-            virtualDisplay.surface = Surface(surface)
+            val virtualSurface = Surface(surface)
+            applySurfaceRefreshHint(
+                virtualSurface,
+                highRefreshHint?.refreshRate ?: 0f
+            )
+            virtualDisplay.surface = virtualSurface
 
             if (directToMini) {
                 binding.freeformRoot.scaleX = 1f
