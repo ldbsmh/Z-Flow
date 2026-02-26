@@ -7,6 +7,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import java.lang.ref.WeakReference
 import android.util.TypedValue
 import android.view.Gravity
@@ -27,9 +29,12 @@ object HookSwipeGesture {
     private const val TAG = "HookSwipeGesture"
     private const val PROGRESS_THRESHOLD = 3f
     private const val HINT_ANIM_DURATION = 150L
+    private const val MINI_LAUNCH_DELAY_MS = 120L
 
     private var hintViewRef: WeakReference<TextView>? = null
     private var hintDismissed = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingMiniLaunch: Runnable? = null
 
     fun init() {
         runCatching {
@@ -51,6 +56,8 @@ object HookSwipeGesture {
                 after {
                     val handler = it.thisObject
                     hintDismissed = false
+                    pendingMiniLaunch?.let(mainHandler::removeCallbacks)
+                    pendingMiniLaunch = null
                     runCatching {
                         val stateEndTargetSet = XposedHelpers.getStaticIntField(
                             gestureStateClass, "STATE_END_TARGET_SET"
@@ -78,22 +85,8 @@ object HookSwipeGesture {
 
                                     val recentsView = ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView")
                                     val context = XposedHelpers.callMethod(recentsView, "getContext") as Context
-                                    val broadcastIntent = Intent("io.relimus.zflow.start_freeform").apply {
-                                        setPackage("io.relimus.zflow")
-                                        putExtra("packageName", topComponent.packageName)
-                                        putExtra("activityName", topComponent.className)
-                                        putExtra("userId", userId)
-                                        putExtra(FreeformService.EXTRA_TASK_ID, taskId)
-                                        putExtra("miniMode", true)
-                                    }
-                                    PendingIntent.getBroadcast(
-                                        context,
-                                        topComponent.hashCode(),
-                                        broadcastIntent,
-                                        PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-                                    ).send()
-
                                     XposedHelpers.callMethod(gestureState, "setEndTarget", homeTarget)
+                                    scheduleMiniLaunch(context, topComponent, userId, taskId)
                                 }.onFailure { e ->
                                     XLog.e("$TAG: Failed to launch freeform", e)
                                 }
@@ -176,6 +169,39 @@ object HookSwipeGesture {
             .setDuration(HINT_ANIM_DURATION)
             .withEndAction { (view.parent as? ViewGroup)?.removeView(view) }
             .start()
+    }
+
+    private fun scheduleMiniLaunch(
+        context: Context,
+        topComponent: ComponentName,
+        userId: Int,
+        taskId: Int
+    ) {
+        pendingMiniLaunch?.let(mainHandler::removeCallbacks)
+        pendingMiniLaunch = Runnable {
+            try {
+                val broadcastIntent = Intent("io.relimus.zflow.start_freeform").apply {
+                    setPackage("io.relimus.zflow")
+                    putExtra("packageName", topComponent.packageName)
+                    putExtra("activityName", topComponent.className)
+                    putExtra("userId", userId)
+                    putExtra(FreeformService.EXTRA_TASK_ID, taskId)
+                    putExtra("miniMode", true)
+                }
+                PendingIntent.getBroadcast(
+                    context,
+                    topComponent.hashCode(),
+                    broadcastIntent,
+                    PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+                ).send()
+            } catch (e: Throwable) {
+                XLog.e("$TAG: Failed to send mini launch broadcast", e)
+            } finally {
+                pendingMiniLaunch = null
+            }
+        }.also {
+            mainHandler.postDelayed(it, MINI_LAUNCH_DELAY_MS)
+        }
     }
 
     private fun readProgress(handler: Any): Float {

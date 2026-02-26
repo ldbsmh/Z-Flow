@@ -99,6 +99,7 @@ class FreeformWindow(
         private const val SUNOS_LEASH_RETRY_MAX = 8
         private const val SUNOS_LEASH_RETRY_DELAY = 16L
         private const val SUNOS_FINISH_HOLD_DELAY = 64L
+        private const val MINI_TASK_MOVE_DELAY_MS = 120L
         private val SUNOS_EXPAND_INTERPOLATOR = PathInterpolator(0.2f, 0f, 0f, 1f)
     }
 
@@ -2518,8 +2519,22 @@ class FreeformWindow(
 
             // Prefer migrating existing task to preserve in-app runtime state.
             if (taskId > 0) {
-                XLog.d("$TAG: Move existing task to freeform, taskId=$taskId, displayId=$displayId")
-                FreeformManager.moveTaskToDisplay(taskId, displayId)
+                val moveTaskAction: () -> Unit = moveTask@{
+                    if (isDestroyed || isClosedToBack || !::virtualDisplay.isInitialized || displayId < 0) {
+                        return@moveTask
+                    }
+                    XLog.d("$TAG: Move existing task to freeform, taskId=$taskId, displayId=$displayId")
+                    FreeformManager.moveTaskToDisplay(taskId, displayId)
+                }
+                if (directToMini) {
+                    XLog.d("$TAG: Delay mini task move for transition settle, taskId=$taskId, displayId=$displayId")
+                    mainHandler.postDelayed(
+                        moveTaskAction,
+                        MINI_TASK_MOVE_DELAY_MS
+                    )
+                } else {
+                    moveTaskAction()
+                }
             } else if (componentName != null && userId >= 0) {
                 XLog.d("$TAG: Start activity on freeform display, component=$componentName, displayId=$displayId")
                 FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
