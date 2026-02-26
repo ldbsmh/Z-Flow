@@ -33,19 +33,6 @@ object HookSwipeGesture {
         val gestureEndTargetClass = loadClass("com.android.quickstep.GestureState\$GestureEndTarget")
 
         MethodFinder.fromClass(absSwipeClass)
-            .filterByName("updateSysUiFlags")
-            .first()
-            .createHook {
-                after {
-                    runCatching {
-                        if (readProgress(it.thisObject) > PROGRESS_THRESHOLD) {
-                            XposedHelpers.callMethod(it.thisObject, "performHapticFeedback")
-                        }
-                    }
-                }
-            }
-
-        MethodFinder.fromClass(absSwipeClass)
             .filterByName("initStateCallbacks")
             .first()
             .createHook {
