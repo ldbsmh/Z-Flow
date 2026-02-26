@@ -59,6 +59,7 @@ object HookSwipeGesture {
                     hintDismissed = false
                     pendingMiniLaunch?.let(mainHandler::removeCallbacks)
                     pendingMiniLaunch = null
+                    removeHint(immediate = true)
                     runCatching {
                         val stateEndTargetSet = XposedHelpers.getStaticIntField(
                             gestureStateClass, "STATE_END_TARGET_SET"
@@ -74,7 +75,7 @@ object HookSwipeGesture {
                             Runnable {
                                 runCatching {
                                     hintDismissed = true
-                                    removeHint()
+                                    removeHint(immediate = true)
                                     if (readProgress(handler) <= PROGRESS_THRESHOLD) return@Runnable
 
                                     val task = getRunningTask(handler) ?: return@Runnable
@@ -161,15 +162,28 @@ object HookSwipeGesture {
     }
 
     private fun removeHint() {
+        removeHint(immediate = false)
+    }
+
+    private fun removeHint(immediate: Boolean) {
         val view = hintViewRef?.get() ?: return
         hintViewRef = null
-        if (!view.isAttachedToWindow) return
+        val removeNow = Runnable {
+            view.animate().cancel()
+            (view.parent as? ViewGroup)?.removeView(view)
+        }
+        if (immediate || !view.isAttachedToWindow) {
+            removeNow.run()
+            return
+        }
+
         view.animate().cancel()
         view.animate()
             .alpha(0f)
             .setDuration(HINT_ANIM_DURATION)
-            .withEndAction { (view.parent as? ViewGroup)?.removeView(view) }
+            .withEndAction(removeNow)
             .start()
+        view.postDelayed(removeNow, HINT_ANIM_DURATION + 80L)
     }
 
     private fun scheduleMiniLaunch(
