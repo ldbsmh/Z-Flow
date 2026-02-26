@@ -45,8 +45,8 @@
     <dimen name="freeform_screen_width_padding">20dp</dimen>
     <dimen name="freeform_screen_height_padding">120dp</dimen>
 
-    <dimen name="floating_button_height">72dp</dimen>
-    <dimen name="floating_button_width">24dp</dimen>
+    <dimen name="floating_button_height">96dp</dimen>
+    <dimen name="floating_button_width">28dp</dimen>
 
     <!--hook launcher-->
     <dimen name="task_card_menu_option_vertical_padding">16dp</dimen>
