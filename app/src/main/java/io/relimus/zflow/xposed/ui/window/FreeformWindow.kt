@@ -1706,6 +1706,8 @@ class FreeformWindow(
 
         private var minLong = 1.1
         private var isMoved = false
+        private var hiddenMoved = false
+        private var hiddenViewDeferredRemoval = false
         private var velocityTracker: VelocityTracker? = null
 
         private fun trackMovement(event: MotionEvent) {
@@ -1719,14 +1721,15 @@ class FreeformWindow(
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouch(v: View?, event: MotionEvent): Boolean {
             // 侧边栏视图的触摸处理
-            if (v?.id == R.id.root && isHidden) {
-                hideGestureDetector.onTouchEvent(event)
+            if (isHidden) {
+                handleHiddenTouch(event)
                 return true
             }
 
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     cancelSpringAnimations()
+                    cleanupDeferredHiddenViewIfNeeded()
 
                     velocityTracker?.recycle()
                     velocityTracker = VelocityTracker.obtain()
@@ -1751,11 +1754,16 @@ class FreeformWindow(
                             Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
                         }
 
+                        if (tryEnterHiddenFromMiniDrag(event)) {
+                            return true
+                        }
+
                         moveStartX = event.rawX
                         moveStartY = event.rawY
                     }
                 }
                 MotionEvent.ACTION_UP -> {
+                    cleanupDeferredHiddenViewIfNeeded()
                     trackMovement(event)
                     velocityTracker?.computeCurrentVelocity(1000,
                         ViewConfiguration.get(context).scaledMaximumFlingVelocity.toFloat())
@@ -1823,40 +1831,10 @@ class FreeformWindow(
                             AnimatorSet().apply {
                                 playTogether(moveViewAnim(windowCoordinate, location))
                                 addListener(
-                                    onStart = {
-                                        isHidden = true
-                                        val inflateContext = try {
-                                            val moduleContext = context.createPackageContext(
-                                                BuildConfig.APPLICATION_ID,
-                                                Context.CONTEXT_IGNORE_SECURITY or Context.CONTEXT_INCLUDE_CODE
-                                            )
-                                            CommonContextWrapper.createAppCompatContext(moduleContext)
-                                        } catch (e: Exception) {
-                                            XLog.e("$TAG: Failed to create module context for inflation", e)
-                                            context
-                                        }
-
-                                        hiddenView = LayoutInflater.from(inflateContext).inflate(R.layout.view_floating_button, null, false)
-                                        hiddenView.setOnTouchListener(this@FloatViewTouchListener)
-                                        if (position == 1) {
-                                            hiddenView.findViewById<View>(R.id.backgroundView).background =
-                                                ContextCompat.getDrawable(inflateContext, R.drawable.floating_button_bg_right)
-                                        }
-
-                                        Instances.windowManager.addView(hiddenView, WindowManager.LayoutParams().apply {
-                                            x = (realScreenWidth - floatingButtonWidth) / 2 * position
-                                            y = location[1]
-                                            width = floatingButtonWidth
-                                            height = floatingButtonHeight
-                                            type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                                            format = PixelFormat.TRANSLUCENT
-                                            flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                                                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                                                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                                        })
-                                    },
                                     onEnd = {
+                                        isHidden = true
+                                        ensureHiddenViewAttached(position, location[1])
+                                        playHiddenRevealAnimation(position)
                                         isMoved = false
                                     }
                                 )
@@ -1892,6 +1870,7 @@ class FreeformWindow(
                     }
                 }
                 MotionEvent.ACTION_CANCEL -> {
+                    cleanupDeferredHiddenViewIfNeeded()
                     velocityTracker?.recycle()
                     velocityTracker = null
                     isMoved = false
@@ -1899,6 +1878,331 @@ class FreeformWindow(
                 }
             }
             return true
+        }
+
+        private fun miniEdgeX(onLeft: Boolean): Int {
+            return if (onLeft) {
+                (realScreenWidth - hangUpViewWidth - screenPaddingX) / -2
+            } else {
+                (realScreenWidth - hangUpViewWidth - screenPaddingX) / 2
+            }
+        }
+
+        private fun miniHiddenCollapseDistance(): Int {
+            return hangUpViewWidth + screenPaddingX
+        }
+
+        private fun hiddenToMiniTriggerDistancePx(): Int {
+            val density = context.resources.displayMetrics.density
+            return (density * 10f).roundToInt().coerceAtLeast(8)
+        }
+
+        private fun miniHiddenCollapsedX(onLeft: Boolean): Int {
+            val edgeX = miniEdgeX(onLeft)
+            val direction = if (onLeft) -1 else 1
+            return edgeX + miniHiddenCollapseDistance() * direction
+        }
+
+        private fun clampMiniY(targetY: Int): Int {
+            val topY = (hangUpViewHeight - realScreenHeight + screenPaddingY) / 2
+            val bottomY = (realScreenHeight - hangUpViewHeight - screenPaddingY) / 2
+            return targetY.coerceIn(min(topY, bottomY), max(topY, bottomY))
+        }
+
+        private fun resolveHiddenInflateContext(): Context {
+            return try {
+                val moduleContext = context.createPackageContext(
+                    BuildConfig.APPLICATION_ID,
+                    Context.CONTEXT_IGNORE_SECURITY or Context.CONTEXT_INCLUDE_CODE
+                )
+                CommonContextWrapper.createAppCompatContext(moduleContext)
+            } catch (e: Exception) {
+                XLog.e("$TAG: Failed to create module context for inflation", e)
+                context
+            }
+        }
+
+        private fun ensureHiddenViewAttached(position: Int, targetY: Int) {
+            val hiddenX = (realScreenWidth - floatingButtonWidth) / 2 * position
+            val drawableRes = if (position == 1) {
+                R.drawable.floating_button_bg_right
+            } else {
+                R.drawable.floating_button_bg
+            }
+
+            if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) {
+                val inflateContext = resolveHiddenInflateContext()
+                hiddenView = LayoutInflater.from(inflateContext)
+                    .inflate(R.layout.view_floating_button, null, false)
+                hiddenView.alpha = 0f
+                hiddenView.setOnTouchListener(this@FloatViewTouchListener)
+                hiddenView.findViewById<View>(R.id.backgroundView).background =
+                    ContextCompat.getDrawable(inflateContext, drawableRes)
+                Instances.windowManager.addView(hiddenView, WindowManager.LayoutParams().apply {
+                    x = hiddenX
+                    y = targetY
+                    width = floatingButtonWidth
+                    height = floatingButtonHeight
+                    type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    format = PixelFormat.TRANSLUCENT
+                    flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                })
+                return
+            }
+
+            hiddenView.visibility = View.VISIBLE
+            hiddenView.setOnTouchListener(this@FloatViewTouchListener)
+            hiddenView.findViewById<View>(R.id.backgroundView).background =
+                ContextCompat.getDrawable(hiddenView.context, drawableRes)
+
+            val hiddenLp = hiddenView.layoutParams as? WindowManager.LayoutParams ?: return
+            hiddenLp.x = hiddenX
+            hiddenLp.y = targetY
+            Instances.windowManager.updateViewLayout(hiddenView, hiddenLp)
+        }
+
+        private fun cleanupDeferredHiddenViewIfNeeded() {
+            if (!hiddenViewDeferredRemoval) return
+            hiddenViewDeferredRemoval = false
+            if (!::hiddenView.isInitialized) return
+
+            if (!isHidden && hiddenView.isAttachedToWindow) {
+                hiddenView.setOnTouchListener(null)
+                Instances.windowManager.removeView(hiddenView)
+            }
+        }
+
+        private fun playHiddenRevealAnimation(position: Int) {
+            if (!::hiddenView.isInitialized) return
+
+            fun startRevealNow() {
+                if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) return
+
+                val fromInsideOffset = floatingButtonWidth.toFloat()
+                val startTranslationX = if (position > 0) fromInsideOffset else -fromInsideOffset
+
+                hiddenView.animate().cancel()
+                hiddenView.alpha = 0f
+                hiddenView.translationX = startTranslationX
+                hiddenView.animate()
+                    .alpha(1f)
+                    .translationX(0f)
+                    .setDuration(180)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+
+            if (hiddenView.isAttachedToWindow) {
+                startRevealNow()
+                return
+            }
+
+            // addView 后首次可能尚未 attached，延后到下一帧启动 reveal，避免 alpha 卡在 0。
+            hiddenView.post {
+                if (!::hiddenView.isInitialized) return@post
+                if (!isHidden) return@post
+                if (hiddenView.isAttachedToWindow) {
+                    startRevealNow()
+                } else {
+                    hiddenView.alpha = 1f
+                    hiddenView.translationX = 0f
+                }
+            }
+        }
+
+        private fun snapHiddenBackToCollapsed(onLeft: Boolean) {
+            val collapsedX = miniHiddenCollapsedX(onLeft)
+            val fromX = windowLayoutParams.x
+            if (fromX == collapsedX) return
+
+            ValueAnimator.ofInt(fromX, collapsedX).apply {
+                duration = 120
+                interpolator = DecelerateInterpolator()
+                addUpdateListener { animator ->
+                    windowLayoutParams.x = animator.animatedValue as Int
+                    if (binding.root.isAttachedToWindow) {
+                        Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                    }
+                }
+                start()
+            }
+        }
+
+        private fun switchMiniToHiddenWithoutAnimation(position: Int, targetY: Int) {
+            val clampedY = clampMiniY(targetY)
+            val hiddenOnRight = position > 0
+            val onLeft = !hiddenOnRight
+            val edgeX = miniEdgeX(onLeft)
+            val collapsedX = miniHiddenCollapsedX(onLeft)
+
+            hangUpPosition[0] = onLeft
+            hangUpPosition[1] = clampedY <= 0
+            lastFloatViewLocation = intArrayOf(edgeX, clampedY)
+
+            ensureHiddenViewAttached(position, clampedY)
+            playHiddenRevealAnimation(position)
+            hiddenViewDeferredRemoval = false
+
+            windowLayoutParams.x = collapsedX
+            windowLayoutParams.y = clampedY
+            if (binding.root.isAttachedToWindow) {
+                Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+            }
+
+            isHidden = true
+        }
+
+        private fun switchHiddenToMiniWithRevealAnimation(hiddenOnRight: Boolean, targetY: Int) {
+            val clampedY = clampMiniY(targetY)
+            val onLeft = !hiddenOnRight
+            val edgeX = miniEdgeX(onLeft)
+            val revealX = miniHiddenCollapsedX(onLeft)
+
+            hangUpPosition[0] = onLeft
+            hangUpPosition[1] = clampedY <= 0
+            lastFloatViewLocation = intArrayOf(edgeX, clampedY)
+
+            windowLayoutParams.x = revealX
+            windowLayoutParams.y = clampedY
+            if (binding.root.isAttachedToWindow) {
+                Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+            }
+
+            isHidden = false
+            if (::hiddenView.isInitialized && hiddenView.isAttachedToWindow) {
+                hiddenView.animate().cancel()
+                hiddenView.alpha = 0f
+                hiddenView.translationX = 0f
+                hiddenViewDeferredRemoval = true
+            } else {
+                hiddenViewDeferredRemoval = false
+            }
+
+            binding.freeformRoot.animate().cancel()
+            binding.freeformRoot.alpha = 0.9f
+            binding.freeformRoot.scaleX = 0.96f
+            binding.freeformRoot.scaleY = 0.96f
+            binding.freeformRoot.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(120)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        }
+
+        private fun tryEnterHiddenFromMiniDrag(event: MotionEvent): Boolean {
+            val onLeft = windowLayoutParams.x <= 0
+            val collapsedX = miniHiddenCollapsedX(onLeft)
+            val reachedCollapsedEdge = if (onLeft) {
+                windowLayoutParams.x <= collapsedX
+            } else {
+                windowLayoutParams.x >= collapsedX
+            }
+            if (!reachedCollapsedEdge) return false
+
+            switchMiniToHiddenWithoutAnimation(if (onLeft) -1 else 1, windowLayoutParams.y)
+            hiddenMoved = true
+            moveStartX = event.rawX
+            moveStartY = event.rawY
+            isMoved = false
+            return true
+        }
+
+        private fun handleHiddenTouch(event: MotionEvent) {
+            if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) {
+                isHidden = false
+                hiddenViewDeferredRemoval = false
+                return
+            }
+            val hiddenLp = hiddenView.layoutParams as? WindowManager.LayoutParams ?: return
+
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    cancelSpringAnimations()
+                    moveStartX = event.rawX
+                    moveStartY = event.rawY
+                    hiddenMoved = false
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    movedX = event.rawX - moveStartX
+                    movedY = event.rawY - moveStartY
+
+                    if (abs(movedX) > minLong || abs(movedY) > minLong) {
+                        hiddenMoved = true
+
+                        val hiddenOnRight = hiddenLp.x > 0
+                        val onLeft = !hiddenOnRight
+                        val edgeX = miniEdgeX(onLeft)
+                        val collapsedX = miniHiddenCollapsedX(onLeft)
+                        val nextCollapsedX = windowLayoutParams.x + movedX.toInt()
+                        val targetY = clampMiniY(windowLayoutParams.y + movedY.toInt())
+
+                        val inwardDistance = if (hiddenOnRight) {
+                            collapsedX - nextCollapsedX
+                        } else {
+                            nextCollapsedX - collapsedX
+                        }
+                        val draggingTowardMini =
+                            inwardDistance >= hiddenToMiniTriggerDistancePx()
+
+                        if (draggingTowardMini) {
+                            switchHiddenToMiniWithRevealAnimation(hiddenOnRight, targetY)
+
+                            isMoved = true
+                            hiddenMoved = false
+                            moveStartX = event.rawX
+                            moveStartY = event.rawY
+                            return
+                        }
+
+                        val targetX = nextCollapsedX
+                            .coerceIn(min(edgeX, collapsedX), max(edgeX, collapsedX))
+                        windowLayoutParams.x = targetX
+                        windowLayoutParams.y = targetY
+                        hiddenLp.y = targetY
+                        Instances.windowManager.updateViewLayout(hiddenView, hiddenLp)
+                        if (binding.root.isAttachedToWindow) {
+                            Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams)
+                        }
+
+                        hangUpPosition[0] = hiddenLp.x <= 0
+                        hangUpPosition[1] = targetY <= 0
+                        lastFloatViewLocation = intArrayOf(
+                            miniEdgeX(hangUpPosition[0]),
+                            targetY
+                        )
+
+                        moveStartX = event.rawX
+                        moveStartY = event.rawY
+                    }
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    if (!hiddenMoved) {
+                        hiddenViewToFloatView()
+                        hiddenMoved = false
+                        return
+                    }
+
+                    val hiddenOnRight = hiddenLp.x > 0
+                    val onLeft = !hiddenOnRight
+                    snapHiddenBackToCollapsed(onLeft)
+                    hiddenMoved = false
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    if (isHidden) {
+                        val onLeft = (hiddenLp.x <= 0)
+                        snapHiddenBackToCollapsed(onLeft)
+                    }
+                    hiddenMoved = false
+                }
+            }
         }
     }
 
@@ -1908,14 +2212,6 @@ class FreeformWindow(
     private val hangUpGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             floatViewToNormalView()
-            return true
-        }
-    })
-
-    // 侧边栏点击手势 - 点击恢复到悬浮模式
-    private val hideGestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-        override fun onSingleTapUp(e: MotionEvent): Boolean {
-            hiddenViewToFloatView()
             return true
         }
     })
@@ -2017,7 +2313,10 @@ class FreeformWindow(
         )
 
         AnimatorSet().apply {
-            playTogether(moveViewAnim(windowCoordinate, location))
+            playTogether(
+                moveViewAnim(windowCoordinate, location),
+                ObjectAnimator.ofFloat(binding.freeformRoot, View.ALPHA, binding.freeformRoot.alpha, 1f)
+            )
             addListener(
                 onStart = {
                     hiddenView.setOnTouchListener(null)
@@ -2152,6 +2451,7 @@ class FreeformWindow(
             }
         }
         isHidden = false
+        binding.freeformRoot.alpha = 1f
         floatViewToNormalViewInternal()
     }
 
