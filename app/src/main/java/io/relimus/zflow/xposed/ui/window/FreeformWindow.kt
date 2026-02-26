@@ -714,7 +714,10 @@ class FreeformWindow(
 
         initFloatBar()
         binding.bottomBar.root.alpha = 0f
-        binding.lottieView.alpha = 0f
+        initFinish = false
+        updateFrameCount = 0
+        binding.lottieView.alpha = 1f
+        binding.lottieView.playAnimation()
         binding.textureView.alpha = 0f
         binding.freeformRoot.alpha = 1f
         binding.freeformRoot.scaleX = 1f
