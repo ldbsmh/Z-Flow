@@ -4,7 +4,15 @@ import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import java.lang.ref.WeakReference
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
 import de.robv.android.xposed.XposedHelpers
 import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
@@ -18,6 +26,10 @@ object HookSwipeGesture {
 
     private const val TAG = "HookSwipeGesture"
     private const val PROGRESS_THRESHOLD = 3f
+    private const val HINT_ANIM_DURATION = 150L
+
+    private var hintViewRef: WeakReference<TextView>? = null
+    private var hintDismissed = false
 
     fun init() {
         runCatching {
@@ -38,6 +50,7 @@ object HookSwipeGesture {
             .createHook {
                 after {
                     val handler = it.thisObject
+                    hintDismissed = false
                     runCatching {
                         val stateEndTargetSet = XposedHelpers.getStaticIntField(
                             gestureStateClass, "STATE_END_TARGET_SET"
@@ -52,6 +65,8 @@ object HookSwipeGesture {
                             stateEndTargetSet,
                             Runnable {
                                 runCatching {
+                                    hintDismissed = true
+                                    removeHint()
                                     if (readProgress(handler) <= PROGRESS_THRESHOLD) return@Runnable
 
                                     val task = getRunningTask(handler) ?: return@Runnable
@@ -89,6 +104,78 @@ object HookSwipeGesture {
                     }
                 }
             }
+
+        runCatching {
+            MethodFinder.fromClass(absSwipeClass)
+                .filterByName("updateSysUiFlags")
+                .first()
+                .createHook {
+                    after {
+                        val handler = it.thisObject
+                        val progress = readProgress(handler)
+                        if (progress >= PROGRESS_THRESHOLD && hintViewRef?.get() == null && !hintDismissed) {
+                            showHint(handler)
+                        } else if (progress < PROGRESS_THRESHOLD && hintViewRef?.get() != null) {
+                            removeHint()
+                        }
+                    }
+                }
+        }.onFailure {
+            XLog.d("$TAG: updateSysUiFlags hook failed", it)
+        }
+    }
+
+    private fun showHint(handler: Any) {
+        runCatching {
+            val recentsView = ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView")
+                as? View ?: return
+            val parent = recentsView.parent as? ViewGroup ?: return
+            val context = recentsView.context
+            val dp = context.resources.displayMetrics.density
+
+            val tv = TextView(context).apply {
+                text = "松手切换为小窗"
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                gravity = Gravity.CENTER
+                val hPad = (16 * dp).toInt()
+                val vPad = (8 * dp).toInt()
+                setPadding(hPad, vPad, hPad, vPad)
+                background = GradientDrawable().apply {
+                    setColor(0xCC000000.toInt())
+                    cornerRadius = 48 * dp
+                }
+                alpha = 0f
+            }
+
+            val lp = ViewGroup.MarginLayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (48 * dp).toInt()
+            }
+
+            parent.addView(tv, lp)
+            tv.post {
+                tv.translationX = (parent.width - tv.width) / 2f
+                tv.animate().alpha(1f).setDuration(HINT_ANIM_DURATION).start()
+            }
+            hintViewRef = WeakReference(tv)
+        }.onFailure {
+            XLog.d("$TAG: showHint failed", it)
+        }
+    }
+
+    private fun removeHint() {
+        val view = hintViewRef?.get() ?: return
+        hintViewRef = null
+        if (!view.isAttachedToWindow) return
+        view.animate().cancel()
+        view.animate()
+            .alpha(0f)
+            .setDuration(HINT_ANIM_DURATION)
+            .withEndAction { (view.parent as? ViewGroup)?.removeView(view) }
+            .start()
     }
 
     private fun readProgress(handler: Any): Float {
