@@ -241,6 +241,9 @@ class FreeformWindow(
     private val barHeight: Float = context.resources.getDimension(R.dimen.bottom_bar_height_flyme)
     private val freeformShadow: Float = context.resources.getDimension(R.dimen.freeform_shadow)
     private val freeformCornerRadius: Float = context.resources.getDimension(R.dimen.freeform_corner_radius)
+    private val freeformCornerRadiusLand: Float = context.resources.getDimension(R.dimen.freeform_corner_radius_landscape)
+    private val effectiveCornerRadius: Float
+        get() = if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE && screenIsPortrait()) freeformCornerRadiusLand else freeformCornerRadius
 
     // 侧边栏按钮尺寸 - 缓存避免在动画回调中访问资源导致崩溃
     private val floatingButtonWidth: Int = context.resources.getDimension(R.dimen.floating_button_width).toInt()
@@ -724,7 +727,7 @@ class FreeformWindow(
             bottomMargin = 0
             rightMargin = 0
         }
-        binding.cardRoot.radius = freeformCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
+        binding.cardRoot.radius = effectiveCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
 
         initFloatBar()
         binding.bottomBar.root.alpha = 0f
@@ -959,6 +962,7 @@ class FreeformWindow(
 
     private fun applyNormalLayout() {
         refreshScale()
+        binding.cardRoot.radius = effectiveCornerRadius
         applyWindowRefreshHint(windowLayoutParams)
         Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
             width = rootWidth
@@ -983,7 +987,7 @@ class FreeformWindow(
             bottomMargin = 0
             rightMargin = 0
         }
-        binding.cardRoot.radius = freeformCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
+        binding.cardRoot.radius = effectiveCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
 
         applyWindowRefreshHint(windowLayoutParams)
         windowLayoutParams.apply {
@@ -1389,7 +1393,7 @@ class FreeformWindow(
                                                         if (!binding.root.isAttachedToWindow) return@addListener
                                                         mScaleX = scaleX
                                                         mScaleY = scaleY
-                                                        binding.cardRoot.radius = freeformCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
+                                                        binding.cardRoot.radius = effectiveCornerRadius * (hangUpViewWidth / rootWidth.toFloat())
                                                         Instances.windowManager.updateViewLayout(binding.root, windowLayoutParams.apply {
                                                             height = hangUpViewHeight
                                                             width = hangUpViewWidth
@@ -2590,7 +2594,7 @@ class FreeformWindow(
                         height = rootHeight
                         width = rootWidth
                     })
-                    binding.cardRoot.radius = freeformCornerRadius
+                    binding.cardRoot.radius = effectiveCornerRadius
                 },
                 onEnd = {
                     isAnimating = false
@@ -2739,7 +2743,7 @@ class FreeformWindow(
                     rightMargin = barHeight.roundToInt()
                 }
             }
-            binding.cardRoot.radius = freeformCornerRadius
+            binding.cardRoot.radius = effectiveCornerRadius
 
             // 重新初始化控制栏布局
             initFloatBar()
