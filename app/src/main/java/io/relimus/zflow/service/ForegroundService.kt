@@ -1,6 +1,5 @@
 package io.relimus.zflow.service
 
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,10 +8,12 @@ import android.app.Service
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.Display
@@ -22,6 +23,7 @@ import android.view.MotionEvent
 import android.view.Surface
 import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.core.content.edit
 import androidx.core.net.toUri
@@ -30,7 +32,8 @@ import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.ui.floating.ChooseAppFloatingView
 import io.relimus.zflow.ui.floating.FloatingActivity
-import io.relimus.zflow.ui.freeform.FreeformService
+import io.relimus.zflow.utils.cast
+import io.relimus.zflow.xposed.services.FreeformService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -115,7 +118,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
                             initConfig()
                             try {
                                 chooseAppFloatingView.onScreenRotationChanged(screenRotation)
-                            } catch (e: Exception) {}
+                            } catch (_: Exception) {}
                         }
                     }
                 }
@@ -133,13 +136,14 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
         sp = getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
         sp.registerOnSharedPreferenceChangeListener(this)
         if (sp.getInt("service_type", KeepAliveService.SERVICE_TYPE) == SERVICE_TYPE) {
+            isRunning = true
             registerReceiver(startFreeformReceiver, IntentFilter("io.relimus.zflow.start_freeform"), RECEIVER_EXPORTED)
 
-            displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
+            displayManager = getSystemService(DISPLAY_SERVICE).cast()
             displayManager.registerDisplayListener(displayListener, null)
             defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
 
-            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            windowManager = getSystemService(WINDOW_SERVICE).cast()
             windowLayoutParams = WindowManager.LayoutParams()
 
             gestureDetector = GestureDetector(this, this)
@@ -158,7 +162,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE).cast<NotificationManager>()
         val notificationIntent = Intent(this, FloatingActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE)
         val builder = Notification.Builder(this.applicationContext,
@@ -181,12 +185,17 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
         val notification = builder.build()
         notification.flags = Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR
 
-        startForeground(3, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(3, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(3, notification)
+        }
 
         return START_STICKY
     }
 
     override fun onDestroy() {
+        isRunning = false
         super.onDestroy()
         displayManager.unregisterDisplayListener(displayListener)
         if (isShowingFloating) removeFloating()
@@ -202,7 +211,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
      */
     private fun initConfig() {
         config = getFloatingConfig()
-        if (getBooleanSp("show_floating", false) && !isShowingFloating && !isShowingChooseApp) {
+        if (getBooleanSp("show_floating") && !isShowingFloating && !isShowingChooseApp) {
             showFloating()
         }
     }
@@ -210,7 +219,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         when(key) {
             "show_floating" -> {
-                if (getBooleanSp(key, false) && !isShowingFloating && !isShowingChooseApp) {
+                if (getBooleanSp(key) && !isShowingFloating && !isShowingChooseApp) {
                     initConfig()
                 } else {
                     removeFloating()
@@ -238,14 +247,14 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
                             floatView,
                             windowLayoutParams.apply { alpha = config.alpha }
                         )
-                    }catch (e: Exception) {}
+                    }catch (_: Exception) {}
                 }
             }
         }
     }
 
-    private fun getBooleanSp(key: String, default: Boolean): Boolean {
-        return sp.getBoolean(key, default)
+    private fun getBooleanSp(key: String): Boolean {
+        return sp.getBoolean(key, false)
     }
 
     private fun getIntSp(key: String, default: Int): Int {
@@ -258,8 +267,8 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
 
     private fun showFloating() {
         floatView =
-            if (config.positionX == 1) LayoutInflater.from(this).inflate(R.layout.view_floating_button_right, null, false)
-            else LayoutInflater.from(this).inflate(R.layout.view_floating_button_left, null, false)
+            if (config.positionX == 1) LayoutInflater.from(this).inflate(R.layout.view_floating_button_right, FrameLayout(this), false)
+            else LayoutInflater.from(this).inflate(R.layout.view_floating_button_left, FrameLayout(this), false)
         val root = floatView.findViewById<View>(R.id.root)
 
         root.setOnTouchListener(this)
@@ -294,7 +303,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
                 startActivity(
                     intent
                 )
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 Toast.makeText(this, getString(R.string.request_overlay_permission_fail), Toast.LENGTH_LONG).show()
             }
         }
@@ -304,7 +313,7 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
     private fun removeFloating() {
         try {
             windowManager.removeViewImmediate(floatView)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
 
         }
         isShowingFloating = false
@@ -337,7 +346,6 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
 
     //按下时的坐标
     private var lastY = -1f
-    @SuppressLint("ClickableViewAccessibility")
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
         when(event.action) {
@@ -355,6 +363,8 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
                 if (touchMode == SCROLL) {
                     if (screenRotation == Configuration.ORIENTATION_PORTRAIT) setIntSp("floating_position_portrait_y", config.positionPortraitY)
                     else setIntSp("floating_position_landscape_y", config.positionLandscapeY)
+                } else {
+                    v.performClick()
                 }
                 touchMode = 0
             }
@@ -402,16 +412,17 @@ class ForegroundService : Service(), SharedPreferences.OnSharedPreferenceChangeL
 
     override fun onChooseAppWindowRemove() {
         isShowingChooseApp = false
-        if (getBooleanSp("show_floating", false) && !isShowingFloating) {
+        if (getBooleanSp("show_floating") && !isShowingFloating) {
             showFloating()
         }
     }
 
     companion object {
-        private const val TAG = "ForegroundService"
         private const val SCROLL = 1
         private const val CHANNEL_ID = "CHANNEL_ID_SUNSHINE_FREEFORM_FOREGROUND"
         const val SERVICE_TYPE = 1
+        var isRunning = false
+            private set
     }
 
     /**

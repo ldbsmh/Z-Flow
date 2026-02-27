@@ -14,7 +14,6 @@ import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.ui.main.MainActivity
 import io.relimus.zflow.ui.permission.PermissionActivity
 import io.relimus.zflow.utils.PermissionUtils
-import io.relimus.zflow.utils.ServiceUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -66,7 +65,7 @@ class SplashActivity : AppCompatActivity() {
     private fun checkPermission(): Boolean {
         when(viewModel.getIntSp("service_type", KeepAliveService.SERVICE_TYPE)) {
             ForegroundService.SERVICE_TYPE -> {
-                if (!ServiceUtils.isServiceWork(this, "io.relimus.zflow.service.ForegroundService")) {
+                if (!ForegroundService.isRunning) {
                     startForegroundService(Intent(this, ForegroundService::class.java))
                 }
             }

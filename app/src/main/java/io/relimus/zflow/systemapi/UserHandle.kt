@@ -1,6 +1,7 @@
 package io.relimus.zflow.systemapi
 
 import android.os.UserHandle
+import io.relimus.zflow.utils.cast
 
 /**
  * @author sunshine
@@ -13,7 +14,7 @@ object UserHandle {
      */
     fun getUserId(userHandle: UserHandle, uid: Int): Int {
         return try {
-            userHandle::class.java.getMethod("getUserId", Int::class.javaPrimitiveType).invoke(userHandle, uid) as Int
+            userHandle::class.java.getMethod("getUserId", Int::class.javaPrimitiveType).invoke(userHandle, uid).cast()
         } catch (_: Exception) {
             0
         }
@@ -23,7 +24,7 @@ object UserHandle {
         return try {
             val mHandleField = userHandle::class.java.getDeclaredField("mHandle")
             mHandleField.isAccessible = true
-            mHandleField.get(userHandle) as Int
+            mHandleField.get(userHandle).cast()
         } catch (e: Exception) {
             e.printStackTrace()
             0

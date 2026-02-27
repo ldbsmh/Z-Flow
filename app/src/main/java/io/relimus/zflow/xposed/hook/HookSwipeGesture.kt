@@ -20,9 +20,9 @@ import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
 import io.relimus.zflow.broadcast.StartFreeformReceiver
-import io.relimus.zflow.ui.freeform.FreeformService
+import io.relimus.zflow.xposed.services.FreeformService
 import io.relimus.zflow.xposed.hook.utils.XLog
-import io.relimus.zflow.xposed.hook.utils.cast
+import io.relimus.zflow.utils.cast
 
 object HookSwipeGesture {
 
@@ -80,13 +80,13 @@ object HookSwipeGesture {
 
                                     val task = getRunningTask(handler) ?: return@Runnable
                                     val topComponent = XposedHelpers.callMethod(task, "getTopComponent")
-                                        as? ComponentName ?: return@Runnable
+                                        .cast<ComponentName?>() ?: return@Runnable
                                     val key = XposedHelpers.getObjectField(task, "key")
                                     val userId = XposedHelpers.getIntField(key, "userId")
                                     val taskId = resolveTaskId(task, key)
 
                                     val recentsView = ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView")
-                                    val context = XposedHelpers.callMethod(recentsView, "getContext") as Context
+                                    val context = XposedHelpers.callMethod(recentsView, "getContext").cast<Context>()
                                     XposedHelpers.callMethod(gestureState, "setEndTarget", homeTarget)
                                     scheduleMiniLaunch(context, topComponent, userId, taskId)
                                 }.onFailure { e ->
@@ -123,8 +123,8 @@ object HookSwipeGesture {
     private fun showHint(handler: Any) {
         runCatching {
             val recentsView = ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView")
-                as? View ?: return
-            val parent = recentsView.parent as? ViewGroup ?: return
+                .cast<View?>() ?: return
+            val parent = recentsView.parent.cast<ViewGroup?>() ?: return
             val context = recentsView.context
             val dp = context.resources.displayMetrics.density
 
@@ -170,7 +170,7 @@ object HookSwipeGesture {
         hintViewRef = null
         val removeNow = Runnable {
             view.animate().cancel()
-            (view.parent as? ViewGroup)?.removeView(view)
+            (view.parent.cast<ViewGroup?>())?.removeView(view)
         }
         if (immediate || !view.isAttachedToWindow) {
             removeNow.run()
@@ -196,7 +196,7 @@ object HookSwipeGesture {
         pendingMiniLaunch = Runnable {
             try {
                 val targetIntent = Intent(Intent.ACTION_MAIN).apply {
-                    setComponent(topComponent)
+                    component = topComponent
                     setPackage(topComponent.packageName)
                     addCategory(Intent.CATEGORY_LAUNCHER)
                 }
@@ -222,7 +222,7 @@ object HookSwipeGesture {
 
     private fun readProgress(handler: Any): Float {
         val shift = ObjectUtil.getObjectUntilSuperclass(handler, "mCurrentShift") ?: return 0f
-        return ObjectUtil.getObject(shift, "value").cast<Float>()
+        return ObjectUtil.getObject(shift, "value").cast()
     }
 
     private fun getRunningTask(handler: Any): Any? {

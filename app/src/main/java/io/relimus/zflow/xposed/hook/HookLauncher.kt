@@ -20,8 +20,8 @@ import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHooks
 import io.relimus.zflow.app.ZFlow
-import io.relimus.zflow.ui.freeform.FreeformService
-import io.relimus.zflow.xposed.hook.utils.cast
+import io.relimus.zflow.xposed.services.FreeformService
+import io.relimus.zflow.utils.cast
 
 object HookLauncher {
 
@@ -48,7 +48,7 @@ object HookLauncher {
                     if (shortcuts.isEmpty()) return@after
 
                     val itemInfo = XposedHelpers.getObjectField(shortcuts[0], "mItemInfo")
-                    val topComponent = XposedHelpers.callMethod(itemInfo, "getTargetComponent") as? ComponentName ?: return@after
+                    val topComponent = XposedHelpers.callMethod(itemInfo, "getTargetComponent").cast<ComponentName?>() ?: return@after
                     val activity = taskView.context.getActivity() ?: return@after
 
                     val task = XposedHelpers.callMethod(taskView, "getTask") ?: return@after
@@ -97,7 +97,7 @@ object HookLauncher {
         return mUserContextRef?.get() ?: run {
             val activityThread = loadClass("android.app.ActivityThread")
             val currentActivityThread = activityThread.getMethod("currentActivityThread").invoke(null)
-            val application = activityThread.getMethod("getApplication").invoke(currentActivityThread) as Application
+            val application = activityThread.getMethod("getApplication").invoke(currentActivityThread).cast<Application>()
             application.createPackageContext(
                 ZFlow.PACKAGE_NAME,
                 Context.CONTEXT_INCLUDE_CODE or Context.CONTEXT_IGNORE_SECURITY

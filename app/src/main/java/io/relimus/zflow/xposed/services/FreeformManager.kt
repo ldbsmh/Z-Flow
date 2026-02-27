@@ -30,6 +30,7 @@ import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.ui.window.FreeformWindow
 import io.relimus.zflow.xposed.utils.Instances
 import de.robv.android.xposed.XposedHelpers
+import io.relimus.zflow.utils.cast
 
 /**
  * Core FreeformManager service running in system_server.
@@ -213,7 +214,7 @@ object FreeformManager : IFreeformManager.Stub() {
                 val task = findTaskInRoot(root, taskId) ?: return null
 
                 val surfaceFromMethod = try {
-                    XposedHelpers.callMethod(task, "getSurfaceControl") as? SurfaceControl
+                    XposedHelpers.callMethod(task, "getSurfaceControl").cast<SurfaceControl?>()
                 } catch (_: Throwable) {
                     null
                 }
@@ -222,7 +223,7 @@ object FreeformManager : IFreeformManager.Stub() {
                 }
 
                 val surfaceFromField = try {
-                    XposedHelpers.getObjectField(task, "mSurfaceControl") as? SurfaceControl
+                    XposedHelpers.getObjectField(task, "mSurfaceControl").cast<SurfaceControl?>()
                 } catch (_: Throwable) {
                     null
                 }
@@ -308,7 +309,17 @@ object FreeformManager : IFreeformManager.Stub() {
 
     override fun getUid(): Int = Process.myUid()
 
-    override fun createWindow(componentName: ComponentName?, userId: Int, taskId: Int, freeformDpi: Int, freeformSize: Int, floatViewSize: Int, dimAmount: Int) {
+    override fun createWindow(
+        componentName: ComponentName?,
+        userId: Int,
+        taskId: Int,
+        freeformDpi: Int,
+        freeformSize: Int,
+        freeformSizeLand: Int,
+        floatViewSize: Int,
+        dimAmount: Int,
+        manualAdjustFreeformRotation: Boolean
+    ) {
         if (!isReady) {
             XLog.e("$TAG: Service not ready")
             return
@@ -341,8 +352,10 @@ object FreeformManager : IFreeformManager.Stub() {
                 val config = FreeformConfig(
                     freeformDpi = freeformDpi,
                     freeformSize = freeformSize / 100f,
+                    freeformSizeLand = freeformSizeLand / 100f,
                     floatViewSize = floatViewSize / 100f,
-                    dimAmount = dimAmount / 100f
+                    dimAmount = dimAmount / 100f,
+                    manualAdjustFreeformRotation = manualAdjustFreeformRotation
                 )
                 // Pass componentName, userId, taskId to FreeformWindow
                 // Activity will be started in onSurfaceTextureAvailable after VirtualDisplay is created
@@ -356,7 +369,17 @@ object FreeformManager : IFreeformManager.Stub() {
         }
     }
 
-    override fun createMiniWindow(componentName: ComponentName?, userId: Int, taskId: Int, freeformDpi: Int, freeformSize: Int, floatViewSize: Int, dimAmount: Int) {
+    override fun createMiniWindow(
+        componentName: ComponentName?,
+        userId: Int,
+        taskId: Int,
+        freeformDpi: Int,
+        freeformSize: Int,
+        freeformSizeLand: Int,
+        floatViewSize: Int,
+        dimAmount: Int,
+        manualAdjustFreeformRotation: Boolean
+    ) {
         if (!isReady) {
             XLog.e("$TAG: Service not ready")
             return
@@ -386,8 +409,10 @@ object FreeformManager : IFreeformManager.Stub() {
                 val config = FreeformConfig(
                     freeformDpi = freeformDpi,
                     freeformSize = freeformSize / 100f,
+                    freeformSizeLand = freeformSizeLand / 100f,
                     floatViewSize = floatViewSize / 100f,
-                    dimAmount = dimAmount / 100f
+                    dimAmount = dimAmount / 100f,
+                    manualAdjustFreeformRotation = manualAdjustFreeformRotation
                 )
                 FreeformWindow(
                     Instances.systemUiContext, componentName, userId, taskId, config,
@@ -537,7 +562,7 @@ object FreeformManager : IFreeformManager.Stub() {
                     clz = UserHandle::class.java,
                     paramTypes = paramTypes(Int::class.javaPrimitiveType),
                     params = params(userId)
-                ) as UserHandle
+                ).cast<UserHandle>()
 
                 ObjectUtil.invokeMethod(
                     obj = Instances.systemContext,

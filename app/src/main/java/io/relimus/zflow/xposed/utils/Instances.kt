@@ -14,6 +14,7 @@ import android.view.IWindowManager
 import android.view.WindowManager
 import com.android.internal.statusbar.IStatusBarService
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
+import io.relimus.zflow.utils.cast
 
 /**
  * System service singleton references.
@@ -48,11 +49,11 @@ object Instances {
         private set
 
     val systemUiContext: Context
-        get() = ObjectUtil.getObject(activityManagerService, "mUiContext") as Context
+        get() = ObjectUtil.getObject(activityManagerService, "mUiContext").cast()
 
     fun init(activityManagerService: Any) {
         Instances.activityManagerService = activityManagerService
-        systemContext = ObjectUtil.getObject(activityManagerService, "mContext") as Context
+        systemContext = ObjectUtil.getObject(activityManagerService, "mContext").cast()
 
         windowManager = systemContext.getSystemService(WindowManager::class.java)
         iWindowManager = IWindowManager.Stub.asInterface(ServiceManager.getService("window"))

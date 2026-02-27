@@ -8,6 +8,7 @@ import de.robv.android.xposed.XC_MethodHook
 import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
+import io.relimus.zflow.utils.cast
 import kotlin.concurrent.thread
 
 /**
@@ -36,10 +37,10 @@ object HookSystem {
             .first()
             .createHook {
                 before { param ->
-                    val serviceName = param.args[0] as? String
+                    val serviceName = param.args[0].cast<String?>()
                     if (serviceName == "package") {
                         unhook?.unhook()
-                        val pms = param.args[1] as IPackageManager
+                        val pms = param.args[1].cast<IPackageManager>()
                         XLog.d("$TAG: Got PackageManagerService: $pms")
                         thread {
                             runCatching {

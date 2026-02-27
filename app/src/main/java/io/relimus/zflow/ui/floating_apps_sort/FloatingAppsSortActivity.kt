@@ -15,6 +15,7 @@ import io.relimus.zflow.R
 import io.relimus.zflow.databinding.ActivityFloatingAppsSortBinding
 import io.relimus.zflow.room.FreeFormAppsEntity
 import io.relimus.zflow.utils.PackageUtils
+import io.relimus.zflow.utils.cast
 import java.util.Collections
 
 class FloatingAppsSortActivity : AppCompatActivity() {
@@ -35,8 +36,8 @@ class FloatingAppsSortActivity : AppCompatActivity() {
         var firstInit = true
 
         //处理多用户
-        val launcherApps: LauncherApps = getSystemService(LAUNCHER_APPS_SERVICE) as LauncherApps
-        val userManager = getSystemService(USER_SERVICE) as UserManager
+        val launcherApps: LauncherApps = getSystemService(LAUNCHER_APPS_SERVICE).cast()
+        val userManager = getSystemService(USER_SERVICE).cast<UserManager>()
         val userHandleMap = HashMap<Int, UserHandle>()
 
 
@@ -46,7 +47,7 @@ class FloatingAppsSortActivity : AppCompatActivity() {
 
         viewModel.getAllApps().observe(this) {
 
-            val appsList = it as ArrayList<FreeFormAppsEntity>
+            val appsList = it.cast<ArrayList<FreeFormAppsEntity>>()
 
             if (firstInit) {
                 //删除已经卸载的app

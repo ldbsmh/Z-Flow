@@ -17,6 +17,7 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import io.relimus.zflow.R
 import io.relimus.zflow.room.FreeFormAppsEntity
+import io.relimus.zflow.utils.cast
 
 /**
  * @author sunshine
@@ -41,8 +42,8 @@ class AppsSortRecyclerAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         context = parent.context
-        val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
-        launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
+        val userManager = context.getSystemService(Context.USER_SERVICE).cast<UserManager>()
+        launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE).cast()
 
         userManager.userProfiles.forEach {
             userHandleMap[io.relimus.zflow.systemapi.UserHandle.getUserId(it)] = it

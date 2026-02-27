@@ -17,6 +17,7 @@ import android.view.Surface
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.core.content.edit
 import androidx.core.net.toUri
@@ -24,7 +25,8 @@ import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.ui.floating.ChooseAppFloatingView
-import io.relimus.zflow.ui.freeform.FreeformService
+import io.relimus.zflow.utils.cast
+import io.relimus.zflow.xposed.services.FreeformService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -37,6 +39,7 @@ import kotlin.math.roundToInt
  * @author sunshine0523
  * 通过无障碍进行保活，同时悬浮按钮界面也移动至此
  */
+@SuppressLint("AccessibilityPolicy")
 class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener, View.OnTouchListener, GestureDetector.OnGestureListener, ChooseAppFloatingView.OnWindowRemoveCallback {
 
     private lateinit var sp: SharedPreferences
@@ -114,7 +117,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
                             initConfig()
                             try {
                                 chooseAppFloatingView.onScreenRotationChanged(screenRotation)
-                            } catch (e: Exception) {}
+                            } catch (_: Exception) {}
                         }
                     }
                 }
@@ -135,11 +138,11 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
 
         registerReceiver(startFreeformReceiver, IntentFilter("io.relimus.zflow.start_freeform"), RECEIVER_EXPORTED)
 
-        displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
+        displayManager = getSystemService(DISPLAY_SERVICE).cast()
         displayManager.registerDisplayListener(displayListener, null)
         defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
 
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        windowManager = getSystemService(WINDOW_SERVICE).cast()
         windowLayoutParams = WindowManager.LayoutParams()
 
         gestureDetector = GestureDetector(this, this)
@@ -179,7 +182,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
      */
     private fun initConfig() {
         config = getFloatingConfig()
-        if (getBooleanSp("show_floating", false) && !isShowingFloating && !isShowingChooseApp) {
+        if (getBooleanSp("show_floating") && !isShowingFloating && !isShowingChooseApp) {
             showFloating()
         }
     }
@@ -187,7 +190,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         when(key) {
             "show_floating" -> {
-                if (getBooleanSp(key, false) && !isShowingFloating && !isShowingChooseApp) {
+                if (getBooleanSp(key) && !isShowingFloating && !isShowingChooseApp) {
                     initConfig()
                 } else {
                     removeFloating()
@@ -220,14 +223,14 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
                             floatView,
                             windowLayoutParams.apply { alpha = config.alpha }
                         )
-                    }catch (e: Exception) {}
+                    }catch (_: Exception) {}
                 }
             }
         }
     }
 
-    private fun getBooleanSp(key: String, default: Boolean): Boolean {
-        return sp.getBoolean(key, default)
+    private fun getBooleanSp(key: String): Boolean {
+        return sp.getBoolean(key, false)
     }
 
     private fun getIntSp(key: String, default: Int): Int {
@@ -240,8 +243,8 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
 
     private fun showFloating() {
         floatView =
-            if (config.positionX == 1) LayoutInflater.from(this).inflate(R.layout.view_floating_button_right, null, false)
-            else LayoutInflater.from(this).inflate(R.layout.view_floating_button_left, null, false)
+            if (config.positionX == 1) LayoutInflater.from(this).inflate(R.layout.view_floating_button_right, FrameLayout(this), false)
+            else LayoutInflater.from(this).inflate(R.layout.view_floating_button_left, FrameLayout(this), false)
         val root = floatView.findViewById<View>(R.id.root)
 
         root.setOnTouchListener(this)
@@ -276,7 +279,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
                 startActivity(
                     intent
                 )
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 Toast.makeText(this, getString(R.string.request_overlay_permission_fail), Toast.LENGTH_LONG).show()
             }
         }
@@ -286,7 +289,7 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
     private fun removeFloating() {
         try {
             windowManager.removeViewImmediate(floatView)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
 
         }
         isShowingFloating = false
@@ -319,7 +322,6 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
 
     //按下时的坐标
     private var lastY = -1f
-    @SuppressLint("ClickableViewAccessibility")
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
         when(event.action) {
@@ -337,6 +339,8 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
                 if (touchMode == SCROLL) {
                     if (screenRotation == Configuration.ORIENTATION_PORTRAIT) setIntSp("floating_position_portrait_y", config.positionPortraitY)
                     else setIntSp("floating_position_landscape_y", config.positionLandscapeY)
+                } else {
+                    v.performClick()
                 }
                 touchMode = 0
             }
@@ -384,13 +388,12 @@ class KeepAliveService : AccessibilityService(), SharedPreferences.OnSharedPrefe
 
     override fun onChooseAppWindowRemove() {
         isShowingChooseApp = false
-        if (getBooleanSp("show_floating", false) && !isShowingFloating) {
+        if (getBooleanSp("show_floating") && !isShowingFloating) {
             showFloating()
         }
     }
 
     companion object {
-        private const val TAG = "KeepAliveService"
         private const val SCROLL = 1
         const val SERVICE_TYPE = 0
     }

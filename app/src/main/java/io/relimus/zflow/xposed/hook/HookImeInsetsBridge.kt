@@ -12,6 +12,7 @@ import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil.getObject
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil.invokeMethodBestMatch
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHooks
+import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.services.FreeformManager
 import kotlin.math.max
 import kotlin.math.min
@@ -67,10 +68,10 @@ object HookImeInsetsBridge {
         if (provider == null) return
 
         val sourceDisplayContent = ObjectUtil.getObjectUntilSuperclass(provider, "mDisplayContent") ?: return
-        val sourceDisplayId = invokeMethodBestMatch(sourceDisplayContent, "getDisplayId") as Int
+        val sourceDisplayId = invokeMethodBestMatch(sourceDisplayContent, "getDisplayId").cast<Int>()
         if (sourceDisplayId != Display.DEFAULT_DISPLAY) return
 
-        val sourceBounds = (XposedHelpers.callMethod(sourceDisplayContent, "getBounds") as? Rect)
+        val sourceBounds = (XposedHelpers.callMethod(sourceDisplayContent, "getBounds").cast<Rect?>())
             ?.let { Rect(it) } ?: return
         if (sourceBounds.height() <= 0) return
 
@@ -87,7 +88,7 @@ object HookImeInsetsBridge {
 
         val wms = ObjectUtil.getObjectUntilSuperclass(sourceDisplayContent, "mWmService") ?: return
         val root = getObject(wms, "mRoot") ?: return
-        val focusedDisplayId = getObject(root, "mTopFocusedDisplayId") as Int
+        val focusedDisplayId = getObject(root, "mTopFocusedDisplayId").cast<Int>()
 
         val targetDisplayIds = if (focusedDisplayId != Display.DEFAULT_DISPLAY && FreeformManager.isManagedDisplay(focusedDisplayId)) {
             intArrayOf(focusedDisplayId)
@@ -112,7 +113,7 @@ object HookImeInsetsBridge {
         val root = getObject(wms, "mRoot") ?: return
         val targetDisplayContent = invokeMethodBestMatch(root, "getDisplayContent", null, targetDisplayId) ?: return
 
-        val targetBounds = (XposedHelpers.callMethod(targetDisplayContent, "getBounds") as? Rect)
+        val targetBounds = (XposedHelpers.callMethod(targetDisplayContent, "getBounds").cast<Rect?>())
             ?.let { Rect(it) } ?: return
         if (targetBounds.height() <= 0) return
 
@@ -207,10 +208,10 @@ object HookImeInsetsBridge {
         val windowState = param.args.getOrNull(0) ?: return
         val dispatchState = param.result ?: return
 
-        val displayId = invokeMethodBestMatch(windowState, "getDisplayId") as? Int ?: return
+        val displayId = invokeMethodBestMatch(windowState, "getDisplayId").cast<Int?>() ?: return
         if (displayId == Display.DEFAULT_DISPLAY || !FreeformManager.isManagedDisplay(displayId)) return
 
-        val attrs = getObject(windowState, "mAttrs") as? WindowManager.LayoutParams
+        val attrs = getObject(windowState, "mAttrs").cast<WindowManager.LayoutParams?>()
         val windowType = attrs?.type ?: 0
         if (windowType !in WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW..
             WindowManager.LayoutParams.LAST_APPLICATION_WINDOW) return
@@ -219,7 +220,7 @@ object HookImeInsetsBridge {
         if (!desiredImeState.visible || desiredImeState.height <= 0) return
 
         val displayContent = XposedHelpers.callMethod(windowState, "getDisplayContent") ?: return
-        val displayBounds = (XposedHelpers.callMethod(displayContent, "getBounds") as? Rect)
+        val displayBounds = (XposedHelpers.callMethod(displayContent, "getBounds").cast<Rect?>())
             ?.let { Rect(it) } ?: return
         if (displayBounds.height() <= 0) return
 
@@ -244,8 +245,8 @@ object HookImeInsetsBridge {
 
     private fun readImeSourceState(provider: Any): ImeSourceState? {
         val source = XposedHelpers.callMethod(provider, "getSource") ?: return null
-        val frame = invokeMethodBestMatch(source, "getFrame") as? Rect ?: return null
-        val visible = invokeMethodBestMatch(source, "isVisible") as? Boolean ?: return null
+        val frame = invokeMethodBestMatch(source, "getFrame").cast<Rect?>() ?: return null
+        val visible = invokeMethodBestMatch(source, "isVisible").cast<Boolean?>() ?: return null
         return ImeSourceState(visible = visible, frame = Rect(frame))
     }
 

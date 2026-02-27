@@ -3,7 +3,6 @@ package io.relimus.zflow.service
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.service.quicksettings.TileService
-import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.ui.floating.FloatingActivity
 import kotlinx.coroutines.DelicateCoroutinesApi
 
@@ -28,6 +27,6 @@ class QuickStartTileService : TileService() {
 
     @SuppressLint("WrongConstant")
     private fun collapseStatusBar() {
-        ZFlow.me.execShell("cmd statusbar collapse", false)
+        FreeformManagerProxy.collapseStatusBarPanel()
     }
 }

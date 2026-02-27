@@ -77,18 +77,6 @@
             app:showSeekBarValue="true" />
 
         <SwitchPreference
-            android:key="remember_freeform_position"
-            android:title="@string/remember_position_title"
-            android:summary="@string/remember_position_summary"
-            app:iconSpaceReserved="false"/>
-
-        <SwitchPreference
-            android:key="use_sui_refuse_to_fullscreen"
-            android:title="@string/use_sui_refuse_to_fullscreen_title"
-            android:summary="@string/use_sui_refuse_to_fullscreen_summary"
-            app:iconSpaceReserved="false"/>
-
-        <SwitchPreference
             android:key="manual_adjust_freeform_rotation"
             android:title="@string/manual_adjust_freeform_rotation_title"
             android:summary="@string/manual_adjust_freeform_rotation_summary"

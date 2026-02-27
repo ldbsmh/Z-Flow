@@ -6,6 +6,7 @@ import io.github.kyuubiran.ezxhelper.core.finder.ConstructorFinder
 import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
+import io.relimus.zflow.utils.cast
 
 
 object HookReload {
@@ -52,7 +53,7 @@ object HookReload {
             .createHook {
                 after {
                     val activityRecord = it.thisObject
-                    val info = XposedHelpers.getObjectField(activityRecord, "info") as ActivityInfo
+                    val info = XposedHelpers.getObjectField(activityRecord, "info").cast<ActivityInfo>()
 
                     XposedHelpers.setIntField(info, "resizeMode", 2)
                 }

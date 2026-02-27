@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.os.IBinder
 import android.util.Log
 import io.relimus.zflow.bean.MotionEventBean
+import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.IFreeformManager
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
@@ -40,7 +41,7 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
             javaClass.classLoader,
             arrayOf(IFreeformManager::class.java),
             ServiceProxy(IFreeformManager.Stub.asInterface(binder))
-        ) as IFreeformManager
+        ).cast<IFreeformManager>()
         binder.linkToDeath(this, 0)
         Log.d(TAG, "Service linked successfully")
     }
@@ -64,12 +65,52 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         return service?.uid ?: -1
     }
 
-    override fun createWindow(componentName: ComponentName?, userId: Int, taskId: Int, freeformDpi: Int, freeformSize: Int, floatViewSize: Int, dimAmount: Int) {
-        service?.createWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
+    override fun createWindow(
+        componentName: ComponentName?,
+        userId: Int,
+        taskId: Int,
+        freeformDpi: Int,
+        freeformSize: Int,
+        freeformSizeLand: Int,
+        floatViewSize: Int,
+        dimAmount: Int,
+        manualAdjustFreeformRotation: Boolean
+    ) {
+        service?.createWindow(
+            componentName,
+            userId,
+            taskId,
+            freeformDpi,
+            freeformSize,
+            freeformSizeLand,
+            floatViewSize,
+            dimAmount,
+            manualAdjustFreeformRotation
+        )
     }
 
-    override fun createMiniWindow(componentName: ComponentName?, userId: Int, taskId: Int, freeformDpi: Int, freeformSize: Int, floatViewSize: Int, dimAmount: Int) {
-        service?.createMiniWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
+    override fun createMiniWindow(
+        componentName: ComponentName?,
+        userId: Int,
+        taskId: Int,
+        freeformDpi: Int,
+        freeformSize: Int,
+        freeformSizeLand: Int,
+        floatViewSize: Int,
+        dimAmount: Int,
+        manualAdjustFreeformRotation: Boolean
+    ) {
+        service?.createMiniWindow(
+            componentName,
+            userId,
+            taskId,
+            freeformDpi,
+            freeformSize,
+            freeformSizeLand,
+            floatViewSize,
+            dimAmount,
+            manualAdjustFreeformRotation
+        )
     }
 
     override fun destroyWindow(displayId: Int) {
@@ -86,15 +127,6 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
 
     override fun injectMotionEvent(event: MotionEventBean?, displayId: Int) {
         service?.injectMotionEvent(event, displayId)
-    }
-
-    /**
-     * Convenience method to inject motion event using displayId from the event itself.
-     */
-    fun injectMotionEvent(event: MotionEventBean?) {
-        event?.let {
-            service?.injectMotionEvent(it, it.displayId)
-        }
     }
 
     override fun injectKeyEvent(keyCode: Int, displayId: Int) {

@@ -1,6 +1,5 @@
 package io.relimus.zflow.ui.floating
 
-import android.app.ActivityOptions
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -17,8 +16,7 @@ import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.github.promeg.pinyinhelper.Pinyin
 import io.relimus.zflow.R
 import io.relimus.zflow.systemapi.UserHandle
-import io.relimus.zflow.ui.freeform.FreeformService
-import java.lang.reflect.Method
+import io.relimus.zflow.xposed.services.FreeformService
 
 /**
  * @author sunshine
@@ -75,7 +73,7 @@ class AllAppsAdapter(
                 )
                 callback.onClick()
             }
-        } catch (e: PackageManager.NameNotFoundException) {}
+        } catch (_: PackageManager.NameNotFoundException) {}
     }
 
     fun getIndex(str: String?): Int {
@@ -85,20 +83,5 @@ class AllAppsAdapter(
             }
         }
         return -1
-    }
-
-    private fun getActivityOptions(context: Context?): ActivityOptions? {
-        val options = ActivityOptions.makeBasic()
-        val freeFormStackId = 5
-        try {
-            val method: Method = ActivityOptions::class.java.getMethod(
-                "setLaunchWindowingMode",
-                Int::class.javaPrimitiveType
-            )
-            method.invoke(options, freeFormStackId)
-        } catch (e: Exception) {
-
-        }
-        return options
     }
 }

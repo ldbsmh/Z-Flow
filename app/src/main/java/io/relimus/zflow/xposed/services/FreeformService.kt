@@ -1,4 +1,4 @@
-package io.relimus.zflow.ui.freeform
+package io.relimus.zflow.xposed.services
 
 import android.app.Service
 import android.content.ComponentName
@@ -38,15 +38,37 @@ class FreeformService: Service() {
 
                 // 从 SharedPreferences 读取配置
                 val sp = getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
-                val freeformDpi = sp.getInt("freeform_scale", FreeformHelper.getScreenDpi(this))
+                val freeformDpi = sp.getInt("freeform_scale", resources.displayMetrics.densityDpi)
                 val freeformSize = sp.getInt("freeform_size", 75)
+                val freeformSizeLand = sp.getInt("freeform_size_land", 90)
                 val floatViewSize = sp.getInt("freeform_float_view_size", 25)
                 val dimAmount = sp.getInt("freeform_dimming_amount", 20)
+                val manualAdjustFreeformRotation = sp.getBoolean("manual_adjust_freeform_rotation", false)
 
                 if (miniMode) {
-                    proxy.createMiniWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
+                    proxy.createMiniWindow(
+                        componentName,
+                        userId,
+                        taskId,
+                        freeformDpi,
+                        freeformSize,
+                        freeformSizeLand,
+                        floatViewSize,
+                        dimAmount,
+                        manualAdjustFreeformRotation
+                    )
                 } else {
-                    proxy.createWindow(componentName, userId, taskId, freeformDpi, freeformSize, floatViewSize, dimAmount)
+                    proxy.createWindow(
+                        componentName,
+                        userId,
+                        taskId,
+                        freeformDpi,
+                        freeformSize,
+                        freeformSizeLand,
+                        floatViewSize,
+                        dimAmount,
+                        manualAdjustFreeformRotation
+                    )
                 }
             }
             ACTION_DESTROY_FREEFORM -> {
@@ -66,10 +88,7 @@ class FreeformService: Service() {
     }
 
     companion object {
-        const val SHELL = "com.android.shell"
-
         const val ACTION_START_INTENT = "io.relimus.zflow.action.start.intent"
-        const val ACTION_CALL_INTENT = "io.relimus.zflow.action.call.intent"
         const val ACTION_DESTROY_FREEFORM = "io.relimus.zflow.action.destroy.freeform"
 
         const val EXTRA_DISPLAY_ID = "io.relimus.zflow.action.intent.display.id"

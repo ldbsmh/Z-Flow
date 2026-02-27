@@ -8,8 +8,9 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.IBinder
-import io.relimus.zflow.app.ZFlow
-import io.relimus.zflow.ui.freeform.FreeformService
+import io.relimus.zflow.service.FreeformManagerProxy
+import io.relimus.zflow.utils.cast
+import io.relimus.zflow.xposed.services.FreeformService
 
 /**
  * 用于开启目标程序
@@ -42,7 +43,7 @@ class NotificationIntentService : Service() {
         collapseStatusBar()
         //点击后清除小窗
         val notificationManager =
-            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            getSystemService(NOTIFICATION_SERVICE).cast<NotificationManager>()
         notificationManager.cancel(2)
 
         val intent = Intent(Intent.ACTION_MAIN, null)
@@ -56,7 +57,6 @@ class NotificationIntentService : Service() {
                     activityName = it.activityInfo.name
                 }
             }
-            getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
             startService(
                 Intent(this, FreeformService::class.java)
                     .setAction(FreeformService.ACTION_START_INTENT)
@@ -75,7 +75,6 @@ class NotificationIntentService : Service() {
 
     @SuppressLint("WrongConstant")
     private fun collapseStatusBar() {
-        //31==S
-        ZFlow.me.execShell("cmd statusbar collapse", false)
+        FreeformManagerProxy.collapseStatusBarPanel()
     }
 }

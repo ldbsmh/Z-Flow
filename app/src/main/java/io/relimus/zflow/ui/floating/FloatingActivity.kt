@@ -10,7 +10,6 @@ import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.service.ForegroundService
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.utils.PermissionUtils
-import io.relimus.zflow.utils.ServiceUtils
 
 /**
  * 通过活动打开应用选择
@@ -35,13 +34,11 @@ class FloatingActivity : AppCompatActivity() {
                 }
             }
             ForegroundService.SERVICE_TYPE -> {
-                if (ServiceUtils.isServiceWork(
-                        this,
-                        "io.relimus.zflow.service.ForegroundService")) {
+                if (ForegroundService.isRunning) {
                     sp.edit {putBoolean("to_show_floating", !sp.getBoolean("to_show_floating", false))}
                 } else {
                     startForegroundService(Intent(this, ForegroundService::class.java))
-                    if (ServiceUtils.isServiceWork(this, "io.relimus.zflow.service.ForegroundService")) {
+                    if (ForegroundService.isRunning) {
                         sp.edit { putBoolean("to_show_floating", !sp.getBoolean("to_show_floating", false))}
                     } else {
                         Toast.makeText(this, getString(R.string.require_foreground), Toast.LENGTH_SHORT).show()

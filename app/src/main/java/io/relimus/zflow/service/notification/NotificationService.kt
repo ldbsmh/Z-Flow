@@ -14,6 +14,7 @@ import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.room.NotificationAppsEntity
 import io.relimus.zflow.systemapi.UserHandle
+import io.relimus.zflow.utils.cast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
@@ -39,7 +40,7 @@ class NotificationService : NotificationListenerService(),
      */
     override fun onListenerConnected() {
         super.onListenerConnected()
-        notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager = getSystemService(NOTIFICATION_SERVICE).cast<NotificationManager>()
         sp = application.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
         viewModel = NotificationViewModel(this)
         enable = sp.getBoolean("notify_freeform", false)
@@ -83,7 +84,7 @@ class NotificationService : NotificationListenerService(),
 
     private fun getNotificationApps() {
         scope.launch(Dispatchers.IO) {
-            notificationApps = (viewModel.getAllNotificationApps().first() as ArrayList<NotificationAppsEntity>?)!!
+            notificationApps = (viewModel.getAllNotificationApps().first().cast<ArrayList<NotificationAppsEntity>?>())!!
 
             notificationAppsPackageName.clear()
             notificationApps.forEach {
@@ -103,7 +104,7 @@ class NotificationService : NotificationListenerService(),
         val smallIcon: Icon = sbn.notification.smallIcon
         val largeIcon: Icon? = try {
             sbn.notification.getLargeIcon()
-        }catch (e: Exception) {
+        }catch (_: Exception) {
             null
         }
         //创建通知渠道
@@ -167,7 +168,6 @@ class NotificationService : NotificationListenerService(),
 
     companion object {
         const val CHANNEL_ID = "CHANNEL_ID_SUNSHINE_FREEFORM_NOTIFICATION"
-        private const val TAG = "NotificationService"
     }
 
 }

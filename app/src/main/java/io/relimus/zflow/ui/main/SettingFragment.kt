@@ -21,13 +21,11 @@ import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.service.ForegroundService
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
-import io.relimus.zflow.ui.freeform.FreeformView
 import io.relimus.zflow.ui.permission.PermissionActivity
 import io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
 import io.relimus.zflow.utils.PermissionUtils
-import kotlin.math.min
-import kotlin.math.roundToInt
 import androidx.core.content.edit
+import io.relimus.zflow.utils.cast
 
 class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClickListener,
     Preference.OnPreferenceChangeListener {
@@ -72,16 +70,8 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             }
             RESET_OVERLAY_SETTING -> {
                 sp.edit().apply {
-                    val screenWidth = min(requireContext().resources.displayMetrics.heightPixels, requireContext().resources.displayMetrics.widthPixels)
-
                     putInt("floating_position_portrait_y", 0)
                     putInt("floating_position_landscape_y", 0)
-                    putInt(FreeformView.REMEMBER_X, 0)
-                    putInt(FreeformView.REMEMBER_Y, 0)
-                    putInt(FreeformView.REMEMBER_LAND_X, 0)
-                    putInt(FreeformView.REMEMBER_LAND_Y, 0)
-                    putInt(FreeformView.REMEMBER_HEIGHT, (screenWidth * 1.6 * 0.75).roundToInt())
-                    putInt(FreeformView.REMEMBER_LAND_HEIGHT, (screenWidth * 0.8).roundToInt())
                     apply()
                 }
                 Snackbar.make(requireView(), getString(R.string.reset_success), Snackbar.LENGTH_SHORT).show()
@@ -95,17 +85,17 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                 MaterialAlertDialogBuilder(requireContext()).apply {
                     setTitle(getString(R.string.freeform_dpi_dialog_title))
                     setView(editView)
-                    setPositiveButton(getString(R.string.done)) {dialog, _ ->
+                    setPositiveButton(getString(R.string.done)) { _, _ ->
                         if (!editText.text.isNullOrBlank()) {
                             val newValue = editText.text!!.toString().toInt()
                             if (newValue in 50..500) {
-                                (preference as SeekBarPreference).value = newValue
+                                (preference.cast<SeekBarPreference>()).value = newValue
                             }
                         }
                     }
                     setNegativeButton(getString(R.string.cancel)) {_, _ ->}
                     setNeutralButton(getString(R.string.to_default)) { _, _ ->
-                        (preference as SeekBarPreference).value = 0
+                        (preference.cast<SeekBarPreference>()).value = 0
                     }
                     create().show()
                 }
@@ -117,7 +107,7 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
     override fun onPreferenceChange(preference: Preference, newValue: Any): Boolean {
         when(preference.key) {
             SHOW_FLOATING -> {
-                if (newValue as Boolean) {
+                if (newValue.cast<Boolean>()) {
                     when(sp.getInt(SERVICE_TYPE, KeepAliveService.SERVICE_TYPE)) {
                         KeepAliveService.SERVICE_TYPE -> {
                             if (!PermissionUtils.isAccessibilitySettingsOn(requireContext())) {
@@ -135,14 +125,14 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             }
             NOTIFY_FREEFORM -> {
                 PermissionUtils.checkPostNotificationPermission(requireActivity())
-                if (newValue as Boolean && !PermissionUtils.checkNotificationListenerPermission(requireContext())) {
+                if (newValue.cast<Boolean>() && !PermissionUtils.checkNotificationListenerPermission(requireContext())) {
                     Toast.makeText(requireContext(), getString(R.string.require_notification), Toast.LENGTH_SHORT).show()
                     startActivity(Intent(requireActivity(), PermissionActivity::class.java))
                     return false
                 }
             }
             SERVICE_TYPE -> {
-                when(newValue as Int) {
+                when(newValue.cast<Int>()) {
                     KeepAliveService.SERVICE_TYPE -> {
                         if (PermissionUtils.isAccessibilitySettingsOn(requireContext())) {
                             requireContext().stopService(Intent(requireContext(), ForegroundService::class.java))

@@ -1,7 +1,6 @@
 package io.relimus.zflow.ui.floating
 
 import android.annotation.SuppressLint
-import android.app.ActivityOptions
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -23,8 +22,8 @@ import io.relimus.zflow.R
 import io.relimus.zflow.ui.floating_apps_sort.FloatingAppsSortActivity
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
 import io.relimus.zflow.room.FreeFormAppsEntity
-import io.relimus.zflow.ui.freeform.*
-import java.lang.reflect.Method
+import io.relimus.zflow.utils.cast
+import io.relimus.zflow.xposed.services.FreeformService
 
 /**
  * @author sunshine
@@ -49,8 +48,8 @@ class ChooseAppFloatingAdapter(
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
-        launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
+        val userManager = context.getSystemService(Context.USER_SERVICE).cast<UserManager>()
+        launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE).cast()
 
         userManager.userProfiles.forEach {
             userHandleMap[io.relimus.zflow.systemapi.UserHandle.getUserId(it)] = it
@@ -135,7 +134,7 @@ class ChooseAppFloatingAdapter(
                         callback.onClick()
                         true
                     }
-                } catch (e: PackageManager.NameNotFoundException) {}
+                } catch (_: PackageManager.NameNotFoundException) {}
             }
         }
 
@@ -147,21 +146,6 @@ class ChooseAppFloatingAdapter(
         } else {
             "${context.packageManager.getApplicationLabel(applicationInfo)}-${context.getString(R.string.fenshen)}${userId}"
         }
-    }
-
-    private fun getActivityOptions(): ActivityOptions? {
-        val options = ActivityOptions.makeBasic()
-        val freeFormStackId = 5
-        try {
-            val method: Method = ActivityOptions::class.java.getMethod(
-                "setLaunchWindowingMode",
-                Int::class.javaPrimitiveType
-            )
-            method.invoke(options, freeFormStackId)
-        } catch (e: Exception) {
-
-        }
-        return options
     }
 
     init {

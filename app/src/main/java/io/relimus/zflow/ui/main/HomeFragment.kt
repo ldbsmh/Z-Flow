@@ -22,6 +22,7 @@ import io.relimus.zflow.databinding.FragmentHomeBinding
 import io.relimus.zflow.xposed.hook.utils.HookTest
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.utils.PermissionUtils
+import io.relimus.zflow.utils.cast
 
 class HomeFragment : Fragment(), View.OnClickListener {
 
@@ -150,7 +151,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
                         accessibilityRFAR.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     }
                     setNegativeButton(getString(R.string.go_to_change_service_type)) { _, _ ->
-                        (requireActivity() as MainActivity).changeToSetting()
+                        (requireActivity().cast<MainActivity>()).changeToSetting()
                     }
                     create().show()
                 }

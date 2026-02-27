@@ -16,6 +16,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import io.relimus.zflow.R
 import io.relimus.zflow.databinding.ActivityChooseAppsBinding
+import io.relimus.zflow.utils.cast
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -62,8 +63,8 @@ class ChooseAppsActivity : AppCompatActivity() {
         viewModel = ViewModelProvider(this)[ChooseAppsViewModel::class.java]
 
         pm = packageManager
-        userManager = getSystemService(USER_SERVICE) as UserManager
-        launcherApps = getSystemService(LAUNCHER_APPS_SERVICE) as LauncherApps
+        userManager = getSystemService(USER_SERVICE).cast<UserManager>()
+        launcherApps = getSystemService(LAUNCHER_APPS_SERVICE).cast<LauncherApps>()
 
         //需要指定列表模式1 是小窗应用 2 是 气泡应用 3是选择兼容性应用
         type = intent.getIntExtra("type", TYPE_FLOATING)
@@ -73,14 +74,14 @@ class ChooseAppsActivity : AppCompatActivity() {
             supportActionBar!!.title = getString(R.string.label_floating_apps)
             //获取数据库中要使用小窗的应用列表，并且放到一个表中，用于在列表中展示
             viewModel.getAllApps().observe(this@ChooseAppsActivity) { list ->
-                this@ChooseAppsActivity.appsList = list as ArrayList<*>
+                this@ChooseAppsActivity.appsList = list.cast<ArrayList<*>>()
                 showAppsList(type)
             }
         } else {
             supportActionBar!!.title = getString(R.string.label_notification_apps)
             viewModel.getAllNotificationApps().observe(this) { list ->
                 //allAppsList.clear()
-                this.appsList = list as ArrayList<*>
+                this.appsList = list.cast<ArrayList<*>>()
                 showAppsList(type)
             }
         }
@@ -131,7 +132,7 @@ class ChooseAppsActivity : AppCompatActivity() {
 
         //需要在这里获取搜索框
         val searchItem = menu.findItem(R.id.app_bar_search)
-        val searchView = searchItem?.actionView as SearchView
+        val searchView = searchItem?.actionView.cast<SearchView>()
         searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String): Boolean {
                 //adapter?.filter?.filter(query)
@@ -191,13 +192,12 @@ class ChooseAppsActivity : AppCompatActivity() {
 
         @SuppressLint("NotifyDataSetChanged")
         override fun publishResults(constraint: CharSequence, results: FilterResults) {
-            adapter?.updateDate(results.values as ArrayList<LauncherActivityInfo>)
+            adapter?.updateDate(results.values.cast<ArrayList<LauncherActivityInfo>>())
         }
 
     }
 
     companion object {
         const val TYPE_FLOATING = 1
-        const val TYPE_NOTIFICATION = 2
     }
 }

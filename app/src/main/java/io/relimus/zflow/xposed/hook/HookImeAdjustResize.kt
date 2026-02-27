@@ -7,7 +7,7 @@ import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil.getObject
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil.invokeMethodBestMatch
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHooks
-import io.relimus.zflow.xposed.hook.utils.cast
+import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.services.FreeformManager
 
 object HookImeAdjustResize {
@@ -48,7 +48,7 @@ object HookImeAdjustResize {
             WindowManager.LayoutParams.LAST_APPLICATION_WINDOW) return
 
         windowAttrs.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
-        (args.firstOrNull { it is WindowManager.LayoutParams } as? WindowManager.LayoutParams)
+        (args.firstOrNull { it is WindowManager.LayoutParams }.cast<WindowManager.LayoutParams?>())
             ?.let { it.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN }
     }
 }

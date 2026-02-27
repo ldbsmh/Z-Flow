@@ -5,14 +5,14 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Parcelable
-import io.relimus.zflow.ui.freeform.FreeformService
+import io.relimus.zflow.xposed.services.FreeformService
 
 class StartFreeformReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val packageName = intent.getStringExtra("packageName")
         val activityName = intent.getStringExtra("activityName")
         val userId = intent.getIntExtra("userId", -1)
-        val extras = intent.getStringExtra("extras")
+        intent.getStringExtra("extras")
         val miniMode = intent.getBooleanExtra("miniMode", false)
         val taskId = intent.getIntExtra(FreeformService.EXTRA_TASK_ID, -1)
         val parcelable = intent.getParcelableExtra(Intent.EXTRA_INTENT, Parcelable::class.java)

@@ -16,6 +16,7 @@ import io.relimus.zflow.R
 import io.relimus.zflow.room.FreeFormAppsEntity
 import io.relimus.zflow.room.NotificationAppsEntity
 import io.relimus.zflow.systemapi.UserHandle
+import io.relimus.zflow.utils.cast
 
 /**
  * @author sunshine
@@ -86,9 +87,9 @@ class AppsRecyclerAdapter<T>(
         viewModel.insertApps(packageName, UserHandle.getUserId(filterAllAppsList[position].user, filterAllAppsList[position].applicationInfo.uid))
 
         if (type == ChooseAppsActivity.TYPE_FLOATING) {
-            appsList.add(FreeFormAppsEntity(-1, filterAllAppsList[position].applicationInfo.packageName, UserHandle.getUserId(filterAllAppsList[position].user, filterAllAppsList[position].applicationInfo.uid)) as T)
+            appsList.add(FreeFormAppsEntity(-1, filterAllAppsList[position].applicationInfo.packageName, UserHandle.getUserId(filterAllAppsList[position].user, filterAllAppsList[position].applicationInfo.uid)).cast())
         } else {
-            appsList.add(NotificationAppsEntity(filterAllAppsList[position].applicationInfo.packageName, UserHandle.getUserId(filterAllAppsList[position].user, filterAllAppsList[position].applicationInfo.uid)) as T)
+            appsList.add(NotificationAppsEntity(filterAllAppsList[position].applicationInfo.packageName, UserHandle.getUserId(filterAllAppsList[position].user, filterAllAppsList[position].applicationInfo.uid)).cast())
         }
 
     }
@@ -109,8 +110,8 @@ class AppsRecyclerAdapter<T>(
      */
     private fun contains(item: FreeFormAppsEntity): Boolean {
         appsList.forEach {
-            if ((it as FreeFormAppsEntity).userId == item.userId &&
-                (it as FreeFormAppsEntity).packageName == item.packageName) return true
+            if ((it.cast<FreeFormAppsEntity>()).userId == item.userId &&
+                (it.cast<FreeFormAppsEntity>()).packageName == item.packageName) return true
         }
         return false
     }
@@ -120,8 +121,8 @@ class AppsRecyclerAdapter<T>(
      */
     private fun contains(item: NotificationAppsEntity): Boolean {
         appsList.forEach {
-            if ((it as NotificationAppsEntity).userId == item.userId &&
-                (it as NotificationAppsEntity).packageName == item.packageName) return true
+            if ((it.cast<NotificationAppsEntity>()).userId == item.userId &&
+                (it.cast<NotificationAppsEntity>()).packageName == item.packageName) return true
         }
         return false
     }
@@ -132,8 +133,8 @@ class AppsRecyclerAdapter<T>(
     private fun remove(item: FreeFormAppsEntity) {
         var toBeRemovedItem: T? = null
         appsList.forEach {
-            if ((it as FreeFormAppsEntity).userId == item.userId &&
-                (it as FreeFormAppsEntity).packageName == item.packageName) {
+            if ((it.cast<FreeFormAppsEntity>()).userId == item.userId &&
+                (it.cast<FreeFormAppsEntity>()).packageName == item.packageName) {
                 toBeRemovedItem = it
                 return@forEach
             }
@@ -148,17 +149,13 @@ class AppsRecyclerAdapter<T>(
     private fun remove(item: NotificationAppsEntity) {
         var toBeRemovedItem: T? = null
         appsList.forEach {
-            if ((it as NotificationAppsEntity).userId == item.userId &&
-                (it as NotificationAppsEntity).packageName == item.packageName) {
+            if ((it.cast<NotificationAppsEntity>()).userId == item.userId &&
+                (it.cast<NotificationAppsEntity>()).packageName == item.packageName) {
                 toBeRemovedItem = it
                 return@forEach
             }
         }
 
         appsList.remove(toBeRemovedItem)
-    }
-
-    companion object {
-        private const val TAG = "AppsRecyclerAdapter"
     }
 }

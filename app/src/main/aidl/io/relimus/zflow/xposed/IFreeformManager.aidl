@@ -11,8 +11,8 @@ interface IFreeformManager {
     int getUid();
 
     // Window management
-    void createWindow(in ComponentName componentName, int userId, int taskId, int freeformDpi, int freeformSize, int floatViewSize, int dimAmount);
-    void createMiniWindow(in ComponentName componentName, int userId, int taskId, int freeformDpi, int freeformSize, int floatViewSize, int dimAmount);
+    void createWindow(in ComponentName componentName, int userId, int taskId, int freeformDpi, int freeformSize, int freeformSizeLand, int floatViewSize, int dimAmount, boolean manualAdjustFreeformRotation);
+    void createMiniWindow(in ComponentName componentName, int userId, int taskId, int freeformDpi, int freeformSize, int freeformSizeLand, int floatViewSize, int dimAmount, boolean manualAdjustFreeformRotation);
     void destroyWindow(int displayId);
     void destroyAllWindows();
     void moveWindowToTop(int displayId);
