@@ -130,14 +130,15 @@ object HookSwipeGesture {
 
             val tv = TextView(context).apply {
                 text = "松手切换为小窗"
-                setTextColor(Color.WHITE)
+                setTextColor(Color.BLACK)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 gravity = Gravity.CENTER
                 val hPad = (16 * dp).toInt()
                 val vPad = (8 * dp).toInt()
                 setPadding(hPad, vPad, hPad, vPad)
                 background = GradientDrawable().apply {
-                    setColor(0xCC000000.toInt())
+                    setColor(Color.WHITE)
+                    setStroke((1 * dp).toInt(), 0x22000000)
                     cornerRadius = 48 * dp
                 }
                 alpha = 0f
