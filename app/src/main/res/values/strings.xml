@@ -160,4 +160,8 @@
     <string name="recent_label">Running Freeform</string>
     <string name="floating_alpha_title">Sidebar Transparency</string>
     <string name="recent_open_by_freeform">Open by Z-Flow</string>
+    <string name="freeform_size_title">小窗大小</string>
+    <string name="freeform_size_land_title">横屏小窗大小</string>
+    <string name="freeform_float_view_size_title">小窗悬浮窗大小</string>
+    <string name="freeform_dimming_amount_title">小窗背景变暗程度</string>
 </resources>
