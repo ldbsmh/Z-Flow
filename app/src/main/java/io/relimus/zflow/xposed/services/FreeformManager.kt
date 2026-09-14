@@ -3,10 +3,12 @@ package io.relimus.zflow.xposed.services
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.app.ActivityOptions
+import android.app.PendingIntent
 import android.app.TaskStackListener
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -558,6 +560,7 @@ object FreeformManager : IFreeformManager.Stub() {
 
     override fun createWindow(
         componentName: ComponentName?,
+        pendingIntent: PendingIntent?,
         userId: Int,
         taskId: Int,
         freeformDpi: Int,
@@ -581,6 +584,10 @@ object FreeformManager : IFreeformManager.Stub() {
 
                 val existingWindow = findAnyWindow(componentName?.packageName)
                 if (existingWindow != null) {
+                    if (pendingIntent != null && existingWindow.launchPendingIntent(pendingIntent)) {
+                        existingWindow.moveToTop()
+                        return@runOnMainThread
+                    }
                     if (existingWindow.isClosedToBack) {
                         existingWindow.restoreFromBack()
                         bringMiniWindowsToFront()
@@ -621,6 +628,7 @@ object FreeformManager : IFreeformManager.Stub() {
                     userId,
                     resolvedTaskId,
                     config,
+                    pendingIntent = pendingIntent,
                     allowTapOutsideToClose = false,
                     sourceRotation = sourceRotation,
                     sourceScreenWidth = sourceScreenWidth,
@@ -637,6 +645,7 @@ object FreeformManager : IFreeformManager.Stub() {
 
     override fun createMiniWindow(
         componentName: ComponentName?,
+        pendingIntent: PendingIntent?,
         userId: Int,
         taskId: Int,
         freeformDpi: Int,
@@ -660,6 +669,10 @@ object FreeformManager : IFreeformManager.Stub() {
 
                 val existing = findAnyWindow(componentName?.packageName)
                 if (existing != null && !existing.isDestroyed) {
+                    if (pendingIntent != null && existing.launchPendingIntent(pendingIntent)) {
+                        existing.moveToTop()
+                        return@runOnMainThread
+                    }
                     if (!existing.isClosedToBack && (existing.isFloating || existing.isHidden)) {
                         existing.moveToTop()
                         return@runOnMainThread
@@ -700,6 +713,7 @@ object FreeformManager : IFreeformManager.Stub() {
                     config,
                     directToMini = true,
                     inheritedMiniLocation = inheritedLocation,
+                    pendingIntent = pendingIntent,
                     allowTapOutsideToClose = false,
                     sourceRotation = sourceRotation,
                     sourceScreenWidth = sourceScreenWidth,
@@ -867,6 +881,37 @@ object FreeformManager : IFreeformManager.Stub() {
                 XLog.d("$TAG: startActivityOnDisplay component=$componentName display=$displayId")
             } catch (e: Throwable) {
                 XLog.e("$TAG: Failed to start activity $componentName on display=$displayId", e)
+            }
+        }
+    }
+
+    override fun sendPendingIntentOnDisplay(pendingIntent: PendingIntent?, displayId: Int) {
+        if (pendingIntent == null || displayId < 0) return
+
+        runOnMainThread {
+            try {
+                val activityOptions = ActivityOptions.makeBasic().apply {
+                    launchDisplayId = displayId
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        pendingIntentBackgroundActivityStartMode =
+                            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                    }
+                }
+                val options = activityOptions.toBundle()
+                pendingIntent.send(
+                    Instances.systemContext,
+                    0,
+                    null,
+                    null,
+                    null,
+                    null,
+                    options
+                )
+                XLog.d("$TAG: sendPendingIntentOnDisplay display=$displayId creator=${pendingIntent.creatorPackage}")
+            } catch (e: PendingIntent.CanceledException) {
+                XLog.e("$TAG: Notification contentIntent was canceled", e)
+            } catch (e: Throwable) {
+                XLog.e("$TAG: Failed to send notification contentIntent on display=$displayId", e)
             }
         }
     }

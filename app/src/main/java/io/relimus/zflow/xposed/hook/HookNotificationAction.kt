@@ -1,5 +1,6 @@
 package io.relimus.zflow.xposed.hook
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Drawable
@@ -91,10 +92,11 @@ object HookNotificationAction {
                 before { param ->
                     val entry = param.args.getOrNull(0) ?: return@before
                     val context = resolveContext(param.thisObject) ?: return@before
-                    val packageName = resolveEntryPackage(entry) ?: return@before
+                    val sbn = resolveEntrySbn(entry) ?: return@before
+                    val packageName = sbn.packageName
 
                     if (RemoteSettings.isNotificationEnabled(context, packageName)) {
-                        launchFreeform(context, packageName)
+                        launchFreeform(context, sbn)
                         param.result = null
                     }
                 }
@@ -117,10 +119,11 @@ object HookNotificationAction {
                     if (!enabled) return@before
                     val entry = param.args.getOrNull(0) ?: return@before
                     val context = resolveContext(param.thisObject) ?: return@before
-                    val packageName = resolveEntryPackage(entry) ?: return@before
+                    val sbn = resolveEntrySbn(entry) ?: return@before
+                    val packageName = sbn.packageName
 
                     if (RemoteSettings.isNotificationEnabled(context, packageName)) {
-                        launchFreeform(context, packageName)
+                        launchFreeform(context, sbn)
                         param.result = null
                     }
                 }
@@ -196,11 +199,9 @@ object HookNotificationAction {
         }.getOrNull()
     }
 
-    private fun resolveEntryPackage(entry: Any): String? {
+    private fun resolveEntrySbn(entry: Any): StatusBarNotification? {
         return runCatching {
-            val sbn = ObjectUtil.getObjectUntilSuperclass(entry, "mSbn") as? StatusBarNotification
-                ?: return null
-            sbn.packageName
+            ObjectUtil.getObjectUntilSuperclass(entry, "mSbn") as? StatusBarNotification
         }.getOrNull()
     }
 
@@ -220,13 +221,13 @@ object HookNotificationAction {
         return null
     }
 
-    private fun launchFreeform(context: Context, packageName: String) {
+    private fun launchFreeform(context: Context, sbn: StatusBarNotification) {
+        val packageName = sbn.packageName
         runCatching {
-            // 解析该应用的启动 Activity（与 NotificationIntentService 同逻辑）
+            val contentIntent: PendingIntent? = sbn.notification.contentIntent
             val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
                 ?: return
-            val component = launchIntent.component
-                ?: return
+            val component = launchIntent.component ?: return
 
             val intent = Intent("io.relimus.zflow.action.start.intent").apply {
                 setClassName(
@@ -236,6 +237,9 @@ object HookNotificationAction {
                 setPackage("io.relimus.zflow")
                 putExtra(Intent.EXTRA_COMPONENT_NAME, component)
                 putExtra(Intent.EXTRA_INTENT, launchIntent)
+                if (contentIntent != null) {
+                    putExtra("notification_content_intent", contentIntent)
+                }
             }
             context.startService(intent)
         }.onFailure {

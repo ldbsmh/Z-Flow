@@ -6,6 +6,7 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.ActivityInfo
@@ -83,6 +84,7 @@ class FreeformWindow(
     private val config: FreeformConfig = FreeformConfig(),
     private val directToMini: Boolean = false,
     private val inheritedMiniLocation: IntArray? = null,
+    private val pendingIntent: PendingIntent? = null,
     private val allowTapOutsideToClose: Boolean = false,
     private val sourceRotation: Int = -1,
     private val sourceScreenWidth: Int = 0,
@@ -469,12 +471,24 @@ class FreeformWindow(
 
     fun getCurrentTaskId(): Int = currentTaskId
 
+    fun launchPendingIntent(pendingIntent: PendingIntent?): Boolean {
+        if (pendingIntent == null || isDestroyed || displayId < 0) return false
+        FreeformManager.sendPendingIntentOnDisplay(pendingIntent, displayId)
+        return true
+    }
+
     private fun startActivityOnVirtualDisplayIfNeeded(): Boolean {
         if (hasRequestedActivityLaunch || componentName == null || userId < 0 || displayId < 0) {
             return false
         }
         hasRequestedActivityLaunch = true
-        FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
+        if (pendingIntent != null) {
+            // 保留通知发布者构造的完整目标、参数和返回栈，在虚拟屏中发送，
+            // 这样消息/邮件等通知会进入对应详情页，而不是应用 Launcher 首页。
+            FreeformManager.sendPendingIntentOnDisplay(pendingIntent, displayId)
+        } else {
+            FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
+        }
         return true
     }
 

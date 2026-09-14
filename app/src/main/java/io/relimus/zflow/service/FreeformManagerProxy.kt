@@ -1,5 +1,6 @@
 package io.relimus.zflow.service
 
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.os.IBinder
 import android.util.Log
@@ -83,6 +84,7 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
 
     override fun createWindow(
         componentName: ComponentName?,
+        pendingIntent: PendingIntent?,
         userId: Int,
         taskId: Int,
         freeformDpi: Int,
@@ -97,6 +99,7 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
     ) {
         service?.createWindow(
             componentName,
+            pendingIntent,
             userId,
             taskId,
             freeformDpi,
@@ -113,6 +116,7 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
 
     override fun createMiniWindow(
         componentName: ComponentName?,
+        pendingIntent: PendingIntent?,
         userId: Int,
         taskId: Int,
         freeformDpi: Int,
@@ -127,6 +131,7 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
     ) {
         service?.createMiniWindow(
             componentName,
+            pendingIntent,
             userId,
             taskId,
             freeformDpi,
@@ -167,6 +172,10 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
 
     override fun startActivityOnDisplay(componentName: ComponentName?, userId: Int, displayId: Int) {
         service?.startActivityOnDisplay(componentName, userId, displayId)
+    }
+
+    override fun sendPendingIntentOnDisplay(pendingIntent: PendingIntent?, displayId: Int) {
+        service?.sendPendingIntentOnDisplay(pendingIntent, displayId)
     }
 
     override fun collapseStatusBarPanel() {

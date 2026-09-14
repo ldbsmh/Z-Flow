@@ -1,5 +1,6 @@
 package io.relimus.zflow.xposed.services
 
+import android.app.PendingIntent
 import android.app.Service
 import android.content.ComponentName
 import android.content.Intent
@@ -39,6 +40,10 @@ class FreeformService : Service() {
                     componentName = innerIntent?.component
                 }
 
+                val pendingIntent = intent.getParcelableExtra(
+                    EXTRA_PENDING_INTENT,
+                    PendingIntent::class.java
+                )
                 val taskId = intent.getIntExtra(EXTRA_TASK_ID, -1)
                 val miniMode = intent.getBooleanExtra(StartFreeformReceiver.EXTRA_MINI_MODE, false)
 
@@ -70,6 +75,7 @@ class FreeformService : Service() {
                 if (miniMode) {
                     proxy.createMiniWindow(
                         componentName,
+                        pendingIntent,
                         userId,
                         taskId,
                         freeformDpi,
@@ -85,6 +91,7 @@ class FreeformService : Service() {
                 } else {
                     proxy.createWindow(
                         componentName,
+                        pendingIntent,
                         userId,
                         taskId,
                         freeformDpi,
@@ -122,5 +129,6 @@ class FreeformService : Service() {
 
         const val EXTRA_DISPLAY_ID = "io.relimus.zflow.action.intent.display.id"
         const val EXTRA_TASK_ID = "task_id"
+        const val EXTRA_PENDING_INTENT = "notification_content_intent"
     }
 }
