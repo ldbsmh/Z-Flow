@@ -4,19 +4,23 @@ import android.app.Service
 import android.content.ComponentName
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
+import io.relimus.zflow.room.DatabaseRepository
+import io.relimus.zflow.xposed.hook.utils.XLog
 
 /**
  * FreeformService - now delegates to FreeformManagerProxy for window creation in system_server.
  * The actual freeform window is created and managed by FreeformManager running in system_server,
  * which provides higher z-order priority for floating windows.
  */
-class FreeformService: Service() {
+class FreeformService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent == null)
+        if (intent == null) {
             return START_NOT_STICKY
+        }
 
         val proxy = ZFlow.me.freeformManagerProxy
         if (!proxy.isConnected) {
@@ -27,23 +31,41 @@ class FreeformService: Service() {
         when (intent.action) {
             ACTION_START_INTENT -> {
                 val userId = intent.getIntExtra(Intent.EXTRA_USER, 0)
-                // Support both EXTRA_COMPONENT_NAME and EXTRA_INTENT for compatibility
-                var componentName = intent.getParcelableExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName::class.java)
+
+                var componentName =
+                    intent.getParcelableExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName::class.java)
                 if (componentName == null) {
                     val innerIntent = intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
                     componentName = innerIntent?.component
                 }
+
                 val taskId = intent.getIntExtra(EXTRA_TASK_ID, -1)
                 val miniMode = intent.getBooleanExtra(StartFreeformReceiver.EXTRA_MINI_MODE, false)
 
-                // 从 SharedPreferences 读取配置
+                val sourceRotation = intent.getIntExtra(StartFreeformReceiver.EXTRA_SOURCE_ROTATION, -1)
+                val sourceScreenWidth = intent.getIntExtra(StartFreeformReceiver.EXTRA_SOURCE_SCREEN_WIDTH, 0)
+                val sourceScreenHeight = intent.getIntExtra(StartFreeformReceiver.EXTRA_SOURCE_SCREEN_HEIGHT, 0)
+
+                val packageName = componentName?.packageName
+                if (!packageName.isNullOrBlank()) {
+                    val repository = DatabaseRepository(this)
+                    if (repository.isBlacklisted(packageName, userId)) {
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                }
+
                 val sp = getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
+                // 注意：DPI 现在由 system_server 中的 FreeformManager 强制跟随物理屏幕，
+                // 这里只保留配置项以便界面显示，实际不会影响 VirtualDisplay DPI。
                 val freeformDpi = sp.getInt("freeform_scale", resources.displayMetrics.densityDpi)
                 val freeformSize = sp.getInt("freeform_size", 75)
                 val freeformSizeLand = sp.getInt("freeform_size_land", 90)
                 val floatViewSize = sp.getInt("freeform_float_view_size", 25)
                 val dimAmount = sp.getInt("freeform_dimming_amount", 20)
                 val manualAdjustFreeformRotation = sp.getBoolean("manual_adjust_freeform_rotation", false)
+
+                XLog.d("FreeformService: request action=${intent.action} component=$componentName userId=$userId taskId=$taskId miniMode=$miniMode dpi=$freeformDpi rotation=$sourceRotation screen=${sourceScreenWidth}x$sourceScreenHeight")
 
                 if (miniMode) {
                     proxy.createMiniWindow(
@@ -55,7 +77,10 @@ class FreeformService: Service() {
                         freeformSizeLand,
                         floatViewSize,
                         dimAmount,
-                        manualAdjustFreeformRotation
+                        manualAdjustFreeformRotation,
+                        sourceRotation,
+                        sourceScreenWidth,
+                        sourceScreenHeight
                     )
                 } else {
                     proxy.createWindow(
@@ -67,10 +92,14 @@ class FreeformService: Service() {
                         freeformSizeLand,
                         floatViewSize,
                         dimAmount,
-                        manualAdjustFreeformRotation
+                        manualAdjustFreeformRotation,
+                        sourceRotation,
+                        sourceScreenWidth,
+                        sourceScreenHeight
                     )
                 }
             }
+
             ACTION_DESTROY_FREEFORM -> {
                 val displayId = intent.getIntExtra(EXTRA_DISPLAY_ID, -1)
                 if (displayId >= 0) {

@@ -14,8 +14,18 @@ object HookPredictiveBack {
     private val backNavigationControllerClass = loadClass("com.android.server.wm.BackNavigationController")
 
     fun init() {
+        if (inited && hookGeneration == HookRegistry.generation) return
+        hookGeneration = HookRegistry.generation
+        inited = false
+
         hookStartBackNavigation()
+
+        XLog.d("$TAG: hook BackNavigationController.startBackNavigation success")
+        inited = true
     }
+
+    private var inited = false
+    private var hookGeneration = -1L
 
     private fun hookStartBackNavigation() {
         MethodFinder.fromClass(backNavigationControllerClass)
@@ -30,8 +40,6 @@ object HookPredictiveBack {
                     disablePredictiveBackAnimation(it.result)
                 }
             }
-
-        XLog.d("$TAG: hook BackNavigationController.startBackNavigation success")
     }
 
     private fun disablePredictiveBackAnimation(info: Any?) {

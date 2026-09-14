@@ -18,6 +18,7 @@ import io.relimus.zflow.databinding.ActivityPermissionBinding
 import io.relimus.zflow.xposed.hook.utils.HookTest
 import io.relimus.zflow.ui.splash.SplashActivity
 import io.relimus.zflow.utils.PermissionUtils
+import io.relimus.zflow.service.KeepAliveService
 
 
 class PermissionActivity : AppCompatActivity(), View.OnClickListener {
@@ -92,19 +93,40 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
     }
 
     private fun checkKeepAliveService(): Boolean {
-        val result = PermissionUtils.isAccessibilitySettingsOn(this)
-        if (result) {
-            binding.content.infoAccessibilityBg.setBackgroundColor(getColor(R.color.success_color))
-            binding.content.imageViewAccessibilityService.setImageDrawable(AppCompatResources.getDrawable(this, R.drawable.ic_done))
-            binding.content.textViewAccessibilityServiceInfo.text = getString(R.string.accessibility_start)
-        } else {
-            binding.content.infoAccessibilityBg.setBackgroundColor(getColor(R.color.warn_color))
-            binding.content.imageViewAccessibilityService.setImageDrawable(AppCompatResources.getDrawable(this, R.drawable.ic_error_white))
-            binding.content.textViewAccessibilityServiceInfo.text = getString(R.string.accessibility_no_start)
+        val enabled = PermissionUtils.isAccessibilitySettingsOn(this)
+        val running = KeepAliveService.isServiceRunning
+    
+        when {
+            enabled && running -> {
+                binding.content.infoAccessibilityBg.setBackgroundColor(getColor(R.color.success_color))
+                binding.content.imageViewAccessibilityService.setImageDrawable(
+                    AppCompatResources.getDrawable(this, R.drawable.ic_done)
+                )
+                binding.content.textViewAccessibilityServiceInfo.text =
+                    getString(R.string.accessibility_start)
+            }
+    
+            enabled -> {
+                binding.content.infoAccessibilityBg.setBackgroundColor(getColor(R.color.warn_color))
+                binding.content.imageViewAccessibilityService.setImageDrawable(
+                    AppCompatResources.getDrawable(this, R.drawable.ic_error_white)
+                )
+                binding.content.textViewAccessibilityServiceInfo.text =
+                    getString(R.string.accessibility_authorized_not_running)
+            }
+    
+            else -> {
+                binding.content.infoAccessibilityBg.setBackgroundColor(getColor(R.color.warn_color))
+                binding.content.imageViewAccessibilityService.setImageDrawable(
+                    AppCompatResources.getDrawable(this, R.drawable.ic_error_white)
+                )
+                binding.content.textViewAccessibilityServiceInfo.text =
+                    getString(R.string.accessibility_no_start)
+            }
         }
-        return result
+        return enabled
     }
-
+    
     private fun checkShizukuPermission(): Boolean {
         val result = ZFlow.me.isRunning.value ?: false
         if (result) {

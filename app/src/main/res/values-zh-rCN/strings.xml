@@ -67,7 +67,7 @@
 
     <!--ChooseAppsActivity-->
     <string name="label_floating_apps">侧边栏快捷应用选择</string>
-    <string name="label_notification_apps">接管通知应用选择</string>
+    <string name="label_notification_apps">选择显示小窗按钮的应用</string>
 
     <!--ChooseAppFloatingAdapter-->
     <string name="all_apps">所有应用</string>
@@ -108,8 +108,8 @@
     <string name="preference_reset_overlay_setting_summary">重置包括记录的小窗位置和大小、侧边栏的位置。可用于以上两者跳出屏外或尺寸异常而无法控制的问题</string>
     <string name="compatible_title">兼容模式启动小窗（实验性）</string>
     <string name="compatible_summary">使用兼容模式启动小窗，该模式可以解决小窗内软件通知、全屏后等界面尺寸异常的问题。兼容模式小窗界面缩放比例下一版本支持。</string>
-    <string name="preference_start_by_recent_view_title">在多任务打开</string>
-    <string name="preference_start_by_recent_view_summary">如何在多任务界面打开Z-Flow？在Xposed管理器中勾选桌面后，长按位于多任务界面的应用图标即可。该功能只支持类Launcher3桌面</string>
+    <string name="preference_start_by_recent_view_title">在桌面图标打开</string>
+    <string name="preference_start_by_recent_view_summary">如何从桌面打开Z-Flow小窗？在Xposed管理器中勾选桌面后，长按桌面应用图标，点击“以小窗打开”即可。</string>
 
     <string name="category_freeform">小窗设置</string>
     <string name="setting_freeform_dpi_title">小窗内界面缩放</string>
@@ -129,10 +129,15 @@
     <string name="floating_alpha_title">侧边栏透明度</string>
 
     <string name="category_notify">通知</string>
-    <string name="switch_notify_freeform">接管选定应用通知</string>
-    <string name="switch_notify_freeform_summary">在选定应用发送通知时，Z-Flow会拦截并且发送一个相同内容的通知，但可以通过Z-Flow开启该应用</string>
-    <string name="preference_notification_apps_summary">选择需要接管的应用</string>
-    <string name="preference_notification_apps">接管通知应用</string>
+    <string name="switch_notify_freeform">在通知显示小窗按钮</string>
+    <string name="switch_notify_freeform_summary">保留原通知，仅在被选应用的通知上显示“打开小窗”按钮，点击即可打开小窗</string>
+    <string name="preference_notification_apps_summary">选择哪些应用的通知上显示“打开小窗”按钮</string>
+    <string name="preference_notification_apps">小窗通知应用</string>
+    <string name="popup_open_by_freeform">以小窗打开</string>
+    <string name="popup_freeform_enable_title">桌面长按打开小窗</string>
+    <string name="popup_freeform_enable_summary">开启后，长按桌面图标可打开小窗</string>
+    <string name="popup_bubble_block_title">屏蔽长按消息气泡</string>
+    <string name="popup_bubble_block_summary">屏蔽 Android 17 长按图标弹出的消息气泡</string>
 
     <!--menu_choose_apps.xml-->
     <string name="search">搜索</string>
@@ -227,5 +232,23 @@
     <string name="freeform_size_land_title">横屏小窗大小</string>
     <string name="freeform_float_view_size_title">小窗悬浮窗大小</string>
     <string name="freeform_dimming_amount_title">小窗背景变暗程度</string>
-
+    <string name="freeform_settings_title">小窗设置</string>
+    <string name="category_sidebar">侧边栏</string>
+    <string name="other_settings_title">其他设置</string>
+    <string name="summary_base_placeholder">隐藏：关闭 | 保活：无障碍</string>
+    <string name="summary_sidebar_placeholder">开关：开启 | 位置：右侧</string>
+    <string name="summary_freeform_placeholder">DPI: 50 | 窗口大小: 75%</string>
+    <string name="summary_notify_placeholder">接管通知：开启</string>
+    <string name="summary_other_placeholder">重置悬浮窗位置等</string>
+    <string name="preference_freeform_blacklist_apps">小窗黑名单</string>
+    <string name="preference_freeform_blacklist_apps_summary">黑名单中的应用不能以小窗模式打开</string>
+    <string name="label_blacklist_apps">小窗黑名单应用选择</string>
+    <string name="app_blacklisted">该应用已在小窗黑名单中</string>
+    <string name="accessibility_start_timeout">无障碍启动超时，请尝试关闭后重新开启</string>
+    <string name="accessibility_keep_alive_failed">添加无障碍保活失败，请尝试重启无障碍服务</string>
+    <string name="accessibility_authorized_not_running">无障碍已授权，但服务尚未完全连接</string>
+    <string name="label_landscape_apps">横屏小窗应用选择</string>
+    <string name="preference_landscape_apps">横屏小窗应用</string>
+    <string name="preference_landscape_apps_summary">勾选的应用默认以横屏小窗方式打开</string>
+    <string name="category_landscape">横屏设置</string>
 </resources>

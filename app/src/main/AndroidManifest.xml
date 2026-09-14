@@ -57,6 +57,10 @@
             android:exported="false" />
         <activity android:name=".ui.floating_apps_sort.FloatingAppsSortActivity" />
         <activity android:name=".ui.choose_apps.ChooseAppsActivity" />
+        <activity
+            android:name="io.relimus.zflow.ui.main.FreeformSettingsActivity"
+            android:parentActivityName="io.relimus.zflow.ui.main.MainActivity"
+            android:exported="false" />
 
         <service
             android:name="io.relimus.zflow.service.KeepAliveService"
@@ -72,19 +76,6 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_config" />
         </service>
-        <service
-            android:name="io.relimus.zflow.service.notification.NotificationService"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-        <service
-            android:name="io.relimus.zflow.service.notification.NotificationIntentService"
-            android:enabled="true"
-            android:exported="false" />
         <service
             android:name="io.relimus.zflow.service.QuickStartTileService"
             android:exported="true"
@@ -118,6 +109,22 @@
             android:exported="true"
             android:multiprocess="false"
             tools:ignore="ExportedContentProvider" />
+            
+        <provider
+            android:name=".providers.BlacklistProvider"
+            android:authorities="io.relimus.zflow.blacklist.provider"
+            android:exported="true" />
+
+        <!-- 横屏小窗 Provider（新增） -->
+        <provider
+            android:name=".providers.LandscapeAppsProvider"
+            android:authorities="io.relimus.zflow.landscape.provider"
+            android:exported="true" />
+
+        <provider
+            android:name=".providers.NotificationSettingsProvider"
+            android:authorities="io.relimus.zflow.notification.provider"
+            android:exported="true" />
 
         <receiver
             android:name="io.relimus.zflow.broadcast.BootBroadcastReceiver"
@@ -137,7 +144,7 @@
             android:value="@string/xposed_description" />
         <meta-data
             android:name="xposedminversion"
-            android:value="53" />
+            android:value="82" />
         <meta-data
             android:name="xposedscope"
             android:resource="@array/xposedscope" /> <!-- bugly -->

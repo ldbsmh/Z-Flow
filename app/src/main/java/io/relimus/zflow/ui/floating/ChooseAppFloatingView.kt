@@ -25,6 +25,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.airbnb.lottie.LottieAnimationView
 import com.github.promeg.pinyinhelper.Pinyin
 import io.relimus.zflow.R
+import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.room.FreeFormAppsEntity
 import io.relimus.zflow.ui.view.WaveSideBarView
 import io.relimus.zflow.utils.PackageUtils
@@ -46,21 +47,20 @@ class ChooseAppFloatingView(
     private val context: Context,
     var showPositionX: Int,
     private val removeCallback: OnWindowRemoveCallback
-){
-    //服务
+) {
     private val windowManager: WindowManager = context.getSystemService(Context.WINDOW_SERVICE).cast()
     private val displayManager: DisplayManager = context.getSystemService(Context.DISPLAY_SERVICE).cast()
     private val defaultDisplay: Display = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
 
-    //scope
     private val scope = MainScope()
 
-    //处理多用户
     private val launcherApps: LauncherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE).cast()
     private val userManager: UserManager = context.getSystemService(Context.USER_SERVICE).cast()
     private val userHandleMap = HashMap<Int, UserHandle>()
 
     private val chooseAppFloatingViewModel = ChooseAppFloatingViewModel(context)
+    private val repository = DatabaseRepository(context)
+
     private var allFreeFormApps: ArrayList<FreeFormAppsEntity>? = null
 
     private var floatingView: View? = null
@@ -72,6 +72,7 @@ class ChooseAppFloatingView(
 
     //所有应用列表
     private var allAppsList = ArrayList<LauncherActivityInfo>()
+
     //使用拼音排序
     private var appsPinyinMap = HashMap<String, String>()
 
@@ -85,11 +86,14 @@ class ChooseAppFloatingView(
         scope.launch(Dispatchers.IO) {
             allFreeFormApps = chooseAppFloatingViewModel.getAllFreeFormApps().first().cast()
             withContext(Dispatchers.Main) {
-                floatingView = LayoutInflater.from(context).inflate(R.layout.view_choose_app_floating, FrameLayout(context), false)
+                floatingView = LayoutInflater.from(context).inflate(
+                    R.layout.view_choose_app_floating,
+                    FrameLayout(context),
+                    false
+                )
                 floatingViewLayoutParams.apply {
                     width = WindowManager.LayoutParams.MATCH_PARENT
                     height = WindowManager.LayoutParams.MATCH_PARENT
-                    //选择应用界面决定还是禁止在系统界面显示了
                     type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                     flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     format = PixelFormat.RGBA_8888
@@ -106,7 +110,6 @@ class ChooseAppFloatingView(
 
                 setFloatingViewContent(floatingView)
 
-                //click out to remove
                 floatingView?.setOnClickListener {
                     removeWindow()
                 }
@@ -116,22 +119,31 @@ class ChooseAppFloatingView(
                 } catch (_: Exception) {
                     windowManager.removeViewImmediate(floatingView)
                     if (Settings.canDrawOverlays(context)) {
-                        windowManager.addView(floatingView, floatingViewLayoutParams.apply {
-                            type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        })
+                        windowManager.addView(
+                            floatingView,
+                            floatingViewLayoutParams.apply {
+                                type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                            }
+                        )
                     } else {
                         try {
-                            Toast.makeText(context, context.getString(R.string.request_overlay_permission), Toast.LENGTH_LONG).show()
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.request_overlay_permission),
+                                Toast.LENGTH_LONG
+                            ).show()
                             val intent = Intent(
                                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                                 "package:${context.packageName}".toUri()
                             )
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            context.startActivity(
-                                intent
-                            )
+                            context.startActivity(intent)
                         } catch (_: Exception) {
-                            Toast.makeText(context, context.getString(R.string.request_overlay_permission_fail), Toast.LENGTH_LONG).show()
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.request_overlay_permission_fail),
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
                     }
                 }
@@ -139,34 +151,31 @@ class ChooseAppFloatingView(
         }
     }
 
-    /**
-     * 屏幕方向改变监听
-     */
     fun onScreenRotationChanged(newRotation: Int) {
         screenRotation = newRotation
         try {
             windowManager.removeViewImmediate(floatingView)
-        }catch (_: Exception){ }
+        } catch (_: Exception) {
+        }
         try {
             windowManager.removeViewImmediate(allAppsView)
-        }catch (_: Exception) { }
+        } catch (_: Exception) {
+        }
         removeCallback.onChooseAppWindowRemove()
     }
 
-    /**
-     * 设置悬浮窗口的内容
-     * 就是设置显示的APP
-     */
     private fun setFloatingViewContent(floatingView: View?) {
-        //TODO 这里有一个奇怪的事情：当下面的xml布局为google的cardview时，就会解析失败，但是用androidx的就可以
         val container = floatingView?.findViewById<LinearLayout>(
             if (showPositionX == -1) R.id.recycler_view_contain_left else R.id.recycler_view_contain_right
         )
-        val recyclerAppsLayout = LayoutInflater.from(context).inflate(R.layout.view_choose_app_floting_view_recycler_app, container, false)
+        val recyclerAppsLayout = LayoutInflater.from(context).inflate(
+            R.layout.view_choose_app_floting_view_recycler_app,
+            container,
+            false
+        )
         val recyclerView: RecyclerView = recyclerAppsLayout.findViewById(R.id.recycler_view)
         container?.addView(recyclerAppsLayout)
 
-        //删除已经卸载的app
         val noInstallAppsList = ArrayList<FreeFormAppsEntity>()
         allFreeFormApps?.forEach {
             if (it.userId == 0) {
@@ -174,7 +183,8 @@ class ChooseAppFloatingView(
                     noInstallAppsList.add(it)
                 }
             } else {
-                val userHandle = if (userHandleMap.containsKey(it.userId)) userHandleMap[it.userId]!! else userHandleMap[0]!!
+                val userHandle =
+                    if (userHandleMap.containsKey(it.userId)) userHandleMap[it.userId]!! else userHandleMap[0]!!
                 if (!PackageUtils.hasInstallThisPackageWithUserId(it.packageName, launcherApps, userHandle)) {
                     noInstallAppsList.add(it)
                 }
@@ -190,23 +200,23 @@ class ChooseAppFloatingView(
         recyclerView.adapter = ChooseAppFloatingAdapter(
             context,
             allFreeFormApps,
-            object: ClickListener() {
+            object : ClickListener() {
                 override fun onClick() {
                     removeWindow()
                 }
             },
-            object: ClickListener() {
+            object : ClickListener() {
                 override fun onClick() {
                     try {
                         windowManager.removeViewImmediate(floatingView)
-                    } catch (_: Exception) {}
+                    } catch (_: Exception) {
+                    }
                     showAllAppsView()
                 }
             }
         )
 
         if (noInstallAppsList.isNotEmpty()) {
-            //Delete NOT install apps from db
             scope.launch(Dispatchers.IO) {
                 chooseAppFloatingViewModel.deleteNotInstall(noInstallAppsList)
             }
@@ -233,7 +243,11 @@ class ChooseAppFloatingView(
                 overlayHeight = realHeight / 3 * 2
             }
 
-            allAppsView = LayoutInflater.from(context).inflate(R.layout.view_all_apps, FrameLayout(context), false)
+            allAppsView = LayoutInflater.from(context).inflate(
+                R.layout.view_all_apps,
+                FrameLayout(context),
+                false
+            )
             val layoutParams = WindowManager.LayoutParams().apply {
                 width = overlayWidth
                 height = overlayHeight
@@ -246,8 +260,17 @@ class ChooseAppFloatingView(
 
             scope.launch(Dispatchers.IO) {
                 allAppsList.clear()
-                userManager.userProfiles.forEach {
-                    allAppsList.addAll(launcherApps.getActivityList(null, it))
+
+                userManager.userProfiles.forEach { userHandle ->
+                    launcherApps.getActivityList(null, userHandle).forEach { app ->
+                        val userId = io.relimus.zflow.systemapi.UserHandle.getUserId(
+                            app.user,
+                            app.applicationInfo.uid
+                        )
+                        if (!repository.isBlacklisted(app.applicationInfo.packageName, userId)) {
+                            allAppsList.add(app)
+                        }
+                    }
                 }
 
                 allAppsList.forEach {
@@ -266,7 +289,8 @@ class ChooseAppFloatingView(
                             override fun onClick() {
                                 try {
                                     windowManager.removeViewImmediate(allAppsView)
-                                }catch (_: Exception) {}
+                                } catch (_: Exception) {
+                                }
 
                                 removeCallback.onChooseAppWindowRemove()
                             }
@@ -275,20 +299,21 @@ class ChooseAppFloatingView(
                     recyclerView.layoutManager = GridLayoutManager(context, 3)
                     recyclerView.adapter = adapter
 
-                    allAppsView!!.findViewById<WaveSideBarView>(R.id.waveSideBarView).setOnTouchLetterChangeListener {
-                        val pos = adapter.getIndex(it)
-                        if(pos != -1){
-                            recyclerView.scrollToPosition(pos)
-                            val layoutManager = recyclerView.layoutManager.cast<GridLayoutManager>()
-                            layoutManager.scrollToPositionWithOffset(pos, 0)
+                    allAppsView!!.findViewById<WaveSideBarView>(R.id.waveSideBarView)
+                        .setOnTouchLetterChangeListener {
+                            val pos = adapter.getIndex(it)
+                            if (pos != -1) {
+                                recyclerView.scrollToPosition(pos)
+                                val layoutManager = recyclerView.layoutManager.cast<GridLayoutManager>()
+                                layoutManager.scrollToPositionWithOffset(pos, 0)
+                            }
                         }
-                    }
 
-                    //点击外部关闭悬浮窗
                     allAppsView!!.setOnClickListener {
                         try {
                             windowManager.removeViewImmediate(allAppsView)
-                        } catch (_: Exception) {}
+                        } catch (_: Exception) {
+                        }
                         removeCallback.onChooseAppWindowRemove()
                     }
                 }
@@ -297,58 +322,52 @@ class ChooseAppFloatingView(
             windowManager.addView(allAppsView, layoutParams)
         } else {
             try {
-                Toast.makeText(context, context.getString(R.string.request_overlay_permission), Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.request_overlay_permission),
+                    Toast.LENGTH_LONG
+                ).show()
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     "package:${context.packageName}".toUri()
                 )
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(
-                    intent
-                )
+                context.startActivity(intent)
             } catch (_: Exception) {
-                Toast.makeText(context, context.getString(R.string.request_overlay_permission_fail), Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.request_overlay_permission_fail),
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
-
     }
 
     private fun removeWindow() {
         try {
             windowManager.removeViewImmediate(floatingView)
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
 
         removeCallback.onChooseAppWindowRemove()
     }
 
-    /**
-     * 根据序号排序
-     */
-    class AppsComparable: Comparator<FreeFormAppsEntity> {
+    class AppsComparable : Comparator<FreeFormAppsEntity> {
         override fun compare(o1: FreeFormAppsEntity?, o2: FreeFormAppsEntity?): Int {
             return o1!!.sortNum.compareTo(o2!!.sortNum)
         }
     }
 
-    /**
-     * 根据拼音排序
-     */
-    inner class PinyinComparable : Comparator<LauncherActivityInfo>{
+    inner class PinyinComparable : Comparator<LauncherActivityInfo> {
         override fun compare(o1: LauncherActivityInfo?, o2: LauncherActivityInfo?): Int {
             return appsPinyinMap[o1!!.label]!!.compareTo(appsPinyinMap[o2!!.label]!!)
         }
     }
 
-    /**
-     * 当叠加层移除时回调
-     */
     interface OnWindowRemoveCallback {
         fun onChooseAppWindowRemove()
     }
 
-    /**
-     * 悬浮窗点击监听器
-     */
     abstract class ClickListener {
         open fun onClick() {}
     }

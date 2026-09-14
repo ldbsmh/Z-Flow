@@ -6,6 +6,16 @@ build/
 # Local configuration file (sdk path, etc)
 local.properties
 
+# Signing credentials (contains passwords - never commit)
+keystore.properties
+*.keystore.properties
+
+# Signing keystore files (never commit - use CI secrets instead)
+keystore/
+*.jks
+*.pk8
+*.x509.pem
+
 # Log/OS Files
 *.log
 
@@ -36,3 +46,8 @@ openspec/
 *claude*
 *CLAUDE*
 AGENTS.md
+
+# Local credential files (never commit)
+配置.txt
+配置2.txt
+配置 2.txt

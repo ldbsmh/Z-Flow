@@ -19,16 +19,18 @@ object HookSystem {
     private const val TAG = "HookSystem"
 
     fun init() {
-        XLog.d("$TAG: Initializing system_server hooks")
+        if (inited && hookGeneration == HookRegistry.generation) return
+        hookGeneration = HookRegistry.generation
+        inited = false
 
-        // Hook ServiceManager.addService to register UserService when PackageManager is ready
         hookServiceManager()
-
-        // Hook ActivityManagerService.systemReady to initialize FreeformManager
         hookActivityManagerService()
 
-        XLog.d("$TAG: System hooks initialized")
+        inited = true
     }
+
+    private var inited = false
+    private var hookGeneration = -1L
 
     private fun hookServiceManager() {
         var unhook: XC_MethodHook.Unhook? = null
@@ -41,11 +43,9 @@ object HookSystem {
                     if (serviceName == "package") {
                         unhook?.unhook()
                         val pms = param.args[1].cast<IPackageManager>()
-                        XLog.d("$TAG: Got PackageManagerService: $pms")
                         thread {
                             runCatching {
                                 UserService.register(pms)
-                                XLog.d("$TAG: UserService registered successfully")
                             }.onFailure { e ->
                                 XLog.e("$TAG: Failed to register UserService", e)
                             }
@@ -63,9 +63,13 @@ object HookSystem {
             .createHook {
                 after { param ->
                     unhook?.unhook()
-                    FreeformManager.activityManagerService = param.thisObject
-                    FreeformManager.systemReady()
-                    XLog.d("$TAG: FreeformManager initialized on systemReady")
+                    runCatching {
+                        FreeformManager.activityManagerService = param.thisObject
+                        FreeformManager.systemReady()
+                        XLog.d("$TAG: FreeformManager initialized")
+                    }.onFailure { e ->
+                        XLog.e("$TAG: Failed to initialize FreeformManager", e)
+                    }
                 }
             }
     }

@@ -1,0 +1,35 @@
+name: Clean All Workflow Runs (One-time Cleanup)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    name: Delete All Previous Workflow Runs
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+
+    steps:
+      - name: Delete ALL workflow runs (except current one)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🧹 开始清理所有旧的 Workflow Runs..."
+
+          CURRENT_RUN_ID=${{ github.run_id }}
+          echo "当前运行 ID: $CURRENT_RUN_ID"
+
+          echo "正在获取并删除所有旧的 workflow runs..."
+
+          gh run list --repo ${{ github.repository }} --limit 500 --json databaseId -q '.[].databaseId' | \
+          while read -r run_id; do
+            if [ "$run_id" != "$CURRENT_RUN_ID" ]; then
+              echo "Deleting run ID: $run_id"
+              gh run delete "$run_id" --repo ${{ github.repository }} || echo "Failed to delete $run_id (maybe already deleted)"
+            else
+              echo "跳过当前运行: $run_id"
+            fi
+          done
+
+          echo "✅ 清理完成！Actions 历史记录已基本清空。"

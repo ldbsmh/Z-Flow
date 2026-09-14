@@ -16,13 +16,22 @@ object HookImeAdjustResize {
     private val iWindowClass = loadClass("android.view.IWindow")
 
     fun init() {
+        if (inited && hookGeneration == HookRegistry.generation) return
+        hookGeneration = HookRegistry.generation
+        inited = false
+
         MethodFinder.fromClass(sessionClass)
             .filterByName("relayout")
             .toList()
             .createHooks {
                 before { handleRelayout(it.thisObject, it.args) }
             }
+
+        inited = true
     }
+
+    private var inited = false
+    private var hookGeneration = -1L
 
     private fun handleRelayout(session: Any?, args: Array<Any?>) {
         if (session == null) return

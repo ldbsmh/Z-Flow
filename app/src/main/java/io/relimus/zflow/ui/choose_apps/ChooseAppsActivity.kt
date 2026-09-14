@@ -24,11 +24,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.Collator
 
-/**
- * @author sunshine
- * @date 2021/1/31
- * 显示小窗的应用选择
- */
 class ChooseAppsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityChooseAppsBinding
@@ -41,16 +36,10 @@ class ChooseAppsActivity : AppCompatActivity() {
     private lateinit var userManager: UserManager
     private lateinit var launcherApps: LauncherApps
 
-    //如果全选/全不选触发，需要刷新界面
     private var needToUpdateView = false
-
-    //第一次获取就加载界面，否则就不加载了，要不会频繁刷新界面
     private var firstObserver = true
-
     private var type = TYPE_FLOATING
-
     private var adapter: AppsRecyclerAdapter<*>? = null
-
     private val filter = AppNameFilter()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,39 +55,45 @@ class ChooseAppsActivity : AppCompatActivity() {
         userManager = getSystemService(USER_SERVICE).cast<UserManager>()
         launcherApps = getSystemService(LAUNCHER_APPS_SERVICE).cast<LauncherApps>()
 
-        //需要指定列表模式1 是小窗应用 2 是 气泡应用 3是选择兼容性应用
         type = intent.getIntExtra("type", TYPE_FLOATING)
         viewModel.type = type
 
-        if (type == TYPE_FLOATING) {
-            supportActionBar!!.title = getString(R.string.label_floating_apps)
-            //获取数据库中要使用小窗的应用列表，并且放到一个表中，用于在列表中展示
-            viewModel.getAllApps().observe(this@ChooseAppsActivity) { list ->
-                this@ChooseAppsActivity.appsList = list.cast<ArrayList<*>>()
+        when (type) {
+            TYPE_FLOATING -> {
+                supportActionBar!!.title = getString(R.string.label_floating_apps)
+                viewModel.getAllApps().observe(this) { list ->
+                    appsList = list.cast<ArrayList<*>>()
+                    showAppsList(type)
+                }
+            }
+            TYPE_BLACKLIST -> {
+                supportActionBar!!.title = getString(R.string.label_blacklist_apps)
+                viewModel.getAllBlacklistApps().observe(this) { list ->
+                    appsList = list.cast<ArrayList<*>>()
+                    showAppsList(type)
+                }
+            }
+            TYPE_LANDSCAPE -> {
+                supportActionBar!!.title = getString(R.string.label_landscape_apps)
+                val landscapePkgs = viewModel.getAllLandscapeApps()
+                appsList = ArrayList(landscapePkgs)
                 showAppsList(type)
             }
-        } else {
-            supportActionBar!!.title = getString(R.string.label_notification_apps)
-            viewModel.getAllNotificationApps().observe(this) { list ->
-                //allAppsList.clear()
-                this.appsList = list.cast<ArrayList<*>>()
-                showAppsList(type)
+            else -> {
+                supportActionBar!!.title = getString(R.string.label_notification_apps)
+                viewModel.getAllNotificationApps().observe(this) { list ->
+                    appsList = list.cast<ArrayList<*>>()
+                    showAppsList(type)
+                }
             }
         }
-
     }
 
     @OptIn(DelicateCoroutinesApi::class)
     private fun showAppsList(type: Int) {
         if (firstObserver || needToUpdateView) {
             GlobalScope.launch(Dispatchers.IO) {
-                val intent = Intent(Intent.ACTION_MAIN, null)
-                intent.addCategory(Intent.CATEGORY_LAUNCHER)
-
                 if (allAppsList.isEmpty()) {
-                    /**
-                     * 获取所有用户下的应用（包括工作资料）
-                     */
                     userManager.userProfiles.forEach {
                         allAppsList.addAll(launcherApps.getActivityList(null, it))
                     }
@@ -112,7 +107,6 @@ class ChooseAppsActivity : AppCompatActivity() {
                 }
 
                 withContext(Dispatchers.Main) {
-                    //加载条关闭
                     binding.lottieView.cancelAnimation()
                     binding.lottieView.animate().alpha(0f).setDuration(300).start()
 
@@ -129,15 +123,10 @@ class ChooseAppsActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_choose_apps, menu)
-
-        //需要在这里获取搜索框
         val searchItem = menu.findItem(R.id.app_bar_search)
         val searchView = searchItem?.actionView.cast<SearchView>()
         searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
-            override fun onQueryTextSubmit(query: String): Boolean {
-                //adapter?.filter?.filter(query)
-                return false
-            }
+            override fun onQueryTextSubmit(query: String): Boolean = false
 
             override fun onQueryTextChange(newText: String): Boolean {
                 filter.filter(newText)
@@ -150,20 +139,15 @@ class ChooseAppsActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
-            android.R.id.home -> {
-                finish()
-            }
+            android.R.id.home -> finish()
             R.id.choose_all -> {
                 needToUpdateView = true
                 viewModel.insertAllApps(allAppsList, userManager)
-                //allAppsList.clear()
             }
             R.id.choose_all_cancel -> {
-                //如果列表是空，则不进行更新
                 if (appsList != null && appsList!!.isNotEmpty()) {
                     needToUpdateView = true
                     viewModel.deleteAll()
-                    //allAppsList.clear()
                 }
             }
         }
@@ -173,7 +157,7 @@ class ChooseAppsActivity : AppCompatActivity() {
     inner class AppNameFilter : Filter() {
         override fun performFiltering(constraint: CharSequence): FilterResults {
             val results = FilterResults()
-            var newAllAppsList =  ArrayList<LauncherActivityInfo>()
+            var newAllAppsList = ArrayList<LauncherActivityInfo>()
 
             if (constraint.isBlank()) {
                 newAllAppsList = allAppsList
@@ -194,10 +178,12 @@ class ChooseAppsActivity : AppCompatActivity() {
         override fun publishResults(constraint: CharSequence, results: FilterResults) {
             adapter?.updateDate(results.values.cast<ArrayList<LauncherActivityInfo>>())
         }
-
     }
 
     companion object {
         const val TYPE_FLOATING = 1
+        const val TYPE_NOTIFICATION = 2
+        const val TYPE_BLACKLIST = 3
+        const val TYPE_LANDSCAPE = 4
     }
 }

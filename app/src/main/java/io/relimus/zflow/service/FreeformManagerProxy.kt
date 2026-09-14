@@ -23,9 +23,25 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
                 val result = method.invoke(obj, *(args ?: emptyArray()))
                 Log.d(TAG, "Called service method: ${method.name}")
                 result
-            } catch (e: Exception) {
+            } catch (e: java.lang.reflect.InvocationTargetException) {
+                val cause = e.targetException ?: e
+                Log.e(TAG, "Service method failed: ${method.name}", cause)
+                defaultValue(method.returnType)
+            } catch (e: Throwable) {
                 Log.e(TAG, "Error calling ${method.name}", e)
-                null
+                defaultValue(method.returnType)
+            }
+        }
+
+        private fun defaultValue(type: Class<*>): Any? {
+            return when (type) {
+                Boolean::class.javaPrimitiveType -> false
+                Int::class.javaPrimitiveType -> -1
+                Long::class.javaPrimitiveType -> -1L
+                Float::class.javaPrimitiveType -> 0f
+                Double::class.javaPrimitiveType -> 0.0
+                Void.TYPE -> null
+                else -> null
             }
         }
     }
@@ -74,7 +90,10 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         freeformSizeLand: Int,
         floatViewSize: Int,
         dimAmount: Int,
-        manualAdjustFreeformRotation: Boolean
+        manualAdjustFreeformRotation: Boolean,
+        sourceRotation: Int,
+        sourceScreenWidth: Int,
+        sourceScreenHeight: Int
     ) {
         service?.createWindow(
             componentName,
@@ -85,7 +104,10 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
             freeformSizeLand,
             floatViewSize,
             dimAmount,
-            manualAdjustFreeformRotation
+            manualAdjustFreeformRotation,
+            sourceRotation,
+            sourceScreenWidth,
+            sourceScreenHeight
         )
     }
 
@@ -98,7 +120,10 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         freeformSizeLand: Int,
         floatViewSize: Int,
         dimAmount: Int,
-        manualAdjustFreeformRotation: Boolean
+        manualAdjustFreeformRotation: Boolean,
+        sourceRotation: Int,
+        sourceScreenWidth: Int,
+        sourceScreenHeight: Int
     ) {
         service?.createMiniWindow(
             componentName,
@@ -109,7 +134,10 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
             freeformSizeLand,
             floatViewSize,
             dimAmount,
-            manualAdjustFreeformRotation
+            manualAdjustFreeformRotation,
+            sourceRotation,
+            sourceScreenWidth,
+            sourceScreenHeight
         )
     }
 

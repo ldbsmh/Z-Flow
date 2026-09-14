@@ -1,0 +1,136 @@
+name: Build Z-Flow Release
+
+on:
+  push:
+    branches: [ master ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '**.txt'
+  pull_request:
+    branches: [ master ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Release APK (JDK 21)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      # 版本号从 1 开始重新编号：使用本仓库的构建序号 BUILD_NUMBER。
+      # BUILD_NUMBER 由 VERSION_OFFSET 把 github.run_number 归一到 1 起算，
+      # 这样即使之前已有若干次 Actions 运行，本次改动后的第一个包也是 1。
+      - name: Resolve build number
+        id: ver
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+          # 首次启用本方案时，把 VERSION_OFFSET 设为「当前 run_number - 1」，
+          # 使本次构建的 BUILD_NUMBER 正好等于 1；之后无需再改。
+          VERSION_OFFSET: ${{ vars.VERSION_OFFSET }}
+        run: |
+          set -eu
+          OFFSET="${VERSION_OFFSET:-0}"
+          BUILD_NUMBER=$(( RUN_NUMBER - OFFSET ))
+          if [ "$BUILD_NUMBER" -lt 1 ]; then
+            BUILD_NUMBER=1
+          fi
+          VERSION_NAME="1.0.${BUILD_NUMBER}"
+          echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "versionCode=${BUILD_NUMBER}  versionName=${VERSION_NAME}"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 从 Secret 解码签名密钥（keystore 不入库，只存在 GitHub Secrets）
+      - name: Decode signing keystore
+        id: keystore
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          set -eu
+          if [ -z "${SIGNING_KEYSTORE_BASE64:-}" ]; then
+            echo "::warning::未配置 SIGNING_KEYSTORE_BASE64，跳过签名，产物为未签名 APK。"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p keystore
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 -d > keystore/release.jks
+          if [ ! -s keystore/release.jks ]; then
+            echo "::error::keystore 解码失败（文件为空），请检查 SIGNING_KEYSTORE_BASE64 是否为单行 base64。"
+            exit 1
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "keystore decoded: $(wc -c < keystore/release.jks) bytes"
+
+      # 通过 -P 注入版本号；签名信息通过环境变量传入（不落盘、不进日志）
+      - name: Build Release APK
+        env:
+          SIGNING_STORE_FILE: keystore/release.jks
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+        run: |
+          if [ "${{ steps.keystore.outputs.available }}" != "true" ] \
+            || [ -z "${SIGNING_STORE_PASSWORD:-}" ] || [ -z "${SIGNING_KEY_PASSWORD:-}" ]; then
+            echo "::warning::签名信息不完整，产物为未签名 APK。"
+          fi
+          ./gradlew assembleRelease --stacktrace -x lintVitalRelease \
+            -PzflowVersionCode=${{ steps.ver.outputs.build_number }} \
+            -PzflowVersionName=${{ steps.ver.outputs.version_name }}
+
+      # 构建后立即清理解码出的密钥，避免留在 runner 工作区
+      - name: Cleanup keystore
+        if: always()
+        run: rm -f keystore/release.jks
+
+      - name: Rename APK with version
+        id: rename
+        run: |
+          set -eu
+          SRC=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          if [ -z "$SRC" ]; then
+            echo "No APK produced" >&2
+            exit 1
+          fi
+          DEST="app/build/outputs/apk/release/Z-Flow-v${{ steps.ver.outputs.version_name }}-build${{ steps.ver.outputs.build_number }}.apk"
+          if [ "$SRC" != "$DEST" ]; then
+            mv "$SRC" "$DEST"
+          fi
+          echo "apk_path=${DEST}" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$(basename "$DEST")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Z-Flow-v${{ steps.ver.outputs.version_name }}-build${{ steps.ver.outputs.build_number }}
+          path: ${{ steps.rename.outputs.apk_path }}
+          retention-days: 14
+
+      - name: Build summary
+        run: |
+          {
+            echo "### Z-Flow 构建完成"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| versionCode | ${{ steps.ver.outputs.build_number }} |"
+            echo "| versionName | ${{ steps.ver.outputs.version_name }} |"
+            echo "| APK | ${{ steps.rename.outputs.apk_name }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

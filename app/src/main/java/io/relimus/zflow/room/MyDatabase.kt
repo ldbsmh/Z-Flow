@@ -7,14 +7,19 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-/**
- * @author sunshine
- * @date 2021/1/31
- */
-@Database(entities = [FreeFormAppsEntity::class, NotificationAppsEntity::class], version = 5, exportSchema = false)
+@Database(
+    entities = [
+        FreeFormAppsEntity::class,
+        NotificationAppsEntity::class,
+        FreeformBlacklistEntity::class
+    ],
+    version = 6,
+    exportSchema = false
+)
 abstract class MyDatabase : RoomDatabase() {
     abstract val freeFormAppsDao: FreeFormAppsDao
     abstract val notificationAppsDao: NotificationAppsDao
+    abstract val freeformBlacklistDao: FreeformBlacklistDao
 
     companion object {
         private var database: MyDatabase? = null
@@ -22,12 +27,17 @@ abstract class MyDatabase : RoomDatabase() {
         @Synchronized
         fun getDatabase(context: Context): MyDatabase {
             if (database == null) {
-                database = Room.databaseBuilder(context.applicationContext, MyDatabase::class.java, "database.db")
+                database = Room.databaseBuilder(
+                    context.applicationContext,
+                    MyDatabase::class.java,
+                    "database.db"
+                )
                     .allowMainThreadQueries()
                     .addMigrations(MIGRATION_1_2)
                     .addMigrations(MIGRATION_2_3)
                     .addMigrations(MIGRATION_3_4)
                     .addMigrations(MIGRATION_4_5)
+                    .addMigrations(MIGRATION_5_6)
                     .build()
             }
             return database!!
@@ -45,9 +55,7 @@ abstract class MyDatabase : RoomDatabase() {
 
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "DROP TABLE IF EXISTS 'CompatibleAppsEntity'"
-                )
+                db.execSQL("DROP TABLE IF EXISTS 'CompatibleAppsEntity'")
                 db.execSQL(
                     "ALTER TABLE 'FreeFormAppsEntity'" +
                             "ADD 'sortNum' int NOT NULL DEFAULT 0"
@@ -57,9 +65,7 @@ abstract class MyDatabase : RoomDatabase() {
 
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    "ALTER TABLE 'FreeFormAppsEntity' RENAME TO 'FreeFormAppsEntity_OLD'"
-                )
+                db.execSQL("ALTER TABLE 'FreeFormAppsEntity' RENAME TO 'FreeFormAppsEntity_OLD'")
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS" +
                             "'FreeFormAppsEntity'" +
@@ -69,9 +75,7 @@ abstract class MyDatabase : RoomDatabase() {
                     "INSERT INTO 'FreeFormAppsEntity'('packageName')" +
                             "SELECT packageName from 'FreeFormAppsEntity_OLD'"
                 )
-                db.execSQL(
-                    "DROP TABLE 'FreeFormAppsEntity_OLD'"
-                )
+                db.execSQL("DROP TABLE 'FreeFormAppsEntity_OLD'")
             }
         }
 
@@ -82,6 +86,18 @@ abstract class MyDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "ALTER TABLE 'NotificationAppsEntity' ADD COLUMN 'userId' INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS 'FreeformBlacklistEntity' (" +
+                            "'packageName' TEXT NOT NULL, " +
+                            "'userId' INTEGER NOT NULL DEFAULT 0, " +
+                            "PRIMARY KEY('packageName', 'userId')" +
+                            ")"
                 )
             }
         }

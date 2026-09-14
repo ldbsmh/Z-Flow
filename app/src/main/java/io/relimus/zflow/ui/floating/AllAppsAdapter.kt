@@ -10,23 +10,23 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.github.promeg.pinyinhelper.Pinyin
 import io.relimus.zflow.R
+import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.systemapi.UserHandle
 import io.relimus.zflow.xposed.services.FreeformService
 
-/**
- * @author sunshine
- * @date 2021/3/7
- */
 class AllAppsAdapter(
     private val context: Context,
     private val allAppsList: ArrayList<LauncherActivityInfo>,
     private val callback: ChooseAppFloatingView.ClickListener
 ) : RecyclerView.Adapter<AllAppsAdapter.ViewHolder>() {
+
+    private val repository = DatabaseRepository(context)
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val icon: ImageView = itemView.findViewById(R.id.imageView_icon)
@@ -44,9 +44,7 @@ class AllAppsAdapter(
         )
     }
 
-    override fun getItemCount(): Int {
-        return allAppsList.size
-    }
+    override fun getItemCount(): Int = allAppsList.size
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val applicationInfo = allAppsList[position].applicationInfo
@@ -59,12 +57,19 @@ class AllAppsAdapter(
                 .into(holder.icon)
             holder.appName.text = allAppsList[position].label
             holder.click.setOnClickListener {
-                val userId = UserHandle.getUserId(allAppsList[position].user, allAppsList[position].applicationInfo.uid)
+                val userId = UserHandle.getUserId(allAppsList[position].user, applicationInfo.uid)
+
+                if (repository.isBlacklisted(packageName, userId)) {
+                    Toast.makeText(context, context.getString(R.string.app_blacklisted), Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+
                 context.startService(
                     Intent(context, FreeformService::class.java)
                         .setAction(FreeformService.ACTION_START_INTENT)
                         .putExtra(Intent.EXTRA_USER, userId)
-                        .putExtra(Intent.EXTRA_INTENT,
+                        .putExtra(
+                            Intent.EXTRA_INTENT,
                             Intent(Intent.ACTION_MAIN)
                                 .setComponent(ComponentName(packageName, activityName))
                                 .setPackage(packageName)
@@ -78,7 +83,7 @@ class AllAppsAdapter(
 
     fun getIndex(str: String?): Int {
         allAppsList.forEach {
-            if(Pinyin.toPinyin(it.label[0]).substring(0..0) == str){
+            if (Pinyin.toPinyin(it.label[0]).substring(0..0) == str) {
                 return allAppsList.indexOf(it)
             }
         }

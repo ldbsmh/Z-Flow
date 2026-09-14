@@ -11,6 +11,12 @@ Z-Flow is an APP that is activated through Xposed and can display most apps in t
 - Open the favorites app with a tile
 - Make the APP that sends notifications open in freeform mode
 
+修改内容：
+1.添加桌面图标长按打开小窗逻辑
+2.修改小窗贴边样式，小窗拖到屏幕底部关闭应用
+3.小窗限制为2个
+4.添加小窗黑名单
+5.微调接管应用通知样式
 ## Download
 [Release](https://github.com/relimus/Z-Flow/releases/)
 

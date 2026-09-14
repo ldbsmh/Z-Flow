@@ -3,21 +3,20 @@ package io.relimus.zflow.ui.choose_apps
 import android.app.Application
 import android.content.Context
 import android.content.pm.LauncherActivityInfo
+import android.net.Uri
+import android.os.Bundle
 import android.os.UserManager
+import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.room.FreeFormAppsEntity
+import io.relimus.zflow.room.FreeformBlacklistEntity
 import io.relimus.zflow.room.NotificationAppsEntity
 import io.relimus.zflow.systemapi.UserHandle
-import androidx.core.content.edit
 
-/**
- * @author sunshine
- * @date 2021/1/31
- */
-class ChooseAppsViewModel(application: Application) : AndroidViewModel(application){
+class ChooseAppsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = DatabaseRepository(application)
     private val sp = application.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
@@ -32,12 +31,20 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         return repository.getAllNotification()
     }
 
+    fun getAllBlacklistApps(): LiveData<List<FreeformBlacklistEntity>?> {
+        return repository.getAllBlacklist()
+    }
+
     fun insertApps(packageName: String, userId: Int) {
         when (type) {
             2 -> {
                 repository.insertNotification(packageName, userId)
                 notifyNotificationAppsChanged()
             }
+            3 -> {
+                repository.insertBlacklist(packageName, userId)
+            }
+            4 -> addLandscapeApp(packageName)
             else -> repository.insertFreeForm(packageName, userId)
         }
     }
@@ -48,6 +55,10 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 repository.deleteNotification(packageName, userId)
                 notifyNotificationAppsChanged()
             }
+            3 -> {
+                repository.deleteBlacklist(packageName, userId)
+            }
+            4 -> removeLandscapeApp(packageName)
             else -> {
                 repository.deleteFreeForm(packageName, userId)
             }
@@ -60,22 +71,30 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 repository.deleteAllNotification()
                 notifyNotificationAppsChanged()
             }
+            3 -> {
+                repository.deleteAllBlacklist()
+            }
+            4 -> clearAllLandscapeApps()
             1 -> {
                 repository.deleteAllFreeForm()
             }
         }
     }
 
-    //添加列表中所有软件
     fun insertAllApps(allAppsList: ArrayList<LauncherActivityInfo>, userManager: UserManager) {
         deleteAll()
         allAppsList.forEach {
+            val userId = UserHandle.getUserId(it.user, it.applicationInfo.uid)
             when (type) {
                 2 -> {
-                    repository.insertNotification(it.applicationInfo.packageName, UserHandle.getUserId(it.user, it.applicationInfo.uid))
+                    repository.insertNotification(it.applicationInfo.packageName, userId)
                     notifyNotificationAppsChanged()
                 }
-                else -> repository.insertFreeForm(it.applicationInfo.packageName, UserHandle.getUserId(it.user, it.applicationInfo.uid))
+                3 -> {
+                    repository.insertBlacklist(it.applicationInfo.packageName, userId)
+                }
+                4 -> addLandscapeApp(it.applicationInfo.packageName)
+                else -> repository.insertFreeForm(it.applicationInfo.packageName, userId)
             }
         }
     }
@@ -92,4 +111,37 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         return sp.getBoolean(key, default)
     }
 
+    // ========== 横屏应用管理（SharedPreferences + ContentProvider）==========
+
+    private val landscapeUri = Uri.parse("content://io.relimus.zflow.landscape.provider")
+
+    fun getAllLandscapeApps(): List<String> {
+        return try {
+            getApplication<Application>().contentResolver.call(
+                landscapeUri, "get_all", null, null
+            )?.getStringArrayList("package_list") ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun addLandscapeApp(packageName: String) {
+        getApplication<Application>().contentResolver.call(
+            landscapeUri, "add", null,
+            Bundle().apply { putString("package_name", packageName) }
+        )
+    }
+
+    private fun removeLandscapeApp(packageName: String) {
+        getApplication<Application>().contentResolver.call(
+            landscapeUri, "remove", null,
+            Bundle().apply { putString("package_name", packageName) }
+        )
+    }
+
+    private fun clearAllLandscapeApps() {
+        getApplication<Application>().contentResolver.call(
+            landscapeUri, "clear_all", null, null
+        )
+    }
 }

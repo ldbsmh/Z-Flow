@@ -24,6 +24,9 @@ interface NotificationAppsDao {
     @Query("SELECT * FROM NotificationAppsEntity")
     fun getAllByFlow() : Flow<List<NotificationAppsEntity>?>
 
+    @Query("SELECT packageName FROM NotificationAppsEntity")
+    fun getAllPackageNames() : List<String>?
+
     @Query("DELETE FROM NotificationAppsEntity")
     fun deleteAll()
 }

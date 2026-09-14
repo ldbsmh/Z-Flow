@@ -2,12 +2,14 @@ package io.relimus.zflow.utils
 
 import android.Manifest
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.Settings
 import android.provider.Settings.SettingNotFoundException
 import android.text.TextUtils.SimpleStringSplitter
 import androidx.core.app.ActivityCompat
+import io.relimus.zflow.service.KeepAliveService
 
 /**
  * @date 2022/8/26
@@ -30,34 +32,51 @@ object PermissionUtils {
     }
 
     fun isAccessibilitySettingsOn(context: Context): Boolean {
-        var accessibilityEnabled = 0
-        val service = context.packageName + "/io.relimus.zflow.service.KeepAliveService"
-        try {
-            accessibilityEnabled = Settings.Secure.getInt(
+        val componentName = ComponentName(
+            context,
+            KeepAliveService::class.java
+        )
+    
+        val expectedFull = componentName.flattenToString()
+        val expectedShort = componentName.flattenToShortString()
+        val expectedLegacy = context.packageName + "/io.relimus.zflow.service.KeepAliveService"
+    
+        val accessibilityEnabled = try {
+            Settings.Secure.getInt(
                 context.applicationContext.contentResolver,
                 Settings.Secure.ACCESSIBILITY_ENABLED
             )
-        } catch (e: SettingNotFoundException) {
+        } catch (_: SettingNotFoundException) {
+            0
         }
-        val mStringColonSplitter = SimpleStringSplitter(':')
-        if (accessibilityEnabled == 1) {
-            val settingValue = Settings.Secure.getString(
-                context.applicationContext.contentResolver,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            )
-            if (settingValue != null) {
-                mStringColonSplitter.setString(settingValue)
-                while (mStringColonSplitter.hasNext()) {
-                    val accessibilityService = mStringColonSplitter.next()
-                    if (accessibilityService.equals(service, ignoreCase = true)) {
-                        return true
-                    }
-                }
+    
+        if (accessibilityEnabled != 1) {
+            return false
+        }
+    
+        val settingValue = Settings.Secure.getString(
+            context.applicationContext.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+    
+        val splitter = SimpleStringSplitter(':')
+        splitter.setString(settingValue)
+    
+        while (splitter.hasNext()) {
+            val enabledService = splitter.next()
+    
+            if (
+                enabledService.equals(expectedFull, ignoreCase = true) ||
+                enabledService.equals(expectedShort, ignoreCase = true) ||
+                enabledService.equals(expectedLegacy, ignoreCase = true)
+            ) {
+                return true
             }
         }
+    
         return false
     }
-
+    
     fun checkPostNotificationPermission(activity: Activity) {
         if (ActivityCompat.checkSelfPermission(
                 activity,
@@ -66,7 +85,8 @@ object PermissionUtils {
         ) {
             ActivityCompat.requestPermissions(
                 activity,
-                listOf(Manifest.permission.POST_NOTIFICATIONS).toTypedArray(), 100
+                listOf(Manifest.permission.POST_NOTIFICATIONS).toTypedArray(),
+                100
             )
         }
     }

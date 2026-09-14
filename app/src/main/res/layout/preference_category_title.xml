@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  次级设置界面的分类标题（如「通知」「基本设置」）。
+  默认 PreferenceCategory 标题偏小且带主题色，这里改为更大字号、加粗、左对齐。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingHorizontal="@dimen/card_view_child_padding"
+    android:paddingTop="20dp"
+    android:paddingBottom="8dp">
+
+    <TextView
+        android:id="@android:id/title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="start|center_vertical"
+        android:textAlignment="viewStart"
+        android:textColor="@color/color_text"
+        android:textSize="@dimen/preference_category_title_size"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@android:id/summary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:gravity="start"
+        android:textAlignment="viewStart"
+        android:textColor="?android:textColorSecondary"
+        android:textSize="14sp"
+        android:visibility="gone" />
+</LinearLayout>

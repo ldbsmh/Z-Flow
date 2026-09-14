@@ -6,6 +6,7 @@ import android.app.ActivityOptions
 import android.app.TaskStackListener
 import android.content.ComponentName
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -17,26 +18,21 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceControl
+import de.robv.android.xposed.XposedHelpers
 import io.github.kyuubiran.ezxhelper.core.misc.paramTypes
 import io.github.kyuubiran.ezxhelper.core.misc.params
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.bean.MotionEventBean
-import io.relimus.zflow.xposed.hook.utils.XLog
-import io.relimus.zflow.xposed.hook.HookReload
+import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.IFreeformManager
+import io.relimus.zflow.xposed.hook.HookReload
+import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.ui.window.FreeformWindow
 import io.relimus.zflow.xposed.utils.Instances
-import de.robv.android.xposed.XposedHelpers
-import io.relimus.zflow.utils.cast
 
-/**
- * Core FreeformManager service running in system_server.
- * Implements IFreeformManager.Stub for AIDL communication with app.
- * Manages VirtualDisplay windows, input injection, and task management.
- */
 @SuppressLint("StaticFieldLeak")
 object FreeformManager : IFreeformManager.Stub() {
     private const val TAG = "FreeformManager"
@@ -45,25 +41,63 @@ object FreeformManager : IFreeformManager.Stub() {
     private val displayIdList = mutableListOf<Int>()
     private var isReady = false
 
-    // 存储 displayId 对应的 taskId 列表
+    // displayId -> taskId list
     private val displayTaskMap = mutableMapOf<Int, MutableList<Int>>()
+
+    // packageName -> latest created/alive taskId
+    private val packageLatestTaskMap = mutableMapOf<String, Int>()
+
+    // taskId -> packageName
+    private val taskPackageMap = mutableMapOf<Int, String>()
 
     lateinit var activityManagerService: Any
         internal set
 
-    // TaskStackListener 监听应用方向变化
     private val taskStackListener = object : TaskStackListener() {
         override fun onTaskCreated(taskId: Int, componentName: ComponentName?) {
-            // 不需要处理，因为窗口创建时会自动关联 task
+            // 所有回调统一切换到主线程，保证线程安全
+            runOnMainThread {
+                val packageName = componentName?.packageName
+                XLog.d("$TAG: onTaskCreated taskId=$taskId component=$componentName")
+                if (!packageName.isNullOrEmpty()) {
+                    taskPackageMap[taskId] = packageName
+                    packageLatestTaskMap[packageName] = taskId
+
+                    val managedDisplayId = displayTaskMap.entries
+                        .find { it.value.contains(taskId) }
+                        ?.key
+
+                    if (managedDisplayId != null) {
+                        bindTaskToWindowIfMatch(taskId, managedDisplayId)
+                    }
+                }
+            }
         }
 
         override fun onTaskRemovalStarted(taskInfo: ActivityManager.RunningTaskInfo) {
-            // 如果是小窗内的任务被移除，真正销毁对应的窗口
             runOnMainThread {
-                displayTaskMap.entries.find { it.value.contains(taskInfo.taskId) }?.let { entry ->
+                val displayId = try {
+                    XposedHelpers.getIntField(taskInfo, "displayId")
+                } catch (_: Exception) {
+                    try {
+                        XposedHelpers.callMethod(taskInfo, "getDisplayId") as Int
+                    } catch (_: Exception) {
+                        -1
+                    }
+                }
+
+                val removedTaskId = taskInfo.taskId
+                val removedPackage = taskPackageMap.remove(removedTaskId)
+                if (!removedPackage.isNullOrEmpty()) {
+                    val latest = packageLatestTaskMap[removedPackage]
+                    if (latest == removedTaskId) {
+                        packageLatestTaskMap.remove(removedPackage)
+                    }
+                }
+
+                displayTaskMap.entries.find { it.value.contains(removedTaskId) }?.let { entry ->
                     val displayId = entry.key
-                    entry.value.remove(taskInfo.taskId)
-                    // 如果这个 display 上没有任务了，真正销毁窗口
+                    entry.value.remove(removedTaskId)
                     if (entry.value.isEmpty()) {
                         getWindow(displayId)?.realDestroy()
                     }
@@ -73,37 +107,37 @@ object FreeformManager : IFreeformManager.Stub() {
 
         override fun onTaskDisplayChanged(taskId: Int, newDisplayId: Int) {
             runOnMainThread {
-                // 记录 task 之前所在的 display
                 val previousDisplayId = displayTaskMap.entries
-                    .find { it.value.contains(taskId) }?.key
+                    .find { it.value.contains(taskId) }
+                    ?.key
 
-                // 更新 task 的 display 映射
                 displayTaskMap.values.forEach { it.remove(taskId) }
+
                 if (displayIdList.contains(newDisplayId)) {
-                    displayTaskMap.getOrPut(newDisplayId) { mutableListOf() }.add(taskId)
+                    displayTaskMap
+                        .getOrPut(newDisplayId) { mutableListOf() }
+                        .add(taskId)
+                    bindTaskToWindowIfMatch(taskId, newDisplayId)
                 }
 
-                // 当任务从虚拟显示器移动到主屏幕时，追踪该任务（用于阻止 relaunch）
                 if (previousDisplayId != null && previousDisplayId != 0 && newDisplayId == 0) {
-                    HookReload.trackedTaskIds.add(taskId)
+                    HookReload.suppressNextRelaunch(taskId)
                 }
 
-                // task 从 VirtualDisplay 移到默认屏幕（用户在桌面点击了同一个 App）
-                // 窗口处于 mini/hidden/closedToBack 状态 → 销毁小窗，让 task 在默认屏幕打开
                 if (previousDisplayId != null && newDisplayId == 0) {
                     val window = getWindow(previousDisplayId)
-                    if (window != null && !window.isDestroyed
-                        && (window.isClosedToBack || window.isFloating || window.isHidden)
+                    if (window != null && !window.isDestroyed &&
+                        (window.isClosedToBack || window.isFloating || window.isHidden)
                     ) {
                         window.realDestroy()
                     }
                 }
+                XLog.d("$TAG: onTaskDisplayChanged taskId=$taskId previous=$previousDisplayId new=$newDisplayId")
             }
         }
 
         override fun onTaskRequestedOrientationChanged(taskId: Int, requestedOrientation: Int) {
             runOnMainThread {
-                // 找到包含此 task 的 display
                 displayTaskMap.entries.find { it.value.contains(taskId) }?.let { entry ->
                     getWindow(entry.key)?.setVirtualDisplayRotation(requestedOrientation)
                 }
@@ -112,7 +146,6 @@ object FreeformManager : IFreeformManager.Stub() {
 
         override fun onActivityRequestedOrientationChanged(taskId: Int, requestedOrientation: Int) {
             runOnMainThread {
-                // Android 10 及以上使用此回调
                 displayTaskMap.entries.find { it.value.contains(taskId) }?.let { entry ->
                     getWindow(entry.key)?.setVirtualDisplayRotation(requestedOrientation)
                 }
@@ -121,26 +154,20 @@ object FreeformManager : IFreeformManager.Stub() {
     }
 
     fun systemReady() {
-        Instances.init(activityManagerService)
-        isReady = true
-
-        // 注册 TaskStackListener
         try {
+            Instances.init(activityManagerService)
             Instances.activityTaskManager.registerTaskStackListener(taskStackListener)
-            XLog.d("$TAG: TaskStackListener registered")
-        } catch (e: Exception) {
-            XLog.e("$TAG: Failed to register TaskStackListener", e)
+            isReady = true
+            XLog.d("$TAG: systemReady completed")
+        } catch (e: Throwable) {
+            isReady = false
+            XLog.e("$TAG: systemReady failed", e)
         }
-
-        XLog.d("$TAG: System ready, FreeformManager initialized")
     }
-
-    // Window management
 
     fun addWindow(window: FreeformWindow) {
         windowList.add(0, window)
         displayIdList.add(0, window.displayId)
-        // 初始化 display 对应的 task 列表
         displayTaskMap[window.displayId] = mutableListOf()
     }
 
@@ -149,7 +176,6 @@ object FreeformManager : IFreeformManager.Stub() {
         if (window != null) {
             windowList.remove(window)
             displayIdList.remove(displayId)
-            // 清理 displayTaskMap
             displayTaskMap.remove(displayId)
         }
     }
@@ -162,17 +188,23 @@ object FreeformManager : IFreeformManager.Stub() {
 
     fun getWindow(displayId: Int): FreeformWindow? = windowList.find { it.displayId == displayId }
 
-    fun isManagedDisplay(displayId: Int): Boolean {
-        return displayIdList.contains(displayId)
+    private fun bindTaskToWindowIfMatch(taskId: Int, displayId: Int) {
+        if (taskId <= 0 || displayId < 0) return
+        val window = getWindow(displayId) ?: return
+        if (window.isDestroyed) return
+
+        val taskPackage = taskPackageMap[taskId]
+        val windowPackage = window.componentName?.packageName
+
+        if (!taskPackage.isNullOrEmpty() && taskPackage == windowPackage) {
+            window.bindTask(taskId)
+        }
     }
 
-    fun getManagedDisplayIds(): IntArray {
-        return displayIdList.toIntArray()
-    }
+    fun isManagedDisplay(displayId: Int): Boolean = displayIdList.contains(displayId)
 
-    /**
-     * 检查指定 displayId 上是否有任务
-     */
+    fun getManagedDisplayIds(): IntArray = displayIdList.toIntArray()
+
     fun hasTaskOnDisplay(displayId: Int): Boolean {
         val taskList = displayTaskMap[displayId]
         return !taskList.isNullOrEmpty()
@@ -182,28 +214,218 @@ object FreeformManager : IFreeformManager.Stub() {
         return displayTaskMap[displayId]?.lastOrNull() ?: -1
     }
 
-    /**
-     * 将指定 display 上的前台 task 移到默认屏幕。
-     * 优先使用 displayTaskMap 中最后一个 task（最新映射），fallback 到传入 taskId。
-     */
-    fun moveTaskFromDisplayToDefault(displayId: Int, fallbackTaskId: Int): Boolean {
-        val taskIdToMove = displayTaskMap[displayId]?.lastOrNull() ?: fallbackTaskId
-        if (taskIdToMove <= 0) return false
+    fun getLatestAliveTaskIdForPackage(packageName: String?): Int {
+        if (packageName.isNullOrEmpty()) return -1
+
+        val mapped = packageLatestTaskMap[packageName] ?: return -1
+        return if (isRootTaskAlive(mapped)) mapped else -1
+    }
+
+    fun resolveBestTaskIdForPackage(
+        packageName: String?,
+        fallbackTaskId: Int
+    ): Int {
+        // Recents supplies the exact task selected by the user. Prefer it over
+        // package-level history because one package may own multiple tasks.
+        if (fallbackTaskId > 0 && isRootTaskAlive(fallbackTaskId)) {
+            return fallbackTaskId
+        }
+
+        val latestAliveTaskId = getLatestAliveTaskIdForPackage(packageName)
+        if (latestAliveTaskId > 0) {
+            return latestAliveTaskId
+        }
+
+        return -1
+    }
+
+    fun isRootTaskAlive(taskId: Int): Boolean {
+        if (taskId <= 0) return false
         return try {
-            Instances.activityTaskManager.moveRootTaskToDisplay(taskIdToMove, Display.DEFAULT_DISPLAY)
-            Instances.activityManager.moveTaskToFront(taskIdToMove, 0)
-            HookReload.trackedTaskIds.add(taskIdToMove)
-            true
-        } catch (e: Exception) {
-            XLog.e("$TAG: Failed to move task $taskIdToMove from display $displayId to default", e)
+            val wms = XposedHelpers.getObjectField(activityManagerService, "mWindowManager")
+            val root = XposedHelpers.getObjectField(wms, "mRoot")
+            findTaskInRoot(root, taskId) != null
+        } catch (_: Throwable) {
             false
         }
     }
 
     /**
-     * 通过 framework 内部 RootWindowContainer 查找 Task SurfaceControl。
-     * 用于 SunOS 风格的 SurfaceControl 过渡动画。
+     * 把任意 taskId 解析为它所属的 **root task id**。
+     *
+     * Android 17 起 Task 层级更深（Task -> TaskFragment -> Task），
+     * anyTaskForId() 会返回非 root 的叶子 task，而
+     * ActivityTaskManagerService.moveRootTaskToDisplay() 只接受 root task id，
+     * 传入叶子 id 会抛：
+     *   IllegalArgumentException: moveRootTaskToTaskDisplayArea: Unknown rootTaskId=N
+     *
+     * 因此迁移前必须先归一到 root task id。解析失败时返回原值。
      */
+    fun resolveRootTaskId(taskId: Int): Int {
+        if (taskId <= 0) return taskId
+        return try {
+            val wms = XposedHelpers.getObjectField(activityManagerService, "mWindowManager")
+            val root = XposedHelpers.getObjectField(wms, "mRoot")
+            val task = findTaskInRoot(root, taskId) ?: return taskId
+
+            val rootTask = runCatching {
+                XposedHelpers.callMethod(task, "getRootTask")
+            }.getOrNull() ?: return taskId
+
+            val rootTaskId = runCatching {
+                XposedHelpers.getIntField(rootTask, "mTaskId")
+            }.getOrElse {
+                runCatching {
+                    XposedHelpers.callMethod(rootTask, "getRootTaskId") as Int
+                }.getOrDefault(taskId)
+            }
+
+            if (rootTaskId > 0) rootTaskId else taskId
+        } catch (_: Throwable) {
+            taskId
+        }
+    }
+
+    fun getTaskDisplayId(taskId: Int): Int {
+        if (taskId <= 0) return -1
+        return try {
+            val wms = XposedHelpers.getObjectField(activityManagerService, "mWindowManager")
+            val root = XposedHelpers.getObjectField(wms, "mRoot")
+            val task = findTaskInRoot(root, taskId) ?: return -1
+
+            try {
+                XposedHelpers.callMethod(task, "getDisplayId") as Int
+            } catch (_: Throwable) {
+                val displayContent = XposedHelpers.callMethod(task, "getDisplayContent")
+                XposedHelpers.getIntField(displayContent, "mDisplayId")
+            }
+        } catch (_: Throwable) {
+            -1
+        }
+    }
+
+    /**
+     * 迁移 Task 到指定 Display，只发起请求，不同步验证结果。
+     * 返回 true 表示请求已成功提交，不保证最终迁移成功。
+     */
+    fun moveTaskToDisplaySafely(taskId: Int, displayId: Int): Boolean {
+        if (taskId <= 0 || displayId < 0) {
+            XLog.w("$TAG: Reject move taskId=$taskId displayId=$displayId")
+            return false
+        }
+
+        if (!isRootTaskAlive(taskId)) {
+            XLog.w("$TAG: Task is not alive taskId=$taskId targetDisplay=$displayId")
+            return false
+        }
+
+        // Android 17 起 anyTaskForId() 可能返回叶子 task，而
+        // moveRootTaskToDisplay() 只接受 root task id，必须先归一。
+        val rootTaskId = resolveRootTaskId(taskId)
+
+        val currentDisplayId = getTaskDisplayId(rootTaskId)
+        if (currentDisplayId == displayId) {
+            XLog.d("$TAG: Task already on target display taskId=$rootTaskId displayId=$displayId")
+            return true
+        }
+
+        return try {
+            XLog.d(
+                "$TAG: Request task move taskId=$taskId rootTaskId=$rootTaskId " +
+                    "from=$currentDisplayId to=$displayId"
+            )
+            // Moving an existing fullscreen task changes its display bounds. Some
+            // apps finish or recreate their root activity during that transition.
+            HookReload.suppressNextRelaunch(rootTaskId)
+            if (rootTaskId != taskId) {
+                HookReload.suppressNextRelaunch(taskId)
+            }
+            Instances.activityTaskManager.moveRootTaskToDisplay(rootTaskId, displayId)
+            // 只表示请求已成功提交，不同步判断最终状态。
+            true
+        } catch (e: Throwable) {
+            HookReload.cancelRelaunchSuppression(rootTaskId)
+            HookReload.cancelRelaunchSuppression(taskId)
+            XLog.e(
+                "$TAG: Failed to request task move taskId=$taskId rootTaskId=$rootTaskId " +
+                    "from=$currentDisplayId to=$displayId",
+                e
+            )
+            false
+        }
+    }
+
+    fun moveTaskFromDisplayToDefault(displayId: Int, fallbackTaskId: Int): Boolean {
+        val mappedTaskId = displayTaskMap[displayId]
+            ?.lastOrNull { isRootTaskAlive(it) }
+
+        val taskIdToMove = when {
+            mappedTaskId != null && mappedTaskId > 0 -> mappedTaskId
+            isRootTaskAlive(fallbackTaskId) -> fallbackTaskId
+            else -> -1
+        }
+
+        if (taskIdToMove <= 0) {
+            return false
+        }
+
+        // 同 moveTaskToDisplaySafely：迁移接口只接受 root task id
+        val rootTaskId = resolveRootTaskId(taskIdToMove)
+
+        val currentDisplayId = getTaskDisplayId(rootTaskId)
+
+        return try {
+            if (currentDisplayId == Display.DEFAULT_DISPLAY) {
+                HookReload.suppressNextRelaunch(rootTaskId)
+                if (isRootTaskAlive(rootTaskId)) {
+                    Instances.activityManager.moveTaskToFront(rootTaskId, 0)
+                }
+                true
+            } else {
+                HookReload.suppressNextRelaunch(rootTaskId)
+                Instances.activityTaskManager.moveRootTaskToDisplay(
+                    rootTaskId,
+                    Display.DEFAULT_DISPLAY
+                )
+                if (isRootTaskAlive(rootTaskId)) {
+                    Instances.activityManager.moveTaskToFront(rootTaskId, 0)
+                }
+                true
+            }
+        } catch (e: Exception) {
+            val message = e.message.orEmpty()
+            if (e is IllegalArgumentException &&
+                message.contains("to its current taskDisplayArea")
+            ) {
+                if (isRootTaskAlive(rootTaskId)) {
+                    Instances.activityManager.moveTaskToFront(rootTaskId, 0)
+                }
+                HookReload.suppressNextRelaunch(rootTaskId)
+                return true
+            }
+
+            HookReload.cancelRelaunchSuppression(rootTaskId)
+            XLog.e(
+                "$TAG: Failed to move task $taskIdToMove (root=$rootTaskId) " +
+                    "from display $displayId to default",
+                e
+            )
+            false
+        }
+    }
+
+    fun removeTask(taskId: Int): Boolean {
+        if (taskId <= 0) return false
+
+        return try {
+            XposedHelpers.callMethod(Instances.activityTaskManager, "removeTask", taskId)
+            true
+        } catch (e: Throwable) {
+            XLog.e("$TAG: Failed to remove task $taskId", e)
+            false
+        }
+    }
+
     fun getTaskSurfaceForAnimation(taskId: Int): SurfaceControl? {
         if (taskId <= 0) return null
         return try {
@@ -255,53 +477,78 @@ object FreeformManager : IFreeformManager.Stub() {
             return XposedHelpers.callMethod(root, "getTask", taskId)
         } catch (_: Throwable) {
         }
+        // Android 17：部分构建改用带 Predicate 的 getTask/anyTaskForId 重载，
+        // 上面按参数个数的调用会全部落空，这里按名称+参数个数兜底反射。
+        try {
+            for (method in root.javaClass.methods) {
+                if (method.name != "anyTaskForId" && method.name != "getTask") continue
+                val params = method.parameterTypes
+                if (params.size != 1) continue
+                if (params[0] != Int::class.javaPrimitiveType) continue
+                method.isAccessible = true
+                val result = method.invoke(root, taskId)
+                if (result != null) return result
+            }
+        } catch (_: Throwable) {
+        }
         return null
     }
 
-    /**
-     * 查找指定应用的任意可用窗口（包括后台窗口）
-     */
     fun findAnyWindow(packageName: String?): FreeformWindow? {
         if (packageName == null) return null
+        // 先查已就绪窗口；再查正在初始化（VirtualDisplay 尚未回调、还没进入
+        // windowList）的窗口，避免同一应用多个通知被快速点击时重复建窗。
         return windowList.find {
             !it.isDestroyed && it.componentName?.packageName == packageName
-        }
+        } ?: FreeformWindow.findWindowByPackage(packageName)
     }
 
-    /**
-     * 将所有 mini/hidden 窗口提升到最顶层，确保其在普通窗口之上
-     */
     fun bringMiniWindowsToFront() {
-        // 使用 toList() 创建快照避免并发修改异常
-        // 使用 reversed() 保持正确的 Z-order（后添加的在上层）
         windowList.filter { it.isFloating || it.isHidden }.toList().reversed().forEach { it.moveToTop() }
     }
 
-    /**
-     * 获取当前 mini/hidden 窗口的悬浮位置（排除指定 displayId）
-     */
+    /** 最多同时小窗数量（从 Z-Flow 设置读取，缓存） */
+    @Volatile
+    var maxFreeformWindows: Int = 2
+        private set
+
+    fun refreshMaxFreeformWindows() {
+        // 通过 ContentProvider 从 Z-Flow 进程读取设置（与 BlacklistProvider
+        // 相同模式，跨进程可靠）。system_server 直接 createPackageContext
+        // 读 SP 在部分 ROM 上会被 SELinux 拦截。
+        maxFreeformWindows = runCatching {
+            val uri = Uri.parse(
+                "content://io.relimus.zflow.notification.provider"
+            )
+            val bundle = Instances.systemContext.contentResolver.call(
+                uri,
+                "get_max_freeform_windows",
+                null,
+                Bundle()
+            )
+            (bundle?.getInt("maxFreeform", 2) ?: 2).coerceIn(1, 5)
+        }.onFailure {
+            XLog.e("$TAG: refreshMaxFreeformWindows failed", it)
+        }.getOrDefault(2)
+    }
+
     fun getMiniWindowLocation(excludeDisplayId: Int): IntArray? {
         return windowList.find {
-            (it.isFloating || it.isHidden) && !it.isDestroyed && !it.isClosedToBack
-                    && it.displayId != excludeDisplayId
+            (it.isFloating || it.isHidden) &&
+                !it.isDestroyed &&
+                !it.isClosedToBack &&
+                it.displayId != excludeDisplayId
         }?.getMiniLocation()
     }
 
-    /**
-     * 关闭所有 mini/hidden 状态的窗口（退到后台）
-     */
     fun closeAllMiniWindows() {
         windowList.filter { it.isFloating || it.isHidden }.forEach { it.closeToBack() }
     }
 
-    /**
-     * 关闭所有普通状态的窗口（退到后台）
-     */
     fun closeAllNormalWindows() {
-        windowList.filter { !it.isFloating && !it.isHidden && !it.isClosedToBack }.forEach { it.closeToBack() }
+        windowList.filter { !it.isFloating && !it.isHidden && !it.isClosedToBack }
+            .forEach { it.closeToBack() }
     }
-
-    // IFreeformManager implementation
 
     override fun getVersionName(): String = BuildConfig.VERSION_NAME
 
@@ -318,7 +565,10 @@ object FreeformManager : IFreeformManager.Stub() {
         freeformSizeLand: Int,
         floatViewSize: Int,
         dimAmount: Int,
-        manualAdjustFreeformRotation: Boolean
+        manualAdjustFreeformRotation: Boolean,
+        sourceRotation: Int,
+        sourceScreenWidth: Int,
+        sourceScreenHeight: Int
     ) {
         if (!isReady) {
             XLog.e("$TAG: Service not ready")
@@ -326,42 +576,58 @@ object FreeformManager : IFreeformManager.Stub() {
         }
         runOnMainThread {
             try {
+                refreshMaxFreeformWindows()
                 Instances.iStatusBarService.collapsePanels()
 
-                // 1. 检查是否已经有一个处于后台的同名应用窗口
                 val existingWindow = findAnyWindow(componentName?.packageName)
                 if (existingWindow != null) {
                     if (existingWindow.isClosedToBack) {
-                        // 如果在后台，恢复它
-                        closeAllNormalWindows()
                         existingWindow.restoreFromBack()
                         bringMiniWindowsToFront()
                         return@runOnMainThread
                     } else if (existingWindow.isFloating || existingWindow.isHidden) {
-                        // 如果是 mini/hidden 状态，恢复到正常模式
-                        closeAllNormalWindows()
                         existingWindow.restoreToNormalView()
+                        return@runOnMainThread
+                    } else {
+                        // 已有一个正常显示的窗口：同一应用只保留一个小窗，
+                        // 直接把它提到最上层，不再创建重复窗口。
+                        existingWindow.moveToTop()
                         return@runOnMainThread
                     }
                 }
 
-                // 2. 如果不存在，关闭当前普通状态窗口，创建新窗口
-                closeAllNormalWindows()
+                val resolvedTaskId = resolveBestTaskIdForPackage(
+                    componentName?.packageName,
+                    taskId
+                )
 
-                // Build config from parameters
+                // DPI 将在 FreeformWindow 内部强制跟随物理屏幕
                 val config = FreeformConfig(
-                    freeformDpi = freeformDpi,
+                    freeformDpi = freeformDpi, // 传入但最终会被覆盖
                     freeformSize = freeformSize / 100f,
                     freeformSizeLand = freeformSizeLand / 100f,
                     floatViewSize = floatViewSize / 100f,
                     dimAmount = dimAmount / 100f,
-                    manualAdjustFreeformRotation = manualAdjustFreeformRotation
+                    manualAdjustFreeformRotation = manualAdjustFreeformRotation,
+                    defaultLandscape = isLandscapeApp(componentName?.packageName)
                 )
-                // Pass componentName, userId, taskId to FreeformWindow
-                // Activity will be started in onSurfaceTextureAvailable after VirtualDisplay is created
-                FreeformWindow(Instances.systemUiContext, componentName, userId, taskId, config)
 
-                // 将 mini 窗口提升到最顶层
+                val traceId = XLog.newTraceId()
+                XLog.d("$TAG: [$traceId] createWindow component=$componentName userId=$userId inputTaskId=$taskId resolvedTaskId=$resolvedTaskId")
+
+                FreeformWindow(
+                    Instances.systemUiContext,
+                    componentName,
+                    userId,
+                    resolvedTaskId,
+                    config,
+                    allowTapOutsideToClose = false,
+                    sourceRotation = sourceRotation,
+                    sourceScreenWidth = sourceScreenWidth,
+                    sourceScreenHeight = sourceScreenHeight,
+                    traceId = traceId
+                )
+
                 bringMiniWindowsToFront()
             } catch (e: Exception) {
                 XLog.e("$TAG: Failed to create window", e)
@@ -378,7 +644,10 @@ object FreeformManager : IFreeformManager.Stub() {
         freeformSizeLand: Int,
         floatViewSize: Int,
         dimAmount: Int,
-        manualAdjustFreeformRotation: Boolean
+        manualAdjustFreeformRotation: Boolean,
+        sourceRotation: Int,
+        sourceScreenWidth: Int,
+        sourceScreenHeight: Int
     ) {
         if (!isReady) {
             XLog.e("$TAG: Service not ready")
@@ -386,9 +655,9 @@ object FreeformManager : IFreeformManager.Stub() {
         }
         runOnMainThread {
             try {
+                refreshMaxFreeformWindows()
                 Instances.iStatusBarService.collapsePanels()
 
-                // 同应用已有可见 mini/hidden 窗口 → 直接提到前台
                 val existing = findAnyWindow(componentName?.packageName)
                 if (existing != null && !existing.isDestroyed) {
                     if (!existing.isClosedToBack && (existing.isFloating || existing.isHidden)) {
@@ -398,13 +667,13 @@ object FreeformManager : IFreeformManager.Stub() {
                     existing.realDestroy()
                 }
 
-                // 继承已有 mini 窗口位置
-                val inheritedLocation = windowList.find {
-                    (it.isFloating || it.isHidden) && !it.isDestroyed && !it.isClosedToBack
-                }?.getMiniLocation()
+                val packageName = componentName?.packageName
+                val landscapeApp = isLandscapeApp(packageName)
 
-                closeAllMiniWindows()
-                closeAllNormalWindows()
+                val resolvedTaskId = resolveBestTaskIdForPackage(
+                    packageName,
+                    taskId
+                )
 
                 val config = FreeformConfig(
                     freeformDpi = freeformDpi,
@@ -412,12 +681,30 @@ object FreeformManager : IFreeformManager.Stub() {
                     freeformSizeLand = freeformSizeLand / 100f,
                     floatViewSize = floatViewSize / 100f,
                     dimAmount = dimAmount / 100f,
-                    manualAdjustFreeformRotation = manualAdjustFreeformRotation
+                    manualAdjustFreeformRotation = manualAdjustFreeformRotation,
+                    defaultLandscape = landscapeApp
                 )
+
+                val inheritedLocation = windowList.find {
+                    (it.isFloating || it.isHidden) && !it.isDestroyed && !it.isClosedToBack
+                }?.getMiniLocation()
+
+                val traceId = XLog.newTraceId()
+                XLog.d("$TAG: [$traceId] createMiniWindow component=$componentName userId=$userId inputTaskId=$taskId resolvedTaskId=$resolvedTaskId")
+
                 FreeformWindow(
-                    Instances.systemUiContext, componentName, userId, taskId, config,
+                    Instances.systemUiContext,
+                    componentName,
+                    userId,
+                    resolvedTaskId,
+                    config,
                     directToMini = true,
-                    inheritedMiniLocation = inheritedLocation
+                    inheritedMiniLocation = inheritedLocation,
+                    allowTapOutsideToClose = false,
+                    sourceRotation = sourceRotation,
+                    sourceScreenWidth = sourceScreenWidth,
+                    sourceScreenHeight = sourceScreenHeight,
+                    traceId = traceId
                 )
             } catch (e: Exception) {
                 XLog.e("$TAG: Failed to create mini window", e)
@@ -470,8 +757,12 @@ object FreeformManager : IFreeformManager.Stub() {
                     count,
                     pointerProperties,
                     pointerCoords,
-                    0, 0, 1f, 1f,
-                    -1, 0,
+                    0,
+                    0,
+                    1f,
+                    1f,
+                    -1,
+                    0,
                     InputDevice.SOURCE_TOUCHSCREEN,
                     0
                 )
@@ -508,7 +799,13 @@ object FreeformManager : IFreeformManager.Stub() {
                 )
                 Instances.inputManager.injectInputEvent(downEvent, 0)
 
-                val upEvent = KeyEvent(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, keyCode, 0)
+                val upEvent = KeyEvent(
+                    downTime,
+                    SystemClock.uptimeMillis(),
+                    KeyEvent.ACTION_UP,
+                    keyCode,
+                    0
+                )
                 ObjectUtil.invokeMethod(
                     obj = upEvent,
                     methodName = "setSource",
@@ -530,34 +827,27 @@ object FreeformManager : IFreeformManager.Stub() {
 
     override fun moveTaskToDisplay(taskId: Int, displayId: Int) {
         runOnMainThread {
-            try {
-                Instances.activityTaskManager.moveRootTaskToDisplay(taskId, displayId)
-                Instances.activityManager.moveTaskToFront(taskId, 0)
-            } catch (e: Exception) {
-                XLog.e("$TAG: Failed to move task $taskId", e)
-            }
+            moveTaskToDisplaySafely(taskId, displayId)
         }
     }
 
     override fun startActivityOnDisplay(componentName: ComponentName?, userId: Int, displayId: Int) {
-        if (componentName == null) return
+        if (componentName == null || userId < 0 || displayId < 0) {
+            return
+        }
+
         runOnMainThread {
             try {
-                val intent = Intent().apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    component = componentName
-                    `package` = componentName.packageName
-                    action = Intent.ACTION_VIEW
+                // 尽量使用标准 Launcher Intent，避免传入非启动 Activity
+                val intent = buildLaunchIntent(componentName) ?: run {
+                    XLog.e("$TAG: Cannot build launch intent for $componentName")
+                    return@runOnMainThread
                 }
+
                 val options = ActivityOptions.makeBasic().apply {
                     launchDisplayId = displayId
-                    ObjectUtil.invokeMethod(
-                        obj = this,
-                        methodName = "setCallerDisplayId",
-                        paramTypes = paramTypes(Int::class.javaPrimitiveType),
-                        params = params(displayId)
-                    )
                 }.toBundle()
+
                 val userHandle = ClassUtil.newInstance(
                     clz = UserHandle::class.java,
                     paramTypes = paramTypes(Int::class.javaPrimitiveType),
@@ -567,11 +857,16 @@ object FreeformManager : IFreeformManager.Stub() {
                 ObjectUtil.invokeMethod(
                     obj = Instances.systemContext,
                     methodName = "startActivityAsUser",
-                    paramTypes = paramTypes(Intent::class.java, Bundle::class.java, UserHandle::class.java),
+                    paramTypes = paramTypes(
+                        Intent::class.java,
+                        Bundle::class.java,
+                        UserHandle::class.java
+                    ),
                     params = params(intent, options, userHandle)
                 )
-            } catch (e: Exception) {
-                XLog.e("$TAG: Failed to start activity $componentName", e)
+                XLog.d("$TAG: startActivityOnDisplay component=$componentName display=$displayId")
+            } catch (e: Throwable) {
+                XLog.e("$TAG: Failed to start activity $componentName on display=$displayId", e)
             }
         }
     }
@@ -595,6 +890,59 @@ object FreeformManager : IFreeformManager.Stub() {
             action()
         } else {
             Handler(Looper.getMainLooper()).post(action)
+        }
+    }
+
+    /**
+     * 获取物理默认屏幕的 DPI，用于 VirtualDisplay，保证与系统一致。
+     */
+    fun getDefaultDisplayDpi(): Int {
+        val display = Instances.displayManager.getDisplay(Display.DEFAULT_DISPLAY)
+        if (display != null) {
+            val metrics = android.util.DisplayMetrics()
+            display.getRealMetrics(metrics)
+            if (metrics.densityDpi > 0) {
+                return metrics.densityDpi
+            }
+        }
+        return Instances.systemContext.resources.displayMetrics.densityDpi
+    }
+
+    /**
+     * 构建标准的 Launcher Intent，避免传入内部 Activity。
+     */
+    private fun buildLaunchIntent(componentName: ComponentName): Intent? {
+        val packageName = componentName.packageName
+        val pm = Instances.systemContext.packageManager
+        val launcherIntent = pm.getLaunchIntentForPackage(packageName)
+        if (launcherIntent != null) {
+            return launcherIntent.apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            }
+        }
+        // 后备：直接使用 component
+        return Intent().apply {
+            component = componentName
+            `package` = packageName
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+
+    /**
+     * 查询应用是否被勾选为横屏小窗
+     */
+    private fun isLandscapeApp(packageName: String?): Boolean {
+        if (packageName.isNullOrEmpty()) return false
+        return try {
+            Instances.systemUiContext.contentResolver.call(
+                Uri.parse("content://io.relimus.zflow.landscape.provider"),
+                "is_landscape_app",
+                null,
+                Bundle().apply { putString("package_name", packageName) }
+            )?.getBoolean("result", false) ?: false
+        } catch (_: Exception) {
+            false
         }
     }
 }

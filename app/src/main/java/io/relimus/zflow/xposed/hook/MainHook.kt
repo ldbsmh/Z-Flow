@@ -1,10 +1,11 @@
 package io.relimus.zflow.xposed.hook
 
-import io.relimus.zflow.xposed.hook.utils.XLog
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
+import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import io.github.kyuubiran.ezxhelper.xposed.EzXposed
+import io.relimus.zflow.xposed.hook.utils.XLog
 
 class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 
@@ -15,34 +16,49 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         EzXposed.initHandleLoadPackage(lpparam)
 
+        // 热重载：取消所有旧钩子，并标记各 Hook 重新初始化
+        HookRegistry.reset()
+
         when (lpparam.packageName) {
             "android" -> {
-                XLog.d("MainHook: init HookFramework for android (system_server)")
                 HookFramework.init()
-                // Initialize system_server hooks for FreeformManager
                 HookSystem.init()
-                // 传主屏幕 IME 到 Virtual Display
                 HookImeInsetsBridge.init()
-                // 监测 IME 并令 Virtual Display 调用 adjustResize
                 HookImeAdjustResize.init()
                 HookReload.init()
                 HookPredictiveBack.init()
             }
+
             "io.relimus.zflow" -> {
-                XLog.d("MainHook: init HookMyself")
                 HookMyself.init()
             }
+
             "com.android.systemui" -> {
-                XLog.d("MainHook: init HookSystemUI")
                 HookSystemUI.init()
+                HookNotificationAction.init()
             }
-            "com.android.launcher3" -> {
-                HookLauncher.init()
-                HookSwipeGesture.init()
-            }
-            "com.google.android.apps.nexuslauncher" -> {
-                HookLauncher.init()
-                HookSwipeGesture.init()
+
+            else -> {
+                // Android 17 的 quickstep / Launcher 可能换包名或跑在独立进程，
+                // 这里放宽匹配，凡包含 launcher / quickstep 的包都尝试注入。
+                val pkg = lpparam.packageName
+                val isLauncherLike =
+                    pkg == "com.android.launcher3" ||
+                        pkg == "com.google.android.apps.nexuslauncher" ||
+                        pkg.contains("launcher", ignoreCase = true) ||
+                        pkg.contains("quickstep", ignoreCase = true)
+
+                if (isLauncherLike) {
+                    runCatching { HookLauncher.init(lpparam.classLoader) }
+                        .onFailure {
+                            XLog.e("HookLauncher.init failed", it)
+                        }
+
+                    runCatching { HookSwipeGesture.init() }
+                        .onFailure {
+                            XLog.e("HookSwipeGesture.init failed", it)
+                        }
+                }
             }
         }
     }

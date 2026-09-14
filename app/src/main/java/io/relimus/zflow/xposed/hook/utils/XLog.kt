@@ -1,57 +1,90 @@
 package io.relimus.zflow.xposed.hook.utils
 
+import android.app.Application
+import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import de.robv.android.xposed.XposedBridge
-import java.io.Serializable
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * 仿照 YukiHookAPI
- * 采用类似 YLog 的用法，支持 Msg、Throwable 和自定义 Tag
+ * 增强日志工具，支持进程、线程、traceId，Debug级别不写XposedBridge。
  */
 object XLog {
 
     private const val DEFAULT_TAG = "Z-Flow"
+    private val sequence = AtomicLong(0)
 
-    fun d(msg: Any? = null, e: Throwable? = null, tag: String = DEFAULT_TAG) =
-        log("D", msg, e, tag)
-
-    fun i(msg: Any? = null, e: Throwable? = null, tag: String = DEFAULT_TAG) =
-        log("I", msg, e, tag)
-
-    fun w(msg: Any? = null, e: Throwable? = null, tag: String = DEFAULT_TAG) =
-        log("W", msg, e, tag)
-
-    fun e(msg: Any? = null, e: Throwable? = null, tag: String = DEFAULT_TAG) =
-        log("E", msg, e, tag)
-
-    /**
-     * 内部统一打印逻辑
-     */
-    private fun log(priority: String, msg: Any?, throwable: Throwable?, tag: String) {
-        val data = LogData(priority, tag, msg?.toString() ?: "", throwable)
-
-        // 打印到 Logcat
-        when (priority) {
-            "D" -> Log.d(tag, data.msg, throwable)
-            "I" -> Log.i(tag, data.msg, throwable)
-            "W" -> Log.w(tag, data.msg, throwable)
-            "E" -> Log.e(tag, data.msg, throwable)
-        }
-
-        // 打印到 Xposed 管理器
-        XposedBridge.log(data.toString())
-        throwable?.let { XposedBridge.log(it) }
+    fun newTraceId(prefix: String = "FF"): String {
+        return "$prefix-${SystemClock.uptimeMillis()}-${sequence.incrementAndGet()}"
     }
 
-    /**
-     * 日志数据结构体，负责格式化输出内容
-     */
-    data class LogData(
-        val priority: String,
-        val tag: String,
-        val msg: String,
-        val throwable: Throwable? = null
-    ) : Serializable {
-        override fun toString(): String = "[$tag][$priority] $msg"
+    fun d(
+        msg: Any? = null,
+        e: Throwable? = null,
+        tag: String = DEFAULT_TAG
+    ) = log(Log.DEBUG, "D", msg, e, tag)
+
+    fun i(
+        msg: Any? = null,
+        e: Throwable? = null,
+        tag: String = DEFAULT_TAG
+    ) = log(Log.INFO, "I", msg, e, tag)
+
+    fun w(
+        msg: Any? = null,
+        e: Throwable? = null,
+        tag: String = DEFAULT_TAG
+    ) = log(Log.WARN, "W", msg, e, tag)
+
+    fun e(
+        msg: Any? = null,
+        e: Throwable? = null,
+        tag: String = DEFAULT_TAG
+    ) = log(Log.ERROR, "E", msg, e, tag)
+
+    private fun log(
+        priority: Int,
+        level: String,
+        msg: Any?,
+        throwable: Throwable?,
+        tag: String
+    ) {
+        val processName = runCatching {
+            Application.getProcessName()
+        }.getOrDefault("unknown")
+
+        val message = buildString {
+            append("process=")
+            append(processName)
+            append(" pid=")
+            append(Process.myPid())
+            append(" thread=")
+            append(Thread.currentThread().name)
+            append(" | ")
+            append(msg?.toString().orEmpty())
+        }
+
+        Log.println(
+            priority,
+            tag,
+            if (throwable == null) {
+                message
+            } else {
+                "$message\n${Log.getStackTraceString(throwable)}"
+            }
+        )
+
+        // 只有 Error 级别写入 Xposed（LSPosed）日志，避免刷屏
+        if (level == "E") {
+            runCatching {
+                XposedBridge.log(
+                    "[$tag][$level] $message"
+                )
+                throwable?.let {
+                    XposedBridge.log(it)
+                }
+            }
+        }
     }
 }

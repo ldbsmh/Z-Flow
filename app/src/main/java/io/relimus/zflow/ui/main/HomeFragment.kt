@@ -72,25 +72,48 @@ class HomeFragment : Fragment(), View.OnClickListener {
     }
 
     private fun checkAccessibilityPermission() {
-        val result = PermissionUtils.isAccessibilitySettingsOn(requireContext())
-
+        val enabled = PermissionUtils.isAccessibilitySettingsOn(requireContext())
+        val running = KeepAliveService.isServiceRunning
+    
         when (sp.getInt("service_type", KeepAliveService.SERVICE_TYPE)) {
             KeepAliveService.SERVICE_TYPE -> {
-                if (!result) {
-                    binding.materialCardViewAccessibilityInfo.visibility = View.VISIBLE
-                    binding.infoAccessibilityBg.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.warn_color))
-                    binding.imageViewAccessibilityService.setImageDrawable(AppCompatResources.getDrawable(requireContext(), R.drawable.ic_error_white))
-                    binding.textViewAccessibilityServiceInfo.text = getString(R.string.accessibility_no_start)
-                } else {
-                    binding.materialCardViewAccessibilityInfo.visibility = View.GONE
+                when {
+                    enabled && running -> {
+                        binding.materialCardViewAccessibilityInfo.visibility = View.GONE
+                    }
+    
+                    enabled -> {
+                        binding.materialCardViewAccessibilityInfo.visibility = View.VISIBLE
+                        binding.infoAccessibilityBg.setBackgroundColor(
+                            ContextCompat.getColor(requireContext(), R.color.warn_color)
+                        )
+                        binding.imageViewAccessibilityService.setImageDrawable(
+                            AppCompatResources.getDrawable(requireContext(), R.drawable.ic_error_white)
+                        )
+                        binding.textViewAccessibilityServiceInfo.text =
+                            getString(R.string.accessibility_authorized_not_running)
+                    }
+    
+                    else -> {
+                        binding.materialCardViewAccessibilityInfo.visibility = View.VISIBLE
+                        binding.infoAccessibilityBg.setBackgroundColor(
+                            ContextCompat.getColor(requireContext(), R.color.warn_color)
+                        )
+                        binding.imageViewAccessibilityService.setImageDrawable(
+                            AppCompatResources.getDrawable(requireContext(), R.drawable.ic_error_white)
+                        )
+                        binding.textViewAccessibilityServiceInfo.text =
+                            getString(R.string.accessibility_no_start)
+                    }
                 }
             }
+    
             else -> {
                 binding.materialCardViewAccessibilityInfo.visibility = View.GONE
             }
         }
     }
-
+    
     private fun checkFreeformManagerStatus(): Boolean {
         val result = ZFlow.me.isRunning.value ?: false
         if (result) {

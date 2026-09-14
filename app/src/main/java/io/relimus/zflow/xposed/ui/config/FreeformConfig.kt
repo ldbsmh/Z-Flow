@@ -10,4 +10,5 @@ data class FreeformConfig(
     var floatViewSize: Float = 0.33f,
     var dimAmount: Float = 0.2f,
     var manualAdjustFreeformRotation: Boolean = false,
+    var defaultLandscape: Boolean = false,
 )

@@ -10,6 +10,7 @@ Z-Flow提供的打开应用选择界面的活动为：io.relimus.zflow.ui.floati
 ## 2.直接打开Z-Flow提供的小窗界面
 除上述方式外，Z-Flow还提供广播方式接收外部应用发送的打开小窗指令。具体例子如下：
 
+
 ```kotlin
 ### 方法1:
 val packageName: String = "io.relimus.zflow"

@@ -49,13 +49,8 @@ class ZFlow : Application() {
      * via UserService in system_server.
      */
     private fun checkServiceConnection() {
-        // Give some time for the binder link to be established
         Handler(mainLooper).postDelayed({
-            if (FreeformManagerProxy.isConnected) {
-                isRunning.postValue(true)
-            } else {
-                isRunning.postValue(false)
-            }
+            isRunning.postValue(FreeformManagerProxy.isConnected)
         }, 500)
     }
 

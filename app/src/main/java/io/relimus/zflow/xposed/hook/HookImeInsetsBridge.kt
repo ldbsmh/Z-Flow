@@ -34,9 +34,18 @@ object HookImeInsetsBridge {
     private val lastObservedSourceStateByDisplay = mutableMapOf<Int, AppliedImeState>()
 
     fun init() {
+        if (inited && hookGeneration == HookRegistry.generation) return
+        hookGeneration = HookRegistry.generation
+        inited = false
+
         hookProviderMethods()
         hookInsetsPolicyAdjustVisibility()
+
+        inited = true
     }
+
+    private var inited = false
+    private var hookGeneration = -1L
 
     private fun hookProviderMethods() {
         listOf(
