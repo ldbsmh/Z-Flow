@@ -228,6 +228,7 @@ class FreeformWindow(
     private var notificationTransitionDeadline = 0L
     private var queuedNotificationIntent: PendingIntent? = null
     private var notificationIntentSent = false
+    private var notificationLaunchGeneration = 0L
     private lateinit var backgroundView: View
 
     var displayId: Int = -1
@@ -479,11 +480,31 @@ class FreeformWindow(
 
     fun launchPendingIntent(pendingIntent: PendingIntent?): Boolean {
         if (pendingIntent == null || isDestroyed || displayId < 0) return false
+
+        // 每次点击都重置发送状态。旧实现第一次发送后该标志永久为 true，
+        // 后续通知无法重新排队，是微信“无反应”的直接原因之一。
+        notificationLaunchGeneration += 1L
+        queuedNotificationIntent = pendingIntent
+        notificationIntentSent = false
+        notificationTransitionDeadline = SystemClock.uptimeMillis() + 5000L
+
+        if (isClosedToBack) restoreFromBack()
+        if (isFloating || isHidden) restoreToNormalView()
+
         val taskId = FreeformManager.getTopTaskIdOnDisplay(displayId)
-            .takeIf { it > 0 } ?: currentTaskId
-        notificationTransitionDeadline = SystemClock.uptimeMillis() + 3500L
-        FreeformManager.sendPendingIntentOnDisplay(pendingIntent, displayId, taskId)
-        scheduleNotificationTaskRecovery()
+            .takeIf { it > 0 && FreeformManager.isRootTaskAlive(it) }
+            ?: currentTaskId.takeIf { it > 0 && FreeformManager.isRootTaskAlive(it) }
+            ?: -1
+        if (taskId > 0) {
+            if (FreeformManager.getTaskDisplayId(taskId) != displayId) {
+                FreeformManager.moveTaskToDisplaySafely(taskId, displayId)
+            }
+        } else if (componentName != null && userId >= 0) {
+            // 微信等应用可能在读完通知后结束原 Task。已有窗口对象仍在，
+            // 但虚拟屏已经没有任务；先重建 Launcher Task，否则队列永远等不到。
+            FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
+        }
+        scheduleQueuedNotificationLaunch(notificationLaunchGeneration)
         return true
     }
 
@@ -495,19 +516,23 @@ class FreeformWindow(
         if (pendingIntent != null) {
             // 先在虚拟屏建立应用 Task。直接发送通知 PendingIntent 时，系统可能
             // 复用默认屏任务；等 Launcher Task 出现在虚拟屏后再定向进入详情页。
+            notificationLaunchGeneration += 1L
             queuedNotificationIntent = pendingIntent
+            notificationIntentSent = false
             FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
-            scheduleQueuedNotificationLaunch()
+            scheduleQueuedNotificationLaunch(notificationLaunchGeneration)
         } else {
             FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
         }
         return true
     }
 
-    private fun scheduleQueuedNotificationLaunch() {
-        listOf(180L, 350L, 650L, 1000L, 1600L).forEach { delay ->
+    private fun scheduleQueuedNotificationLaunch(generation: Long) {
+        listOf(80L, 180L, 350L, 650L, 1000L, 1600L, 2400L).forEach { delay ->
             mainHandler.postDelayed({
-                if (notificationIntentSent || isDestroyed || isClosedToBack || displayId < 0) {
+                if (generation != notificationLaunchGeneration || notificationIntentSent ||
+                    isDestroyed || isClosedToBack || displayId < 0
+                ) {
                     return@postDelayed
                 }
                 val taskId = FreeformManager.getTopTaskIdOnDisplay(displayId)
@@ -2567,8 +2592,10 @@ class FreeformWindow(
 
                     if (hadTask && pendingIntent != null) {
                         // 已有任务先迁入虚拟屏，再发送通知详情意图。
+                        notificationLaunchGeneration += 1L
                         queuedNotificationIntent = pendingIntent
-                        scheduleQueuedNotificationLaunch()
+                        notificationIntentSent = false
+                        scheduleQueuedNotificationLaunch(notificationLaunchGeneration)
                     } else if (!hadTask && componentName != null && userId >= 0) {
                         // 没有现有 Task，先在虚拟屏建立 Launcher Task。
                         startActivityOnVirtualDisplayIfNeeded()

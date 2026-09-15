@@ -152,17 +152,22 @@ object HookNotificationAction {
                     val rootView = param.args.getOrNull(0) as? View ?: return@after
                     val context = rootView.context ?: return@after
 
-                    // 该通知的应用是否被勾选
-                    val packageName = resolveNotificationPackage(context, param.thisObject)
-                        ?: return@after
+                    // 每次通知视图绑定时都取得当前 SBN，避免复用旧通知的数据。
+                    val sbn = resolveNotificationSbn(param.thisObject) ?: return@after
+                    val packageName = sbn.packageName
                     if (!RemoteSettings.isNotificationEnabled(context, packageName)) return@after
 
-                    // 找到气泡按钮 ImageView（id 与 applyBubbleAction smali 一致）
+                    // 找到气泡按钮 ImageView（id 与 applyBubbleAction smali 一致）。
                     val imageView = rootView.findViewById(0x1020280) as? ImageView ?: return@after
-
                     val icon = loadFreeformIcon(context) ?: return@after
-                    runCatching { imageView.setImageDrawable(icon) }
-                        .onFailure { XLog.e("$TAG set freeform icon failed", it) }
+                    runCatching {
+                        imageView.setImageDrawable(icon)
+                        // 直接接管实际按钮，避免 BubblesManager 在第一次点击后改变
+                        // bubble 状态，导致后续点击走不同内部方法。
+                        imageView.setOnClickListener {
+                            launchFreeform(context, sbn)
+                        }
+                    }.onFailure { XLog.e("$TAG bind freeform action failed", it) }
                 }
             }
     }
@@ -187,16 +192,18 @@ object HookNotificationAction {
 
     // ==================== 工具 ====================
 
-    private fun resolveNotificationPackage(context: Context, contentView: Any): String? {
+    private fun resolveNotificationSbn(contentView: Any): StatusBarNotification? {
         return runCatching {
             val row = ObjectUtil.getObjectUntilSuperclass(contentView, "mContainingNotification")
                 ?: return null
             val adapter = ObjectUtil.getObjectUntilSuperclass(row, "mEntryAdapter")
                 ?: return null
-            val sbn = XposedHelpers.callMethod(adapter, "getSbn") as? StatusBarNotification
-                ?: return null
-            sbn.packageName
+            XposedHelpers.callMethod(adapter, "getSbn") as? StatusBarNotification
         }.getOrNull()
+    }
+
+    private fun resolveNotificationPackage(context: Context, contentView: Any): String? {
+        return resolveNotificationSbn(contentView)?.packageName
     }
 
     private fun resolveEntrySbn(entry: Any): StatusBarNotification? {
