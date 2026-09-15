@@ -174,8 +174,12 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         service?.startActivityOnDisplay(componentName, userId, displayId)
     }
 
-    override fun sendPendingIntentOnDisplay(pendingIntent: PendingIntent?, displayId: Int) {
-        service?.sendPendingIntentOnDisplay(pendingIntent, displayId)
+    override fun sendPendingIntentOnDisplay(
+        pendingIntent: PendingIntent?,
+        displayId: Int,
+        taskId: Int
+    ) {
+        service?.sendPendingIntentOnDisplay(pendingIntent, displayId, taskId)
     }
 
     override fun collapseStatusBarPanel() {

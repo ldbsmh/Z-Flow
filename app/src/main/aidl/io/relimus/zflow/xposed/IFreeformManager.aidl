@@ -35,7 +35,7 @@ interface IFreeformManager {
     // Task management
     void moveTaskToDisplay(int taskId, int displayId);
     void startActivityOnDisplay(in ComponentName componentName, int userId, int displayId);
-    void sendPendingIntentOnDisplay(in PendingIntent pendingIntent, int displayId);
+    void sendPendingIntentOnDisplay(in PendingIntent pendingIntent, int displayId, int taskId);
 
     // Status
     void collapseStatusBarPanel();

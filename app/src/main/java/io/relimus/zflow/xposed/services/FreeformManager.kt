@@ -129,9 +129,15 @@ object FreeformManager : IFreeformManager.Stub() {
                 if (previousDisplayId != null && newDisplayId == 0) {
                     val window = getWindow(previousDisplayId)
                     if (window != null && !window.isDestroyed &&
+                        !window.isNotificationTransitionActive() &&
                         (window.isClosedToBack || window.isFloating || window.isHidden)
                     ) {
                         window.realDestroy()
+                    } else if (window?.isNotificationTransitionActive() == true) {
+                        XLog.d(
+                            "$TAG: keeping display=$previousDisplayId alive during " +
+                                "notification task transition"
+                        )
                     }
                 }
                 XLog.d("$TAG: onTaskDisplayChanged taskId=$taskId previous=$previousDisplayId new=$newDisplayId")
@@ -885,13 +891,26 @@ object FreeformManager : IFreeformManager.Stub() {
         }
     }
 
-    override fun sendPendingIntentOnDisplay(pendingIntent: PendingIntent?, displayId: Int) {
+    override fun sendPendingIntentOnDisplay(
+        pendingIntent: PendingIntent?,
+        displayId: Int,
+        taskId: Int
+    ) {
         if (pendingIntent == null || displayId < 0) return
 
         runOnMainThread {
             try {
                 val activityOptions = ActivityOptions.makeBasic().apply {
                     launchDisplayId = displayId
+                    if (taskId > 0) {
+                        // setLaunchTaskId 是隐藏 API；system_server 中通过反射调用，
+                        // 将通知详情固定到已经迁入虚拟屏的应用 Task。
+                        runCatching {
+                            XposedHelpers.callMethod(this, "setLaunchTaskId", taskId)
+                        }.onFailure {
+                            XLog.w("$TAG: setLaunchTaskId unavailable taskId=$taskId", it)
+                        }
+                    }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                         pendingIntentBackgroundActivityStartMode =
                             ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
@@ -907,7 +926,10 @@ object FreeformManager : IFreeformManager.Stub() {
                     null,
                     options
                 )
-                XLog.d("$TAG: sendPendingIntentOnDisplay display=$displayId creator=${pendingIntent.creatorPackage}")
+                XLog.d(
+                    "$TAG: sendPendingIntentOnDisplay display=$displayId taskId=$taskId " +
+                        "creator=${pendingIntent.creatorPackage}"
+                )
             } catch (e: PendingIntent.CanceledException) {
                 XLog.e("$TAG: Notification contentIntent was canceled", e)
             } catch (e: Throwable) {

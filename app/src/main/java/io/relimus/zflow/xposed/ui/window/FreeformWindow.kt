@@ -225,6 +225,9 @@ class FreeformWindow(
     private var hasAddedWindowToManager = false
     private var hasRequestedInitialTaskMove = false
     private var hasRequestedActivityLaunch = false
+    private var notificationTransitionDeadline = 0L
+    private var queuedNotificationIntent: PendingIntent? = null
+    private var notificationIntentSent = false
     private lateinit var backgroundView: View
 
     var displayId: Int = -1
@@ -471,9 +474,16 @@ class FreeformWindow(
 
     fun getCurrentTaskId(): Int = currentTaskId
 
+    fun isNotificationTransitionActive(): Boolean =
+        SystemClock.uptimeMillis() < notificationTransitionDeadline
+
     fun launchPendingIntent(pendingIntent: PendingIntent?): Boolean {
         if (pendingIntent == null || isDestroyed || displayId < 0) return false
-        FreeformManager.sendPendingIntentOnDisplay(pendingIntent, displayId)
+        val taskId = FreeformManager.getTopTaskIdOnDisplay(displayId)
+            .takeIf { it > 0 } ?: currentTaskId
+        notificationTransitionDeadline = SystemClock.uptimeMillis() + 3500L
+        FreeformManager.sendPendingIntentOnDisplay(pendingIntent, displayId, taskId)
+        scheduleNotificationTaskRecovery()
         return true
     }
 
@@ -483,13 +493,63 @@ class FreeformWindow(
         }
         hasRequestedActivityLaunch = true
         if (pendingIntent != null) {
-            // 保留通知发布者构造的完整目标、参数和返回栈，在虚拟屏中发送，
-            // 这样消息/邮件等通知会进入对应详情页，而不是应用 Launcher 首页。
-            FreeformManager.sendPendingIntentOnDisplay(pendingIntent, displayId)
+            // 先在虚拟屏建立应用 Task。直接发送通知 PendingIntent 时，系统可能
+            // 复用默认屏任务；等 Launcher Task 出现在虚拟屏后再定向进入详情页。
+            queuedNotificationIntent = pendingIntent
+            FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
+            scheduleQueuedNotificationLaunch()
         } else {
             FreeformManager.startActivityOnDisplay(componentName, userId, displayId)
         }
         return true
+    }
+
+    private fun scheduleQueuedNotificationLaunch() {
+        listOf(180L, 350L, 650L, 1000L, 1600L).forEach { delay ->
+            mainHandler.postDelayed({
+                if (notificationIntentSent || isDestroyed || isClosedToBack || displayId < 0) {
+                    return@postDelayed
+                }
+                val taskId = FreeformManager.getTopTaskIdOnDisplay(displayId)
+                if (taskId <= 0) return@postDelayed
+                val intent = queuedNotificationIntent ?: return@postDelayed
+                bindTask(taskId)
+                notificationIntentSent = true
+                notificationTransitionDeadline = SystemClock.uptimeMillis() + 3500L
+                FreeformManager.sendPendingIntentOnDisplay(intent, displayId, taskId)
+                queuedNotificationIntent = null
+                scheduleNotificationTaskRecovery()
+            }, delay)
+        }
+    }
+
+    /**
+     * 某些应用的通知 PendingIntent 先进入中转页，随后自行启动详情页；
+     * 后续 Activity 不继承 launchDisplayId。短时检查该应用最新任务并迁回
+     * 当前虚拟屏，覆盖这种二段式通知跳转。
+     */
+    private fun scheduleNotificationTaskRecovery() {
+        val packageName = componentName?.packageName ?: return
+        listOf(250L, 600L, 1200L, 2200L).forEach { delay ->
+            mainHandler.postDelayed({
+                if (isDestroyed || isClosedToBack || displayId < 0) return@postDelayed
+                // 通知详情可能新建独立 Task，优先跟踪该应用最新任务，
+                // 而不是始终选中原 Launcher Task。
+                val taskId = FreeformManager.getLatestAliveTaskIdForPackage(packageName)
+                    .takeIf { it > 0 } ?: currentTaskId
+                if (taskId <= 0) return@postDelayed
+                val actualDisplay = FreeformManager.getTaskDisplayId(taskId)
+                if (actualDisplay != displayId) {
+                    XLog.w(
+                        "$TAG: [$traceId] Notification task escaped to display=" +
+                            "$actualDisplay; moving taskId=$taskId back to $displayId"
+                    )
+                    FreeformManager.moveTaskToDisplaySafely(taskId, displayId)
+                } else {
+                    bindTask(taskId)
+                }
+            }, delay)
+        }
     }
 
     private fun screenIsPortrait(): Boolean = screenRotation == Surface.ROTATION_0 || screenRotation == Surface.ROTATION_180
@@ -2505,10 +2565,14 @@ class FreeformWindow(
 
                     XLog.d("$TAG: [$traceId] Initial task move request: taskId=$currentTaskId displayId=$displayId hadTask=$hadTask moveRequested=$moveRequested")
 
-                    if (!hadTask && componentName != null && userId >= 0) {
-                    // 没有现有 Task，直接启动新 Activity
-                    startActivityOnVirtualDisplayIfNeeded()
-                }
+                    if (hadTask && pendingIntent != null) {
+                        // 已有任务先迁入虚拟屏，再发送通知详情意图。
+                        queuedNotificationIntent = pendingIntent
+                        scheduleQueuedNotificationLaunch()
+                    } else if (!hadTask && componentName != null && userId >= 0) {
+                        // 没有现有 Task，先在虚拟屏建立 Launcher Task。
+                        startActivityOnVirtualDisplayIfNeeded()
+                    }
 
                 // 延迟验证迁移结果
                 mainHandler.postDelayed({
