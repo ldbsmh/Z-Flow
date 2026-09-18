@@ -140,6 +140,10 @@ object FreeformManager : IFreeformManager.Stub() {
                         )
                     }
                 }
+                XLog.ls(
+                    "TASK_DISPLAY_CHANGED task=$taskId previous=$previousDisplayId new=$newDisplayId " +
+                        "window=${getWindow(newDisplayId)?.componentName}"
+                )
                 XLog.d("$TAG: onTaskDisplayChanged taskId=$taskId previous=$previousDisplayId new=$newDisplayId")
             }
         }
@@ -588,7 +592,16 @@ object FreeformManager : IFreeformManager.Stub() {
                 refreshMaxFreeformWindows()
                 Instances.iStatusBarService.collapsePanels()
 
+                XLog.ls(
+                    "MANAGER_CREATE component=$componentName user=$userId inputTask=$taskId " +
+                        "pending=${pendingIntent != null}"
+                )
                 val existingWindow = findAnyWindow(componentName?.packageName)
+                XLog.ls(
+                    "MANAGER_EXISTING pkg=${componentName?.packageName} " +
+                        "found=${existingWindow != null} " +
+                        "display=${existingWindow?.displayId} destroyed=${existingWindow?.isDestroyed}"
+                )
                 // 【修复】忽略已销毁或 displayId 无效的窗口，让它们自然清理，
                 // 创建新窗口而不是尝试复用无效实例。
                 if (existingWindow != null && !existingWindow.isDestroyed && existingWindow.displayId >= 0) {
@@ -629,6 +642,10 @@ object FreeformManager : IFreeformManager.Stub() {
 
                 val traceId = XLog.newTraceId()
                 XLog.d("$TAG: [$traceId] createWindow component=$componentName userId=$userId inputTaskId=$taskId resolvedTaskId=$resolvedTaskId")
+                XLog.ls(
+                    "WINDOW_CREATE trace=$traceId component=$componentName display=pending " +
+                        "resolvedTask=$resolvedTaskId pending=${pendingIntent != null}"
+                )
 
                 FreeformWindow(
                     Instances.systemUiContext,
@@ -675,7 +692,16 @@ object FreeformManager : IFreeformManager.Stub() {
                 refreshMaxFreeformWindows()
                 Instances.iStatusBarService.collapsePanels()
 
+                XLog.ls(
+                    "MANAGER_CREATE_MINI component=$componentName user=$userId inputTask=$taskId " +
+                        "pending=${pendingIntent != null}"
+                )
                 val existing = findAnyWindow(componentName?.packageName)
+                XLog.ls(
+                    "MANAGER_EXISTING_MINI pkg=${componentName?.packageName} " +
+                        "found=${existing != null} display=${existing?.displayId} " +
+                        "destroyed=${existing?.isDestroyed}"
+                )
                 // 【修复】同 createWindow：忽略已销毁或 displayId 无效的窗口
                 if (existing != null && !existing.isDestroyed && existing.displayId >= 0) {
                     if (pendingIntent != null && existing.launchPendingIntent(pendingIntent)) {
@@ -899,6 +925,10 @@ object FreeformManager : IFreeformManager.Stub() {
         displayId: Int,
         taskId: Int
     ) {
+        XLog.ls(
+            "PENDING_SEND_REQUEST display=$displayId task=$taskId " +
+                "creator=${pendingIntent?.creatorPackage} activity=${pendingIntent?.isActivity}"
+        )
         if (pendingIntent == null || displayId < 0) return
 
         runOnMainThread {
@@ -928,6 +958,10 @@ object FreeformManager : IFreeformManager.Stub() {
                     null,
                     null,
                     options
+                )
+                XLog.ls(
+                    "PENDING_SEND_OK display=$displayId task=$taskId " +
+                        "creator=${pendingIntent.creatorPackage}"
                 )
                 XLog.d(
                     "$TAG: sendPendingIntentOnDisplay display=$displayId taskId=$taskId " +

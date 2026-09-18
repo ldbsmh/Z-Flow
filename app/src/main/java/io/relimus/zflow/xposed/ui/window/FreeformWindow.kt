@@ -559,6 +559,10 @@ class FreeformWindow(
                 bindTask(taskId)
                 notificationIntentSent = true
                 notificationTransitionDeadline = SystemClock.uptimeMillis() + 3500L
+                XLog.ls(
+                    "PENDING_SEND trace=$traceId display=$displayId task=$taskId " +
+                        "creator=${intent.creatorPackage} activity=${intent.isActivity}"
+                )
                 FreeformManager.sendPendingIntentOnDisplay(intent, displayId, taskId)
                 queuedNotificationIntent = null
                 scheduleNotificationTaskRecovery()
@@ -2404,6 +2408,10 @@ class FreeformWindow(
         }
 
         isClosedToBack = true
+        XLog.ls(
+            "WINDOW_CLOSE_BACK trace=$traceId display=$displayId component=$componentName " +
+                "task=$currentTaskId notificationTransition=${isNotificationTransitionActive()}"
+        )
         cancelSpringAnimations()
 
         try {
@@ -2525,6 +2533,10 @@ class FreeformWindow(
         }
         if (!isClosedToBack) closeToBack()
         isDestroyed = true
+        XLog.ls(
+            "WINDOW_DESTROY trace=$traceId display=$displayId component=$componentName " +
+                "task=$currentTaskId closed=$isClosedToBack"
+        )
         try {
             if (::binding.isInitialized) binding.textureView.removeCallbacks(initTimeoutRunnable)
             mainHandler.removeCallbacks(initTimeoutRunnable)
@@ -2574,6 +2586,11 @@ class FreeformWindow(
                 virtualDisplay = createdDisplay
                 displayId = virtualDisplay.display.displayId
                 markVirtualDisplaySpecApplied()
+                XLog.ls(
+                    "VD_CREATED trace=$traceId display=$displayId component=$componentName " +
+                        "task=$currentTaskId directMini=$directToMini " +
+                        "size=${freeformScreenWidth}x$freeformScreenHeight"
+                )
                 XLog.d("$TAG: [$traceId] VirtualDisplay created displayId=$displayId size=${freeformScreenWidth}x$freeformScreenHeight dpi=$freeformDpi")
                 try {
                     val wmHidden = Refine.unsafeCast<WindowManagerHidden>(Instances.windowManager)
@@ -2600,6 +2617,10 @@ class FreeformWindow(
                 mainHandler.postDelayed(initialPlacement@{
                     if (isDestroyed || isClosedToBack || displayId < 0) return@initialPlacement
                     val hadTask = currentTaskId > 0
+                    XLog.ls(
+                        "TASK_PLACEMENT_START trace=$traceId display=$displayId " +
+                            "task=$currentTaskId hadTask=$hadTask pending=${pendingIntent != null}"
+                    )
                     val moveRequested = if (hadTask) {
                         FreeformManager.moveTaskToDisplaySafely(currentTaskId, displayId)
                     } else {
@@ -2627,6 +2648,11 @@ class FreeformWindow(
 
                     val topTask = FreeformManager.getTopTaskIdOnDisplay(displayId)
                     val hasTask = FreeformManager.hasTaskOnDisplay(displayId)
+                    XLog.ls(
+                        "TASK_VERIFY_1 trace=$traceId display=$displayId " +
+                            "requested=$currentTaskId top=$topTask hasTask=$hasTask " +
+                            "pending=${queuedNotificationIntent != null} sent=$notificationIntentSent"
+                    )
 
                     XLog.d("$TAG: [$traceId] Verify task result (1st) requestedTask=$currentTaskId moveRequested=$moveRequested displayId=$displayId hasTask=$hasTask topTask=$topTask")
 

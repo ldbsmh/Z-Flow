@@ -43,6 +43,15 @@ object XLog {
         tag: String = DEFAULT_TAG
     ) = log(Log.ERROR, "E", msg, e, tag)
 
+    /** 强制写入 LSPosed 日志，用于跨进程诊断链路。 */
+    fun ls(msg: Any?, tag: String = "ZFlowDiag", e: Throwable? = null) {
+        runCatching {
+            val text = msg?.toString().orEmpty()
+            XposedBridge.log("[$tag] $text")
+            e?.let { XposedBridge.log(it) }
+        }
+    }
+
     private fun log(
         priority: Int,
         level: String,
