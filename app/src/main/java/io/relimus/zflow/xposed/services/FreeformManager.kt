@@ -589,7 +589,9 @@ object FreeformManager : IFreeformManager.Stub() {
                 Instances.iStatusBarService.collapsePanels()
 
                 val existingWindow = findAnyWindow(componentName?.packageName)
-                if (existingWindow != null) {
+                // 【修复】忽略已销毁或 displayId 无效的窗口，让它们自然清理，
+                // 创建新窗口而不是尝试复用无效实例。
+                if (existingWindow != null && !existingWindow.isDestroyed && existingWindow.displayId >= 0) {
                     if (pendingIntent != null && existingWindow.launchPendingIntent(pendingIntent)) {
                         existingWindow.moveToTop()
                         return@runOnMainThread
@@ -674,7 +676,8 @@ object FreeformManager : IFreeformManager.Stub() {
                 Instances.iStatusBarService.collapsePanels()
 
                 val existing = findAnyWindow(componentName?.packageName)
-                if (existing != null && !existing.isDestroyed) {
+                // 【修复】同 createWindow：忽略已销毁或 displayId 无效的窗口
+                if (existing != null && !existing.isDestroyed && existing.displayId >= 0) {
                     if (pendingIntent != null && existing.launchPendingIntent(pendingIntent)) {
                         existing.moveToTop()
                         return@runOnMainThread
