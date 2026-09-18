@@ -233,7 +233,8 @@ object HookNotificationAction {
         XLog.ls(
             "NOTIFY_CLICK pkg=$packageName key=${sbn.key} id=${sbn.id} " +
                 "tag=${sbn.tag} uid=${sbn.uid} hasContent=${sbn.notification.contentIntent != null} " +
-                "contentType=${sbn.notification.contentIntent?.type}"
+                "contentCreator=${sbn.notification.contentIntent?.creatorPackage} " +
+                "contentActivity=${sbn.notification.contentIntent?.isActivity}"
         )
         runCatching {
             val contentIntent: PendingIntent? = sbn.notification.contentIntent
