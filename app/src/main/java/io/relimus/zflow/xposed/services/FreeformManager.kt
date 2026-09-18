@@ -71,6 +71,27 @@ object FreeformManager : IFreeformManager.Stub() {
 
                     if (managedDisplayId != null) {
                         bindTaskToWindowIfMatch(taskId, managedDisplayId)
+                    } else {
+                        // QQ/HMS 等通知会先结束原 Splash/Router Task，再在默认屏
+                        // 新建详情 Task。通知过渡期内，把同包名的新 Task 迁回原小窗。
+                        val notificationWindow = windowList.firstOrNull {
+                            !it.isDestroyed &&
+                                it.componentName?.packageName == packageName &&
+                                it.isNotificationTransitionActive()
+                        }
+                        if (notificationWindow != null) {
+                            val targetDisplay = notificationWindow.displayId
+                            XLog.ls(
+                                "NOTIFY_NEW_TASK task=$taskId pkg=$packageName " +
+                                    "display=${getTaskDisplayId(taskId)} target=$targetDisplay"
+                            )
+                            notificationWindow.bindTask(taskId)
+                            if (targetDisplay >= 0 &&
+                                getTaskDisplayId(taskId) != targetDisplay
+                            ) {
+                                moveTaskToDisplaySafely(taskId, targetDisplay)
+                            }
+                        }
                     }
                 }
             }
@@ -98,10 +119,20 @@ object FreeformManager : IFreeformManager.Stub() {
                 }
 
                 displayTaskMap.entries.find { it.value.contains(removedTaskId) }?.let { entry ->
-                    val displayId = entry.key
+                    val managedDisplayId = entry.key
                     entry.value.remove(removedTaskId)
+                    val window = getWindow(managedDisplayId)
                     if (entry.value.isEmpty()) {
-                        getWindow(displayId)?.realDestroy()
+                        if (window?.isNotificationTransitionActive() == true) {
+                            // 通知中转页结束是正常流程；等待后续新建详情 Task，
+                            // 不要在这里销毁 VirtualDisplay。
+                            XLog.ls(
+                                "NOTIFY_OLD_TASK_REMOVED task=$removedTaskId " +
+                                    "display=$managedDisplayId keepWindow=true"
+                            )
+                        } else {
+                            window?.realDestroy()
+                        }
                     }
                 }
             }
