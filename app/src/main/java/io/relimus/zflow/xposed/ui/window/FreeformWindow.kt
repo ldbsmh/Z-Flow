@@ -514,8 +514,26 @@ class FreeformWindow(
         }
         hasRequestedActivityLaunch = true
         if (pendingIntent != null) {
-            // 先在虚拟屏建立应用 Task。直接发送通知 PendingIntent 时，系统可能
-            // 复用默认屏任务；等 Launcher Task 出现在虚拟屏后再定向进入详情页。
+            // 【QQ 通知修复】先在虚拟屏建立应用 Launcher Task，再发送 PendingIntent。
+            // 
+            // 问题根因：
+            // QQ 等应用使用中转 Activity 模式处理通知：
+            //   1. 通知 PendingIntent 先启动透明 router Activity
+            //   2. router 在虚拟屏启动，但没有配置虚拟屏启动参数
+            //   3. router 再启动详情页时使用默认 Display
+            //   4. 详情页逃回主屏，虚拟屏任务消失
+            // 
+            // 修复方案：
+            // 所有通知都使用安全路径（不再区分 Activity/Broadcast/Service 类型）：
+            //   1. 先启动应用 Launcher 建立虚拟屏 Task
+            //   2. 等 Task 出现后，在该 Task 中发送 PendingIntent
+            //   3. 即使 PendingIntent 使用中转组件，最终详情页也会留在虚拟屏
+            // 
+            // 影响：
+            // - QQ 通知小窗：修复详情页逃回主屏问题 ✓
+            // - 微信通知小窗：可能短暂显示应用主页（约 32-180ms），
+            //   然后跳转到详情页，但保证详情页在小窗中 ✓
+            // - 通知启动速度：轻微延迟（需等待 Task 建立），但保证正确性
             notificationLaunchGeneration += 1L
             queuedNotificationIntent = pendingIntent
             notificationIntentSent = false
