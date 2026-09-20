@@ -1993,6 +1993,7 @@ class FreeformWindow(
         }
 
         private fun resolveHiddenInflateContext(): Context {
+            return try {
                 val moduleContext = context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY or Context.CONTEXT_INCLUDE_CODE)
                 CommonContextWrapper.createAppCompatContext(moduleContext)
             } catch (e: Exception) {
@@ -2000,6 +2001,7 @@ class FreeformWindow(
                 context
             }
         }
+
         private fun ensureHiddenViewAttached(position: Int, targetY: Int) {
             val hiddenX = calcDockHiddenX(position)
             val rawHiddenY = centerToScreenTopLeftY(targetY, floatingButtonHeight)
