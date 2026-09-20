@@ -1,20 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 贴边把手样式 1：小白条（来自 master 分支的观感）。
-     窗口宽度为 60dp，与图标档位一致，靠窗口偏移裁切只露出白色竖条。
-     注意：这里不使用 ImageView，避免与图标档位的 dockAppIcon 混淆。 -->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root"
-    android:layout_width="60dp"
-    android:layout_height="60dp">
+    android:layout_width="@dimen/floating_button_width"
+    android:layout_height="@dimen/floating_button_height">
 
     <View
         android:id="@+id/backgroundView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:alpha="0.6"
-        android:background="@drawable/floating_dock_bg"
+        android:background="@drawable/floating_button_bg"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"

@@ -346,17 +346,31 @@ class FreeformWindow(
     /** 贴边把手样式：0 = 小白条，其余为露出应用图标的百分比 */
     private val dockStyle: Int = config.dockStyle.coerceIn(0, 100)
 
-    /** 是否显示为小白条（不显示应用图标，只露出白色竖条） */
+    /** 是否显示为小白条（不显示应用图标，只露出一条白色竖条） */
     private val dockIsBarStyle: Boolean get() = dockStyle == 0
 
-    /** 把手的完整窗口尺寸，所有档位一致，保证动画与拖拽边界统一 */
-    private val floatingButtonWidth: Int = (60 * dockDensity).roundToInt()
-    private val floatingButtonHeight: Int = (60 * dockDensity).roundToInt()
+    /**
+     * 小白条档位：完全复刻 master 的 28dp × 96dp 竖条窗口。
+     * 窗口比图标 dock 窄但更高，靠 x 偏移把大部分推出屏幕。
+     */
+    private val barWidthPx: Int = (28 * dockDensity).roundToInt()
+    private val barHeightPx: Int = (96 * dockDensity).roundToInt()
 
-    /** 贴边时露出的宽度（像素）：小白条只露 3.5dp 竖条，图标档位按比例 */
+    /** 把手的完整窗口尺寸：小白条用窄高窗口，图标档位用 60dp 方形窗口 */
+    private val floatingButtonWidth: Int
+        get() = if (dockIsBarStyle) barWidthPx else (60 * dockDensity).roundToInt()
+    private val floatingButtonHeight: Int
+        get() = if (dockIsBarStyle) barHeightPx else (60 * dockDensity).roundToInt()
+
+    /**
+     * 贴边时露出的宽度（像素）。
+     * 小白条档位整个窗口都算可见区（窗口内只画一条 3.5dp 竖条，
+     * 其余是透明区域，仍可接收触摸）；
+     * 图标档位按百分比裁切露出宽度。
+     */
     private val dockVisibleWidth: Int
         get() = if (dockIsBarStyle) {
-            (3.5 * dockDensity).roundToInt()
+            floatingButtonWidth
         } else {
             (floatingButtonWidth * (dockStyle / 100f)).roundToInt().coerceIn(1, floatingButtonWidth)
         }
@@ -2075,7 +2089,10 @@ class FreeformWindow(
             if (!::hiddenView.isInitialized) return
             fun startRevealNow() {
                 if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) return
-                val startTranslationX = if (position > 0) {
+                val startTranslationX = if (dockIsBarStyle) {
+                    // 白条档位复刻 master：整窗从屏幕外推入
+                    if (position > 0) floatingButtonWidth.toFloat() else -floatingButtonWidth.toFloat()
+                } else if (position > 0) {
                     (floatingButtonWidth - dockVisibleWidth).toFloat()
                 } else {
                     -(floatingButtonWidth - dockVisibleWidth).toFloat()
@@ -2172,11 +2189,16 @@ class FreeformWindow(
 
     /**
      * 贴边时把手的 X 坐标（窗口左上角）。
-     * 右侧贴边：x = 屏宽 - 可见宽度；左侧贴边：x = 可见宽度 - 窗口总宽。
-     * 小白条档位窗口本身就是 28dp，可见宽度等于窗口宽度，贴齐屏幕边缘。
+     *
+     * 小白条档位复刻 master：窗口 28dp 宽，x 取 (屏宽 - 窗口宽)/2 × 方向，
+     * 使窗口大半移出屏幕，只露出中间一截，视觉上是一条居中的白色竖条。
+     *
+     * 图标档位：窗口 60dp，x = 屏宽 - 露出宽度，仅裁切露出 dockVisibleWidth。
      */
     private fun calcDockHiddenX(position: Int): Int {
-        return if (position > 0) {
+        return if (dockIsBarStyle) {
+            (realScreenWidth - floatingButtonWidth) / 2 * (if (position > 0) 1 else -1)
+        } else if (position > 0) {
             realScreenWidth - dockVisibleWidth
         } else {
             dockVisibleWidth - floatingButtonWidth
