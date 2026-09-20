@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 贴边把手样式 1：小白条（来自 master 分支的观感）。
-     窗口宽度为 60dp，与图标档位一致，靠窗口偏移裁切只露出白色竖条。 -->
+     窗口宽度为 60dp，与图标档位一致，靠窗口偏移裁切只露出白色竖条。
+     注意：这里不使用 ImageView，避免与图标档位的 dockAppIcon 混淆。 -->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -20,7 +21,7 @@
         app:layout_constraintTop_toTopOf="parent" />
 
     <View
-        android:id="@+id/dockAppIcon"
+        android:id="@+id/barView"
         android:layout_width="3.5dp"
         android:layout_height="0dp"
         android:layout_marginVertical="21dp"

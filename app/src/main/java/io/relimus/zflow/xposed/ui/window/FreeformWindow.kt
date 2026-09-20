@@ -1975,20 +1975,19 @@ class FreeformWindow(
          */
         private fun applyDockAppearance(context: Context) {
             val backgroundView = hiddenView?.findViewById<View>(R.id.backgroundView)
-            val iconView = hiddenView?.findViewById<ImageView>(R.id.dockAppIcon)
             backgroundView?.background = ContextCompat.getDrawable(context, R.drawable.floating_dock_bg)
-            if (dockIsBarStyle) {
-                iconView?.setImageDrawable(null)
-                return
-            }
+            // 小白条档位不使用应用图标；dockAppIcon 只在图标档位存在且为 ImageView
+            if (dockIsBarStyle) return
+            val iconView = hiddenView?.findViewById<View>(R.id.dockAppIcon)
+            if (iconView !is ImageView) return
             runCatching {
                 componentName?.packageName?.let { pkg ->
                     val pm = context.packageManager
                     val appInfo = pm.getApplicationInfo(pkg, 0)
-                    iconView?.setImageDrawable(pm.getApplicationIcon(appInfo))
+                    iconView.setImageDrawable(pm.getApplicationIcon(appInfo))
                 }
             }.onFailure {
-                iconView?.setImageDrawable(null)
+                iconView.setImageDrawable(null)
             }
         }
 
