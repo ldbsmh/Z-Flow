@@ -106,6 +106,9 @@ class FreeformWindow(
     )
 
     companion object {
+        const val DOCK_STYLE_MIN = 28
+        const val DOCK_STYLE_MAX = 100
+
         private const val TAG = "FreeformWindow"
         private const val WIDTH_HEIGHT_RATIO = 20f / 35f
 
@@ -343,37 +346,19 @@ class FreeformWindow(
 
     private val dockDensity: Float = context.resources.displayMetrics.density
 
-    /** 贴边把手样式：0 = 小白条，其余为露出应用图标的百分比 */
-    private val dockStyle: Int = config.dockStyle.coerceIn(0, 100)
+    /** 贴边把手露出比例：28 ~ 100（百分比） */
+    private val dockStyle: Int = config.dockStyle.coerceIn(DOCK_STYLE_MIN, DOCK_STYLE_MAX)
 
-    /** 是否显示为小白条（不显示应用图标，只露出一条白色竖条） */
-    private val dockIsBarStyle: Boolean get() = dockStyle == 0
-
-    /**
-     * 小白条档位：完全复刻 master 的 28dp × 96dp 竖条窗口。
-     * 窗口比图标 dock 窄但更高，靠 x 偏移把大部分推出屏幕。
-     */
-    private val barWidthPx: Int = (28 * dockDensity).roundToInt()
-    private val barHeightPx: Int = (96 * dockDensity).roundToInt()
-
-    /** 把手的完整窗口尺寸：小白条用窄高窗口，图标档位用 60dp 方形窗口 */
-    private val floatingButtonWidth: Int
-        get() = if (dockIsBarStyle) barWidthPx else (60 * dockDensity).roundToInt()
-    private val floatingButtonHeight: Int
-        get() = if (dockIsBarStyle) barHeightPx else (60 * dockDensity).roundToInt()
+    /** 把手的完整窗口尺寸：统一 60dp 方形窗口 */
+    private val floatingButtonWidth: Int = (60 * dockDensity).roundToInt()
+    private val floatingButtonHeight: Int = (60 * dockDensity).roundToInt()
 
     /**
-     * 贴边时露出的宽度（像素）。
-     * 小白条档位整个窗口都算可见区（窗口内只画一条 3.5dp 竖条，
-     * 其余是透明区域，仍可接收触摸）；
-     * 图标档位按百分比裁切露出宽度。
+     * 贴边时露出的宽度（像素），按自定义百分比裁切。
      */
     private val dockVisibleWidth: Int
-        get() = if (dockIsBarStyle) {
-            floatingButtonWidth
-        } else {
-            (floatingButtonWidth * (dockStyle / 100f)).roundToInt().coerceIn(1, floatingButtonWidth)
-        }
+        get() = (floatingButtonWidth * (dockStyle / 100f)).roundToInt()
+            .coerceIn(1, floatingButtonWidth)
 
     private val screenPaddingX: Int = context.resources.getDimension(R.dimen.freeform_screen_width_padding).roundToInt()
     private val screenPaddingY: Int = context.resources.getDimension(R.dimen.freeform_screen_height_padding).roundToInt()
@@ -1983,20 +1968,11 @@ class FreeformWindow(
             return targetY.coerceIn(min(topY, bottomY), max(topY, bottomY))
         }
         /**
-         * 按档位设置把手外观：
-         * 档 1（小白条）不显示应用图标；其余档位显示完整应用图标，
+         * 设置把手外观：统一使用应用图标底衬，
          * 由浮动窗口的偏移量决定露出多少比例。
          */
         private fun applyDockAppearance(context: Context) {
             val backgroundView = hiddenView?.findViewById<View>(R.id.backgroundView)
-            if (dockIsBarStyle) {
-                backgroundView?.background = ContextCompat.getDrawable(
-                    context,
-                    if (isHiddenOnRight()) R.drawable.floating_button_bg_right else R.drawable.floating_button_bg
-                )
-                applyBarViewSide()
-                return
-            }
             backgroundView?.background = ContextCompat.getDrawable(context, R.drawable.floating_dock_bg)
             val iconView = hiddenView?.findViewById<View>(R.id.dockAppIcon)
             if (iconView !is ImageView) return
@@ -2009,20 +1985,6 @@ class FreeformWindow(
             }.onFailure {
                 iconView.setImageDrawable(null)
             }
-        }
-
-        /**
-         * 小白条竖条贴在窗口靠屏幕内侧的一边：
-         * 右侧贴边时窗口左边界在屏内，竖条靠窗口左缘；
-         * 左侧贴边时窗口右边界在屏内，竖条靠窗口右缘。
-         */
-        private fun applyBarViewSide() {
-            val bar = hiddenView?.findViewById<View>(R.id.barView) ?: return
-            val lp = bar.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams ?: return
-            val onRight = isHiddenOnRight()
-            lp.startToStart = if (onRight) androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID else androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
-            lp.endToEnd = if (onRight) androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET else androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-            bar.layoutParams = lp
         }
 
         private fun resolveHiddenInflateContext(): Context {
@@ -2043,7 +2005,7 @@ class FreeformWindow(
             if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) {
                 val inflateContext = resolveHiddenInflateContext()
                 hiddenView = LayoutInflater.from(inflateContext).inflate(
-                    if (dockIsBarStyle) R.layout.view_floating_bar else R.layout.view_floating_button,
+                    R.layout.view_floating_button,
                     null,
                     false
                 )
@@ -2109,10 +2071,7 @@ class FreeformWindow(
             if (!::hiddenView.isInitialized) return
             fun startRevealNow() {
                 if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) return
-                val startTranslationX = if (dockIsBarStyle) {
-                    // 白条档位复刻 master：整窗从屏幕外推入
-                    if (position > 0) floatingButtonWidth.toFloat() else -floatingButtonWidth.toFloat()
-                } else if (position > 0) {
+                val startTranslationX = if (position > 0) {
                     (floatingButtonWidth - dockVisibleWidth).toFloat()
                 } else {
                     -(floatingButtonWidth - dockVisibleWidth).toFloat()

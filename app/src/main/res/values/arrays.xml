@@ -13,22 +13,6 @@
         <item>Right side of screen</item>
     </string-array>
 
-    <string-array name="dock_style">
-        <item>White bar</item>
-        <item>25% app icon</item>
-        <item>50% app icon</item>
-        <item>75% app icon</item>
-        <item>100% app icon</item>
-    </string-array>
-
-    <integer-array name="dock_style_value">
-        <item>0</item>
-        <item>25</item>
-        <item>50</item>
-        <item>75</item>
-        <item>100</item>
-    </integer-array>
-
     <integer-array name="floating_show_position_value">
         <item>-1</item>
         <item>1</item>

@@ -12,8 +12,8 @@ data class FreeformConfig(
     var manualAdjustFreeformRotation: Boolean = false,
     var defaultLandscape: Boolean = false,
     /**
-     * 贴边把手样式：
-     * 0 = 小白条，25 / 50 / 75 / 100 = 露出应用图标的比例（百分比）
+     * 贴边把手露出比例（百分比），范围 28 ~ 100。
+     * 数值 = 露出的应用图标宽度占把手完整宽度的比例。
      */
     var dockStyle: Int = 100
 )

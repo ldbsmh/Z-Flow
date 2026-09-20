@@ -231,8 +231,8 @@
     <string name="freeform_size_title">小窗大小</string>
     <string name="freeform_size_land_title">横屏小窗大小</string>
     <string name="freeform_float_view_size_title">小窗悬浮窗大小</string>
-    <string name="freeform_dock_style_title">贴边把手样式</string>
-    <string name="freeform_dock_style_summary">选择小窗贴到屏幕边缘时露出的效果</string>
+    <string name="freeform_dock_style_title">贴边把手露出比例</string>
+    <string name="freeform_dock_style_summary">小窗贴到屏幕边缘时露出的应用图标比例（28%～100%）</string>
     <string name="freeform_dimming_amount_title">小窗背景变暗程度</string>
     <string name="freeform_settings_title">小窗设置</string>
     <string name="category_sidebar">侧边栏</string>

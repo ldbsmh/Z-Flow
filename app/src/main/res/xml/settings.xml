@@ -109,13 +109,15 @@
                 app:min="10"
                 android:max="50"
                 app:showSeekBarValue="true"/>
-            <io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
-                app:entries="@array/dock_style"
-                app:entryValues="@array/dock_style_value"
+            <SeekBarPreference
                 android:key="freeform_dock_style"
                 android:title="@string/freeform_dock_style_title"
                 android:summary="@string/freeform_dock_style_summary"
-                app:iconSpaceReserved="false"/>
+                app:iconSpaceReserved="false"
+                app:defaultValue="100"
+                app:min="28"
+                android:max="100"
+                app:showSeekBarValue="true"/>
             <SeekBarPreference
                 android:key="freeform_dimming_amount"
                 android:title="@string/freeform_dimming_amount_title"
