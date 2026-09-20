@@ -1989,11 +1989,15 @@ class FreeformWindow(
          */
         private fun applyDockAppearance(context: Context) {
             val backgroundView = hiddenView?.findViewById<View>(R.id.backgroundView)
-            backgroundView?.background = ContextCompat.getDrawable(context, R.drawable.floating_dock_bg)
             if (dockIsBarStyle) {
+                backgroundView?.background = ContextCompat.getDrawable(
+                    context,
+                    if (isHiddenOnRight()) R.drawable.floating_button_bg_right else R.drawable.floating_button_bg
+                )
                 applyBarViewSide()
                 return
             }
+            backgroundView?.background = ContextCompat.getDrawable(context, R.drawable.floating_dock_bg)
             val iconView = hiddenView?.findViewById<View>(R.id.dockAppIcon)
             if (iconView !is ImageView) return
             runCatching {
