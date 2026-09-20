@@ -1990,8 +1990,10 @@ class FreeformWindow(
         private fun applyDockAppearance(context: Context) {
             val backgroundView = hiddenView?.findViewById<View>(R.id.backgroundView)
             backgroundView?.background = ContextCompat.getDrawable(context, R.drawable.floating_dock_bg)
-            // 小白条档位不使用应用图标；dockAppIcon 只在图标档位存在且为 ImageView
-            if (dockIsBarStyle) return
+            if (dockIsBarStyle) {
+                applyBarViewSide()
+                return
+            }
             val iconView = hiddenView?.findViewById<View>(R.id.dockAppIcon)
             if (iconView !is ImageView) return
             runCatching {
@@ -2003,6 +2005,20 @@ class FreeformWindow(
             }.onFailure {
                 iconView.setImageDrawable(null)
             }
+        }
+
+        /**
+         * 小白条竖条贴在窗口靠屏幕内侧的一边：
+         * 右侧贴边时窗口左边界在屏内，竖条靠窗口左缘；
+         * 左侧贴边时窗口右边界在屏内，竖条靠窗口右缘。
+         */
+        private fun applyBarViewSide() {
+            val bar = hiddenView?.findViewById<View>(R.id.barView) ?: return
+            val lp = bar.layoutParams as? androidx.constraintlayout.widget.ConstraintLayout.LayoutParams ?: return
+            val onRight = isHiddenOnRight()
+            lp.startToStart = if (onRight) androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID else androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET
+            lp.endToEnd = if (onRight) androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.UNSET else androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            bar.layoutParams = lp
         }
 
         private fun resolveHiddenInflateContext(): Context {
@@ -2196,11 +2212,11 @@ class FreeformWindow(
      * 图标档位：窗口 60dp，x = 屏宽 - 露出宽度，仅裁切露出 dockVisibleWidth。
      */
     private fun calcDockHiddenX(position: Int): Int {
-        return if (dockIsBarStyle) {
-            (realScreenWidth - floatingButtonWidth) / 2 * (if (position > 0) 1 else -1)
-        } else if (position > 0) {
+        return if (position > 0) {
+            // 右侧贴边：窗口左边界 = 屏宽 - 露出宽度，窗口右侧部分推出屏外
             realScreenWidth - dockVisibleWidth
         } else {
+            // 左侧贴边：窗口右边界贴住屏幕左缘，窗口左侧部分推出屏外
             dockVisibleWidth - floatingButtonWidth
         }
     }
