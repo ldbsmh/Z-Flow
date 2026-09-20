@@ -5,6 +5,22 @@
         <item>屏幕右侧</item>
     </string-array>
 
+    <string-array name="dock_style">
+        <item>小白条</item>
+        <item>25% 应用图标</item>
+        <item>50% 应用图标</item>
+        <item>75% 应用图标</item>
+        <item>100% 应用图标</item>
+    </string-array>
+
+    <integer-array name="dock_style_value">
+        <item>0</item>
+        <item>25</item>
+        <item>50</item>
+        <item>75</item>
+        <item>100</item>
+    </integer-array>
+
     <string-array name="service_type">
         <item>使用无障碍</item>
         <item>使用前台服务</item>

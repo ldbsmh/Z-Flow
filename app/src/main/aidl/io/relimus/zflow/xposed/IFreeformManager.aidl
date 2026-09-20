@@ -16,13 +16,15 @@ interface IFreeformManager {
                       int userId, int taskId,
                       int freeformDpi, int freeformSize, int freeformSizeLand,
                       int floatViewSize, int dimAmount, boolean manualAdjustFreeformRotation,
-                      int sourceRotation, int sourceScreenWidth, int sourceScreenHeight);
-                      
+                      int sourceRotation, int sourceScreenWidth, int sourceScreenHeight,
+                      int dockStyle);
+
     void createMiniWindow(in ComponentName componentName, in PendingIntent pendingIntent,
                           int userId, int taskId,
                           int freeformDpi, int freeformSize, int freeformSizeLand,
                           int floatViewSize, int dimAmount, boolean manualAdjustFreeformRotation,
-                          int sourceRotation, int sourceScreenWidth, int sourceScreenHeight);
+                          int sourceRotation, int sourceScreenWidth, int sourceScreenHeight,
+                          int dockStyle);
                           
     void destroyWindow(int displayId);
     void destroyAllWindows();

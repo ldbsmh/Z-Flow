@@ -341,8 +341,25 @@ class FreeformWindow(
     private val effectiveCornerRadius: Float
         get() = if (virtualDisplayRotation == VIRTUAL_DISPLAY_ROTATION_LANDSCAPE && screenIsPortrait()) freeformCornerRadiusLand else freeformCornerRadius
 
-    private val floatingButtonWidth: Int = (60 * context.resources.displayMetrics.density).roundToInt()
-    private val floatingButtonHeight: Int = (60 * context.resources.displayMetrics.density).roundToInt()
+    private val dockDensity: Float = context.resources.displayMetrics.density
+
+    /** 贴边把手样式：0 = 小白条，其余为露出应用图标的百分比 */
+    private val dockStyle: Int = config.dockStyle.coerceIn(0, 100)
+
+    /** 是否显示为小白条（不显示应用图标，只露出白色竖条） */
+    private val dockIsBarStyle: Boolean get() = dockStyle == 0
+
+    /** 把手的完整窗口尺寸，所有档位一致，保证动画与拖拽边界统一 */
+    private val floatingButtonWidth: Int = (60 * dockDensity).roundToInt()
+    private val floatingButtonHeight: Int = (60 * dockDensity).roundToInt()
+
+    /** 贴边时露出的宽度（像素）：小白条只露 3.5dp 竖条，图标档位按比例 */
+    private val dockVisibleWidth: Int
+        get() = if (dockIsBarStyle) {
+            (3.5 * dockDensity).roundToInt()
+        } else {
+            (floatingButtonWidth * (dockStyle / 100f)).roundToInt().coerceIn(1, floatingButtonWidth)
+        }
 
     private val screenPaddingX: Int = context.resources.getDimension(R.dimen.freeform_screen_width_padding).roundToInt()
     private val screenPaddingY: Int = context.resources.getDimension(R.dimen.freeform_screen_height_padding).roundToInt()
@@ -1951,8 +1968,31 @@ class FreeformWindow(
             val bottomY = (realScreenHeight - hangUpViewHeight - screenPaddingY) / 2
             return targetY.coerceIn(min(topY, bottomY), max(topY, bottomY))
         }
+        /**
+         * 按档位设置把手外观：
+         * 档 1（小白条）不显示应用图标；其余档位显示完整应用图标，
+         * 由浮动窗口的偏移量决定露出多少比例。
+         */
+        private fun applyDockAppearance(context: Context) {
+            val backgroundView = hiddenView?.findViewById<View>(R.id.backgroundView)
+            val iconView = hiddenView?.findViewById<ImageView>(R.id.dockAppIcon)
+            backgroundView?.background = ContextCompat.getDrawable(context, R.drawable.floating_dock_bg)
+            if (dockIsBarStyle) {
+                iconView?.setImageDrawable(null)
+                return
+            }
+            runCatching {
+                componentName?.packageName?.let { pkg ->
+                    val pm = context.packageManager
+                    val appInfo = pm.getApplicationInfo(pkg, 0)
+                    iconView?.setImageDrawable(pm.getApplicationIcon(appInfo))
+                }
+            }.onFailure {
+                iconView?.setImageDrawable(null)
+            }
+        }
+
         private fun resolveHiddenInflateContext(): Context {
-            return try {
                 val moduleContext = context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_IGNORE_SECURITY or Context.CONTEXT_INCLUDE_CODE)
                 CommonContextWrapper.createAppCompatContext(moduleContext)
             } catch (e: Exception) {
@@ -1967,7 +2007,11 @@ class FreeformWindow(
             val hiddenY = resolveNonOverlappingHiddenDockY(hiddenOnRight, rawHiddenY)
             if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) {
                 val inflateContext = resolveHiddenInflateContext()
-                hiddenView = LayoutInflater.from(inflateContext).inflate(R.layout.view_floating_button, null, false)
+                hiddenView = LayoutInflater.from(inflateContext).inflate(
+                    if (dockIsBarStyle) R.layout.view_floating_bar else R.layout.view_floating_button,
+                    null,
+                    false
+                )
                 hiddenView.alpha = 0f
                 dragCloseHandler = HiddenViewDragCloseHandler(
                     context = inflateContext,
@@ -1981,17 +2025,7 @@ class FreeformWindow(
                     floatingButtonWidth = floatingButtonWidth,
                     floatingButtonHeight = floatingButtonHeight
                 ).also { it.attach() }
-                hiddenView.findViewById<View>(R.id.backgroundView).background = ContextCompat.getDrawable(inflateContext, R.drawable.floating_dock_bg)
-                val iconView = hiddenView.findViewById<ImageView>(R.id.dockAppIcon)
-                runCatching {
-                    componentName?.packageName?.let { pkg ->
-                        val pm = inflateContext.packageManager
-                        val appInfo = pm.getApplicationInfo(pkg, 0)
-                        iconView.setImageDrawable(pm.getApplicationIcon(appInfo))
-                    }
-                }.onFailure {
-                    iconView.setImageDrawable(null)
-                }
+                applyDockAppearance(inflateContext)
                 Instances.windowManager.addView(hiddenView, WindowManager.LayoutParams().apply {
                     gravity = Gravity.TOP or Gravity.START
                     x = hiddenX; y = hiddenY
@@ -2019,17 +2053,7 @@ class FreeformWindow(
                 floatingButtonWidth = floatingButtonWidth,
                 floatingButtonHeight = floatingButtonHeight
             ).also { it.attach() }
-            hiddenView.findViewById<View>(R.id.backgroundView).background = ContextCompat.getDrawable(hiddenView.context, R.drawable.floating_dock_bg)
-            val iconView = hiddenView.findViewById<ImageView>(R.id.dockAppIcon)
-            runCatching {
-                componentName?.packageName?.let { pkg ->
-                    val pm = hiddenView.context.packageManager
-                    val appInfo = pm.getApplicationInfo(pkg, 0)
-                    iconView.setImageDrawable(pm.getApplicationIcon(appInfo))
-                }
-            }.onFailure {
-                iconView.setImageDrawable(null)
-            }
+            applyDockAppearance(hiddenView.context)
             val hiddenLp = hiddenView.layoutParams.cast<WindowManager.LayoutParams?>() ?: return
             hiddenLp.gravity = Gravity.TOP or Gravity.START
             hiddenLp.x = hiddenX; hiddenLp.y = hiddenY
@@ -2050,7 +2074,11 @@ class FreeformWindow(
             if (!::hiddenView.isInitialized) return
             fun startRevealNow() {
                 if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) return
-                val startTranslationX = if (position > 0) floatingButtonWidth.toFloat() else -floatingButtonWidth.toFloat()
+                val startTranslationX = if (position > 0) {
+                    (floatingButtonWidth - dockVisibleWidth).toFloat()
+                } else {
+                    -(floatingButtonWidth - dockVisibleWidth).toFloat()
+                }
                 hiddenView.animate().cancel()
                 hiddenView.alpha = 0f
                 hiddenView.translationX = startTranslationX
@@ -2141,7 +2169,18 @@ class FreeformWindow(
         }
     })
 
-    private fun calcDockHiddenX(position: Int): Int = if (position > 0) realScreenWidth - floatingButtonWidth / 2 else -floatingButtonWidth / 2
+    /**
+     * 贴边时把手的 X 坐标（窗口左上角）。
+     * 右侧贴边：x = 屏宽 - 可见宽度；左侧贴边：x = 可见宽度 - 窗口总宽。
+     * 小白条档位窗口本身就是 28dp，可见宽度等于窗口宽度，贴齐屏幕边缘。
+     */
+    private fun calcDockHiddenX(position: Int): Int {
+        return if (position > 0) {
+            realScreenWidth - dockVisibleWidth
+        } else {
+            dockVisibleWidth - floatingButtonWidth
+        }
+    }
 
     private fun genFloatViewLocation(): IntArray = intArrayOf(
         if (hangUpPosition[0]) (realScreenWidth - hangUpViewWidth - screenPaddingX) / -2 else (realScreenWidth - hangUpViewWidth - screenPaddingX) / 2,

@@ -95,7 +95,8 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         manualAdjustFreeformRotation: Boolean,
         sourceRotation: Int,
         sourceScreenWidth: Int,
-        sourceScreenHeight: Int
+        sourceScreenHeight: Int,
+        dockStyle: Int
     ) {
         service?.createWindow(
             componentName,
@@ -110,7 +111,8 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
             manualAdjustFreeformRotation,
             sourceRotation,
             sourceScreenWidth,
-            sourceScreenHeight
+            sourceScreenHeight,
+            dockStyle
         )
     }
 
@@ -127,7 +129,8 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         manualAdjustFreeformRotation: Boolean,
         sourceRotation: Int,
         sourceScreenWidth: Int,
-        sourceScreenHeight: Int
+        sourceScreenHeight: Int,
+        dockStyle: Int
     ) {
         service?.createMiniWindow(
             componentName,
@@ -142,7 +145,8 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
             manualAdjustFreeformRotation,
             sourceRotation,
             sourceScreenWidth,
-            sourceScreenHeight
+            sourceScreenHeight,
+            dockStyle
         )
     }
 

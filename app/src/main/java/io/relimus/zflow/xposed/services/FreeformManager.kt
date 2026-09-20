@@ -612,7 +612,8 @@ object FreeformManager : IFreeformManager.Stub() {
         manualAdjustFreeformRotation: Boolean,
         sourceRotation: Int,
         sourceScreenWidth: Int,
-        sourceScreenHeight: Int
+        sourceScreenHeight: Int,
+        dockStyle: Int
     ) {
         if (!isReady) {
             XLog.e("$TAG: Service not ready")
@@ -668,7 +669,8 @@ object FreeformManager : IFreeformManager.Stub() {
                     floatViewSize = floatViewSize / 100f,
                     dimAmount = dimAmount / 100f,
                     manualAdjustFreeformRotation = manualAdjustFreeformRotation,
-                    defaultLandscape = isLandscapeApp(componentName?.packageName)
+                    defaultLandscape = isLandscapeApp(componentName?.packageName),
+                    dockStyle = dockStyle
                 )
 
                 val traceId = XLog.newTraceId()
@@ -712,7 +714,8 @@ object FreeformManager : IFreeformManager.Stub() {
         manualAdjustFreeformRotation: Boolean,
         sourceRotation: Int,
         sourceScreenWidth: Int,
-        sourceScreenHeight: Int
+        sourceScreenHeight: Int,
+        dockStyle: Int
     ) {
         if (!isReady) {
             XLog.e("$TAG: Service not ready")
@@ -761,7 +764,8 @@ object FreeformManager : IFreeformManager.Stub() {
                     floatViewSize = floatViewSize / 100f,
                     dimAmount = dimAmount / 100f,
                     manualAdjustFreeformRotation = manualAdjustFreeformRotation,
-                    defaultLandscape = landscapeApp
+                    defaultLandscape = landscapeApp,
+                    dockStyle = dockStyle
                 )
 
                 val inheritedLocation = windowList.find {

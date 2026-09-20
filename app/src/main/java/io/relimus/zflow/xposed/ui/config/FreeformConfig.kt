@@ -11,4 +11,9 @@ data class FreeformConfig(
     var dimAmount: Float = 0.2f,
     var manualAdjustFreeformRotation: Boolean = false,
     var defaultLandscape: Boolean = false,
+    /**
+     * 贴边把手样式：
+     * 0 = 小白条，25 / 50 / 75 / 100 = 露出应用图标的比例（百分比）
+     */
+    var dockStyle: Int = 100
 )

@@ -76,6 +76,7 @@ class FreeformService : Service() {
                 val floatViewSize = sp.getInt("freeform_float_view_size", 25)
                 val dimAmount = sp.getInt("freeform_dimming_amount", 20)
                 val manualAdjustFreeformRotation = sp.getBoolean("manual_adjust_freeform_rotation", false)
+                val dockStyle = sp.getInt("freeform_dock_style", 100)
 
                 XLog.ls(
                     "SERVICE_REQUEST component=$componentName user=$userId task=$taskId " +
@@ -99,7 +100,8 @@ class FreeformService : Service() {
                         manualAdjustFreeformRotation,
                         sourceRotation,
                         sourceScreenWidth,
-                        sourceScreenHeight
+                        sourceScreenHeight,
+                        dockStyle
                     )
                 } else {
                     proxy.createWindow(
@@ -115,7 +117,8 @@ class FreeformService : Service() {
                         manualAdjustFreeformRotation,
                         sourceRotation,
                         sourceScreenWidth,
-                        sourceScreenHeight
+                        sourceScreenHeight,
+                        dockStyle
                     )
                 }
             }
