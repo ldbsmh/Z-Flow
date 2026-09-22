@@ -14,6 +14,9 @@ import java.lang.reflect.Proxy
 /**
  * Client-side proxy for IFreeformManager.
  * Provides IPC access to the FreeformManager service running in system_server.
+ *
+ * 所有方法都委托给 [service]；binder 断开后 [service] 为 null，
+ * 各方法返回安全的默认值（与 AIDL 声明一致）。
  */
 object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
     private const val TAG = "FreeformManagerProxy"
@@ -21,12 +24,9 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
     private class ServiceProxy(private val obj: IFreeformManager) : InvocationHandler {
         override fun invoke(proxy: Any?, method: Method, args: Array<out Any?>?): Any? {
             return try {
-                val result = method.invoke(obj, *(args ?: emptyArray()))
-                Log.d(TAG, "Called service method: ${method.name}")
-                result
+                method.invoke(obj, *(args ?: emptyArray()))
             } catch (e: java.lang.reflect.InvocationTargetException) {
-                val cause = e.targetException ?: e
-                Log.e(TAG, "Service method failed: ${method.name}", cause)
+                Log.e(TAG, "Service method failed: ${method.name}", e.targetException ?: e)
                 defaultValue(method.returnType)
             } catch (e: Throwable) {
                 Log.e(TAG, "Error calling ${method.name}", e)
@@ -34,16 +34,14 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
             }
         }
 
-        private fun defaultValue(type: Class<*>): Any? {
-            return when (type) {
-                Boolean::class.javaPrimitiveType -> false
-                Int::class.javaPrimitiveType -> -1
-                Long::class.javaPrimitiveType -> -1L
-                Float::class.javaPrimitiveType -> 0f
-                Double::class.javaPrimitiveType -> 0.0
-                Void.TYPE -> null
-                else -> null
-            }
+        private fun defaultValue(type: Class<*>): Any? = when (type) {
+            Boolean::class.javaPrimitiveType -> false
+            Int::class.javaPrimitiveType -> -1
+            Long::class.javaPrimitiveType -> -1L
+            Float::class.javaPrimitiveType -> 0f
+            Double::class.javaPrimitiveType -> 0.0
+            Void.TYPE -> null
+            else -> null
         }
     }
 
@@ -68,19 +66,13 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         Log.e(TAG, "Service binder died")
     }
 
-    // IFreeformManager implementations - delegate to service
+    // ---- IFreeformManager：全部转发给 service，未连接时返回 AIDL 默认值 ----
 
-    override fun getVersionName(): String? {
-        return service?.versionName
-    }
+    override fun getVersionName(): String? = service?.versionName
 
-    override fun getVersionCode(): Int {
-        return service?.versionCode ?: -1
-    }
+    override fun getVersionCode(): Int = service?.versionCode ?: -1
 
-    override fun getUid(): Int {
-        return service?.uid ?: -1
-    }
+    override fun getUid(): Int = service?.uid ?: -1
 
     override fun createWindow(
         componentName: ComponentName?,
@@ -99,20 +91,10 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         dockStyle: Int
     ) {
         service?.createWindow(
-            componentName,
-            pendingIntent,
-            userId,
-            taskId,
-            freeformDpi,
-            freeformSize,
-            freeformSizeLand,
-            floatViewSize,
-            dimAmount,
-            manualAdjustFreeformRotation,
-            sourceRotation,
-            sourceScreenWidth,
-            sourceScreenHeight,
-            dockStyle
+            componentName, pendingIntent, userId, taskId,
+            freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
+            dimAmount, manualAdjustFreeformRotation, sourceRotation,
+            sourceScreenWidth, sourceScreenHeight, dockStyle
         )
     }
 
@@ -133,72 +115,39 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         dockStyle: Int
     ) {
         service?.createMiniWindow(
-            componentName,
-            pendingIntent,
-            userId,
-            taskId,
-            freeformDpi,
-            freeformSize,
-            freeformSizeLand,
-            floatViewSize,
-            dimAmount,
-            manualAdjustFreeformRotation,
-            sourceRotation,
-            sourceScreenWidth,
-            sourceScreenHeight,
-            dockStyle
+            componentName, pendingIntent, userId, taskId,
+            freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
+            dimAmount, manualAdjustFreeformRotation, sourceRotation,
+            sourceScreenWidth, sourceScreenHeight, dockStyle
         )
     }
 
-    override fun destroyWindow(displayId: Int) {
-        service?.destroyWindow(displayId)
-    }
+    override fun destroyWindow(displayId: Int) = service?.destroyWindow(displayId) ?: Unit
 
-    override fun destroyAllWindows() {
-        service?.destroyAllWindows()
-    }
+    override fun destroyAllWindows() = service?.destroyAllWindows() ?: Unit
 
-    override fun moveWindowToTop(displayId: Int) {
-        service?.moveWindowToTop(displayId)
-    }
+    override fun moveWindowToTop(displayId: Int) = service?.moveWindowToTop(displayId) ?: Unit
 
-    override fun injectMotionEvent(event: MotionEventBean?, displayId: Int) {
-        service?.injectMotionEvent(event, displayId)
-    }
+    override fun injectMotionEvent(event: MotionEventBean?, displayId: Int) =
+        service?.injectMotionEvent(event, displayId) ?: Unit
 
-    override fun injectKeyEvent(keyCode: Int, displayId: Int) {
-        service?.injectKeyEvent(keyCode, displayId)
-    }
+    override fun injectKeyEvent(keyCode: Int, displayId: Int) =
+        service?.injectKeyEvent(keyCode, displayId) ?: Unit
 
-    override fun moveTaskToDisplay(taskId: Int, displayId: Int) {
-        service?.moveTaskToDisplay(taskId, displayId)
-    }
+    override fun moveTaskToDisplay(taskId: Int, displayId: Int) =
+        service?.moveTaskToDisplay(taskId, displayId) ?: Unit
 
-    override fun startActivityOnDisplay(componentName: ComponentName?, userId: Int, displayId: Int) {
-        service?.startActivityOnDisplay(componentName, userId, displayId)
-    }
+    override fun startActivityOnDisplay(componentName: ComponentName?, userId: Int, displayId: Int) =
+        service?.startActivityOnDisplay(componentName, userId, displayId) ?: Unit
 
-    override fun sendPendingIntentOnDisplay(
-        pendingIntent: PendingIntent?,
-        displayId: Int,
-        taskId: Int
-    ) {
-        service?.sendPendingIntentOnDisplay(pendingIntent, displayId, taskId)
-    }
+    override fun sendPendingIntentOnDisplay(pendingIntent: PendingIntent?, displayId: Int, taskId: Int) =
+        service?.sendPendingIntentOnDisplay(pendingIntent, displayId, taskId) ?: Unit
 
-    override fun collapseStatusBarPanel() {
-        service?.collapseStatusBarPanel()
-    }
+    override fun collapseStatusBarPanel() = service?.collapseStatusBarPanel() ?: Unit
 
-    override fun getOpenWindowCount(): Int {
-        return service?.openWindowCount ?: 0
-    }
+    override fun getOpenWindowCount(): Int = service?.openWindowCount ?: 0
 
-    override fun isServiceReady(): Boolean {
-        return service?.isServiceReady == true
-    }
+    override fun isServiceReady(): Boolean = service?.isServiceReady == true
 
-    override fun asBinder(): IBinder? {
-        return service?.asBinder()
-    }
+    override fun asBinder(): IBinder? = service?.asBinder()
 }
