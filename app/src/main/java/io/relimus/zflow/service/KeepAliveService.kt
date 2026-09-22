@@ -5,89 +5,34 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
-import android.content.res.Configuration
 import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
-import android.view.Display
-import android.view.GestureDetector
 import android.view.Gravity
-import android.view.LayoutInflater
-import android.view.MotionEvent
-import android.view.Surface
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.core.content.edit
-import androidx.core.net.toUri
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
-import io.relimus.zflow.ui.floating.ChooseAppFloatingView
 import io.relimus.zflow.utils.cast
-import io.relimus.zflow.xposed.services.FreeformService
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.launch
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
 
 /**
- * 通过无障碍进行保活，同时悬浮按钮界面也移动至此
+ * 通过无障碍进行保活。
+ *
+ * 悬浮按钮 / 应用选择浮层的全部逻辑已移至 [FloatingWindowController]，
+ * 本类只负责：无障碍服务生命周期、1x1 保活层、以及配置变更时
+ * 在无障碍模式与前台服务模式之间切换。
  */
 @SuppressLint("AccessibilityPolicy")
 class KeepAliveService : AccessibilityService(),
-    SharedPreferences.OnSharedPreferenceChangeListener,
-    View.OnTouchListener,
-    GestureDetector.OnGestureListener,
-    ChooseAppFloatingView.OnWindowRemoveCallback {
+    SharedPreferences.OnSharedPreferenceChangeListener {
 
     private lateinit var sp: SharedPreferences
-    private val scope = MainScope()
-
-    // 是否正在展示悬浮按钮
-    private var isShowingFloating = false
-
-    // 是否正在展示选择应用
-    private var isShowingChooseApp = false
-
-    // 窗口管理器
     private lateinit var windowManager: WindowManager
-    private lateinit var windowLayoutParams: WindowManager.LayoutParams
-
-    // 悬浮按钮配置
-    private lateinit var config: FloatingConfig
-
-    // 屏幕宽高
-    private var screenWidth: Int = 0
-    private var screenHeight: Int = 0
-
-    // 物理屏幕方向，1竖屏，2横屏
-    private var screenRotation: Int = 0
-
-    // 物理屏幕方向，0 1 2 3分别代表四个方向
-    private var displayRotation = Surface.ROTATION_0
-
-    private lateinit var gestureDetector: GestureDetector
-
-    // 悬浮按钮界面
-    private lateinit var floatView: View
-
-    // 应用选择悬浮界面
-    private lateinit var chooseAppFloatingView: ChooseAppFloatingView
-
-    // 触摸模式，标记是点击还是长按
-    private var touchMode = 0
-
-    private lateinit var displayManager: DisplayManager
-
-    // 获取默认屏幕
-    private lateinit var defaultDisplay: Display
+    private lateinit var floatingController: FloatingWindowController
 
     private var startFreeformReceiver = StartFreeformReceiver()
 
@@ -108,67 +53,12 @@ class KeepAliveService : AccessibilityService(),
         }
     }
 
-    // 屏幕监听
-    private val displayListener = object : DisplayManager.DisplayListener {
-        override fun onDisplayAdded(displayId: Int) {}
-
-        override fun onDisplayRemoved(displayId: Int) {}
-
-        override fun onDisplayChanged(displayId: Int) {
-            if (displayId == Display.DEFAULT_DISPLAY) {
-                val newRotation = defaultDisplay.rotation
-                if (newRotation != displayRotation) {
-                    displayRotation = newRotation
-                    scope.launch(Dispatchers.Main) {
-                        val tempScreenRotation =
-                            if (displayRotation == Surface.ROTATION_0 || displayRotation == Surface.ROTATION_180) {
-                                Configuration.ORIENTATION_PORTRAIT
-                            } else {
-                                Configuration.ORIENTATION_LANDSCAPE
-                            }
-
-                        if (tempScreenRotation != screenRotation) {
-                            screenRotation = tempScreenRotation
-
-                            if (screenRotation == Configuration.ORIENTATION_PORTRAIT) {
-                                screenHeight = max(
-                                    resources.displayMetrics.widthPixels,
-                                    resources.displayMetrics.heightPixels
-                                )
-                                screenWidth = min(
-                                    resources.displayMetrics.widthPixels,
-                                    resources.displayMetrics.heightPixels
-                                )
-                            } else {
-                                screenWidth = max(
-                                    resources.displayMetrics.widthPixels,
-                                    resources.displayMetrics.heightPixels
-                                )
-                                screenHeight = min(
-                                    resources.displayMetrics.widthPixels,
-                                    resources.displayMetrics.heightPixels
-                                )
-                            }
-
-                            removeFloating()
-                            initConfig()
-                            try {
-                                chooseAppFloatingView.onScreenRotationChanged(screenRotation)
-                            } catch (_: Exception) {
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     override fun onCreate() {
         super.onCreate()
         instance = this
         isServiceRunning = false
         connected = false
-
+        sp = getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
         mainHandler.postDelayed(connectTimeoutRunnable, 3000)
     }
 
@@ -180,7 +70,6 @@ class KeepAliveService : AccessibilityService(),
         instance = this
         mainHandler.removeCallbacks(connectTimeoutRunnable)
 
-        sp = getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
         sp.registerOnSharedPreferenceChangeListener(this)
 
         // 切换为无障碍模式
@@ -196,25 +85,13 @@ class KeepAliveService : AccessibilityService(),
             RECEIVER_EXPORTED
         )
 
-        displayManager = getSystemService(DISPLAY_SERVICE).cast()
-        displayManager.registerDisplayListener(displayListener, null)
-        defaultDisplay = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
-
         windowManager = getSystemService(WINDOW_SERVICE).cast()
-        windowLayoutParams = WindowManager.LayoutParams()
-
-        gestureDetector = GestureDetector(this, this)
-
-        screenWidth = resources.displayMetrics.widthPixels
-        screenHeight = resources.displayMetrics.heightPixels
-        screenRotation = resources.configuration.orientation
 
         // 添加 1x1 无障碍保活层
         addAliveOverlayView()
 
-        initConfig()
-        chooseAppFloatingView = ChooseAppFloatingView(this, config.positionX, this)
-        startService(Intent(this, FreeformService::class.java))
+        floatingController = FloatingWindowController(this)
+        floatingController.attach()
 
         Toast.makeText(this, getString(R.string.accessibility_start), Toast.LENGTH_SHORT).show()
     }
@@ -235,28 +112,21 @@ class KeepAliveService : AccessibilityService(),
         instance = null
         mainHandler.removeCallbacks(connectTimeoutRunnable)
 
-        try {
-            displayManager.unregisterDisplayListener(displayListener)
-        } catch (_: Exception) {
-        }
-
-        if (isShowingFloating) {
-            removeFloating()
-        }
-
+        if (::floatingController.isInitialized) floatingController.detach()
         removeAliveOverlayView()
 
-        try {
-            sp.unregisterOnSharedPreferenceChangeListener(this)
-        } catch (_: Exception) {
-        }
+        runCatching { sp.unregisterOnSharedPreferenceChangeListener(this) }
+        runCatching { unregisterReceiver(startFreeformReceiver) }
+    }
 
-        try {
-            unregisterReceiver(startFreeformReceiver)
-        } catch (_: Exception) {
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
+        // 悬浮窗相关 key 由 FloatingWindowController 自行监听；
+        // 这里只处理模式切换。
+        if (key == "service_type" &&
+            sp.getInt("service_type", SERVICE_TYPE) == SERVICE_TYPE
+        ) {
+            stopService(Intent(this, ForegroundService::class.java))
         }
-
-        stopService(Intent(this, FreeformService::class.java))
     }
 
     /**
@@ -295,250 +165,13 @@ class KeepAliveService : AccessibilityService(),
      */
     private fun removeAliveOverlayView() {
         try {
-            aliveView?.let {
-                windowManager.removeView(it)
-            }
+            aliveView?.let { windowManager.removeView(it) }
         } catch (_: Throwable) {
         }
         aliveView = null
     }
 
-    /**
-     * 加载配置
-     */
-    private fun initConfig() {
-        config = getFloatingConfig()
-        if (getBooleanSp("show_floating") && !isShowingFloating && !isShowingChooseApp) {
-            showFloating()
-        }
-    }
-
-    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
-        when (key) {
-            "show_floating" -> {
-                if (getBooleanSp(key) && !isShowingFloating && !isShowingChooseApp) {
-                    initConfig()
-                } else {
-                    removeFloating()
-                }
-            }
-
-            "floating_position_x" -> {
-                removeFloating()
-                initConfig()
-                chooseAppFloatingView.showPositionX = config.positionX
-            }
-
-            // Activity传来的打开小窗监听
-            "to_show_floating" -> {
-                if (!isShowingChooseApp) {
-                    removeFloating()
-                    isShowingChooseApp = true
-                    chooseAppFloatingView.showFloatingView()
-                }
-            }
-
-            "service_type" -> {
-                if (getIntSp("service_type", SERVICE_TYPE) == SERVICE_TYPE) {
-                    stopService(Intent(this, ForegroundService::class.java))
-                }
-            }
-
-            "floating_alpha" -> {
-                config.alpha = getIntSp("floating_alpha", 10) / 10f
-                if (isShowingFloating) {
-                    try {
-                        windowManager.updateViewLayout(
-                            floatView,
-                            windowLayoutParams.apply { alpha = config.alpha }
-                        )
-                    } catch (_: Exception) {
-                    }
-                }
-            }
-        }
-    }
-
-    private fun getBooleanSp(key: String): Boolean {
-        return sp.getBoolean(key, false)
-    }
-
-    private fun getIntSp(key: String, default: Int): Int {
-        return sp.getInt(key, default)
-    }
-
-    private fun setIntSp(key: String, value: Int) {
-        sp.edit { putInt(key, value) }
-    }
-
-    private fun showFloating() {
-        floatView =
-            if (config.positionX == 1) {
-                LayoutInflater.from(this)
-                    .inflate(R.layout.view_floating_button_right, FrameLayout(this), false)
-            } else {
-                LayoutInflater.from(this)
-                    .inflate(R.layout.view_floating_button_left, FrameLayout(this), false)
-            }
-
-        val root = floatView.findViewById<View>(R.id.root)
-        root.setOnTouchListener(this)
-
-        val floatingButtonWidth = resources.getDimension(R.dimen.floating_button_width).toInt()
-        val floatingButtonHeight = resources.getDimension(R.dimen.floating_button_height).toInt()
-
-        if (Settings.canDrawOverlays(this)) {
-            windowManager.addView(floatView, windowLayoutParams.apply {
-                x = (screenWidth - floatingButtonWidth) / 2 * config.positionX
-                y = if (screenRotation == Configuration.ORIENTATION_PORTRAIT) {
-                    config.positionPortraitY
-                } else {
-                    config.positionLandscapeY
-                }
-                width = floatingButtonWidth
-                height = floatingButtonHeight
-                type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                format = PixelFormat.TRANSLUCENT
-                flags = flags or
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                windowAnimations = android.R.style.Animation_Dialog
-                alpha = config.alpha
-            })
-
-            isShowingFloating = true
-        } else {
-            try {
-                Toast.makeText(this, getString(R.string.request_overlay_permission), Toast.LENGTH_LONG).show()
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    "package:$packageName".toUri()
-                )
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-            } catch (_: Exception) {
-                Toast.makeText(this, getString(R.string.request_overlay_permission_fail), Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    private fun removeFloating() {
-        try {
-            windowManager.removeViewImmediate(floatView)
-        } catch (_: Exception) {
-        }
-        isShowingFloating = false
-    }
-
-    private fun getFloatingConfig(): FloatingConfig {
-        return FloatingConfig(
-            getIntSp("floating_position_x", -1),
-            getIntSp("floating_position_portrait_y", 0),
-            getIntSp("floating_position_landscape_y", 0),
-            getIntSp("floating_alpha", 10) / 10f
-        )
-    }
-
-    private fun handleMove(dy: Float) {
-        if (screenRotation == Configuration.ORIENTATION_PORTRAIT) {
-            config.positionPortraitY = max(
-                screenHeight / -2,
-                min(screenHeight / 2, config.positionPortraitY + dy.roundToInt())
-            )
-        } else {
-            config.positionLandscapeY = max(
-                screenHeight / -2,
-                min(screenHeight / 2, config.positionLandscapeY + dy.roundToInt())
-            )
-        }
-
-        windowManager.updateViewLayout(
-            floatView,
-            windowLayoutParams.apply {
-                y = max(screenHeight / -2, min(screenHeight / 2, y + dy.roundToInt()))
-            }
-        )
-    }
-
-    // 按下时的坐标
-    private var lastY = -1f
-
-    override fun onTouch(v: View, event: MotionEvent): Boolean {
-        gestureDetector.onTouchEvent(event)
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                lastY = event.rawY
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                if (touchMode == SCROLL) {
-                    val dy = event.rawY - lastY
-                    handleMove(dy)
-                    lastY = event.rawY
-                }
-            }
-
-            MotionEvent.ACTION_UP -> {
-                if (touchMode == SCROLL) {
-                    if (screenRotation == Configuration.ORIENTATION_PORTRAIT) {
-                        setIntSp("floating_position_portrait_y", config.positionPortraitY)
-                    } else {
-                        setIntSp("floating_position_landscape_y", config.positionLandscapeY)
-                    }
-                } else {
-                    v.performClick()
-                }
-                touchMode = 0
-            }
-        }
-        return true
-    }
-
-    override fun onDown(e: MotionEvent): Boolean {
-        return false
-    }
-
-    override fun onShowPress(e: MotionEvent) {
-    }
-
-    override fun onSingleTapUp(e: MotionEvent): Boolean {
-        chooseAppFloatingView.showFloatingView()
-        removeFloating()
-        isShowingChooseApp = true
-        return false
-    }
-
-    override fun onScroll(
-        e1: MotionEvent?,
-        e2: MotionEvent,
-        distanceX: Float,
-        distanceY: Float
-    ): Boolean {
-        touchMode = SCROLL
-        return false
-    }
-
-    override fun onLongPress(e: MotionEvent) {
-    }
-
-    override fun onFling(
-        e1: MotionEvent?,
-        e2: MotionEvent,
-        velocityX: Float,
-        velocityY: Float
-    ): Boolean {
-        return false
-    }
-
-    override fun onChooseAppWindowRemove() {
-        isShowingChooseApp = false
-        if (getBooleanSp("show_floating") && !isShowingFloating) {
-            showFloating()
-        }
-    }
-
     companion object {
-        private const val SCROLL = 1
         const val SERVICE_TYPE = 0
 
         @Volatile
@@ -549,17 +182,4 @@ class KeepAliveService : AccessibilityService(),
         var isServiceRunning = false
             private set
     }
-
-    /**
-     * 悬浮按钮配置类
-     */
-    data class FloatingConfig(
-        // 垂直按钮横坐标，-1左，1右
-        var positionX: Int,
-        // 竖屏状态悬浮按钮纵坐标
-        var positionPortraitY: Int,
-        var positionLandscapeY: Int,
-        // 侧边栏透明度
-        var alpha: Float
-    )
 }
