@@ -171,10 +171,6 @@ object FreeformManager : IFreeformManager.Stub() {
                         )
                     }
                 }
-                XLog.ls(
-                    "TASK_DISPLAY_CHANGED task=$taskId previous=$previousDisplayId new=$newDisplayId " +
-                        "window=${getWindow(newDisplayId)?.componentName}"
-                )
                 XLog.d("$TAG: onTaskDisplayChanged taskId=$taskId previous=$previousDisplayId new=$newDisplayId")
             }
         }
