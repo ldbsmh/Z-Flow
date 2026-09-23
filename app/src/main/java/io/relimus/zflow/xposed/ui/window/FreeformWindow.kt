@@ -575,8 +575,8 @@ class FreeformWindow(
                 bindTask(taskId)
                 notificationIntentSent = true
                 notificationTransitionDeadline = SystemClock.uptimeMillis() + 3500L
-                XLog.ls(
-                    "PENDING_SEND trace=$traceId display=$displayId task=$taskId " +
+                XLog.d(
+                    "$TAG: PENDING_SEND trace=$traceId display=$displayId task=$taskId " +
                         "creator=${intent.creatorPackage} activity=${intent.isActivity}"
                 )
                 FreeformManager.sendPendingIntentOnDisplay(intent, displayId, taskId)
@@ -2570,8 +2570,8 @@ class FreeformWindow(
         }
         if (!isClosedToBack) closeToBack()
         isDestroyed = true
-        XLog.ls(
-            "WINDOW_DESTROY trace=$traceId display=$displayId component=$componentName " +
+        XLog.d(
+            "$TAG: WINDOW_DESTROY trace=$traceId display=$displayId component=$componentName " +
                 "task=$currentTaskId closed=$isClosedToBack"
         )
         try {

@@ -230,21 +230,13 @@ object HookNotificationAction {
 
     private fun launchFreeform(context: Context, sbn: StatusBarNotification) {
         val packageName = sbn.packageName
-        XLog.ls(
-            "NOTIFY_CLICK pkg=$packageName key=${sbn.key} id=${sbn.id} " +
-                "tag=${sbn.tag} uid=${sbn.uid} hasContent=${sbn.notification.contentIntent != null} " +
-                "contentCreator=${sbn.notification.contentIntent?.creatorPackage} " +
-                "contentActivity=${sbn.notification.contentIntent?.isActivity}"
-        )
         runCatching {
             val contentIntent: PendingIntent? = sbn.notification.contentIntent
             val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
                 ?: run {
-                    XLog.ls("NOTIFY_ABORT noLaunchIntent pkg=$packageName")
                     return
                 }
             val component = launchIntent.component ?: run {
-                XLog.ls("NOTIFY_ABORT noComponent pkg=$packageName intent=$launchIntent")
                 return
             }
 
@@ -260,15 +252,8 @@ object HookNotificationAction {
                     putExtra("notification_content_intent", contentIntent)
                 }
             }
-            XLog.ls(
-                "NOTIFY_START_SERVICE pkg=$packageName component=$component " +
-                    "pendingCreator=${contentIntent?.creatorPackage} " +
-                    "pendingActivity=${contentIntent?.isActivity}"
-            )
             context.startService(intent)
-            XLog.ls("NOTIFY_SERVICE_SENT pkg=$packageName")
         }.onFailure {
-            XLog.ls("NOTIFY_ABORT exception pkg=$packageName", e = it)
             XLog.e("$TAG launchFreeform failed: pkg=$packageName", it)
         }
     }

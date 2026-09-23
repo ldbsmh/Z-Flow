@@ -29,12 +29,6 @@ class FreeformService : Service() {
             return START_NOT_STICKY
         }
 
-        XLog.ls(
-            "SERVICE_START action=${intent.action} startId=$startId " +
-                "component=${intent.getParcelableExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName::class.java)} " +
-                "hasInner=${intent.hasExtra(Intent.EXTRA_INTENT)} " +
-                "hasPending=${intent.hasExtra(EXTRA_PENDING_INTENT)}"
-        )
 
         when (intent.action) {
             ACTION_START_INTENT -> {
@@ -78,12 +72,6 @@ class FreeformService : Service() {
                 val manualAdjustFreeformRotation = sp.getBoolean("manual_adjust_freeform_rotation", false)
                 val dockStyle = sp.getInt("freeform_dock_style", 100)
 
-                XLog.ls(
-                    "SERVICE_REQUEST component=$componentName user=$userId task=$taskId " +
-                        "mini=$miniMode pending=${pendingIntent != null} " +
-                        "pendingCreator=${pendingIntent?.creatorPackage} " +
-                        "pendingActivity=${pendingIntent?.isActivity}"
-                )
                 XLog.d("FreeformService: request action=${intent.action} component=$componentName userId=$userId taskId=$taskId miniMode=$miniMode dpi=$freeformDpi rotation=$sourceRotation screen=${sourceScreenWidth}x$sourceScreenHeight")
 
                 if (miniMode) {

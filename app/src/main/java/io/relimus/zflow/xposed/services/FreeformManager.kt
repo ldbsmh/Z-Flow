@@ -81,8 +81,8 @@ object FreeformManager : IFreeformManager.Stub() {
                         }
                         if (notificationWindow != null) {
                             val targetDisplay = notificationWindow.displayId
-                            XLog.ls(
-                                "NOTIFY_NEW_TASK task=$taskId pkg=$packageName " +
+                            XLog.d(
+                                "$TAG: NOTIFY_NEW_TASK task=$taskId pkg=$packageName " +
                                     "display=${getTaskDisplayId(taskId)} target=$targetDisplay"
                             )
                             notificationWindow.bindTask(taskId)
@@ -126,8 +126,8 @@ object FreeformManager : IFreeformManager.Stub() {
                         if (window?.isNotificationTransitionActive() == true) {
                             // 通知中转页结束是正常流程；等待后续新建详情 Task，
                             // 不要在这里销毁 VirtualDisplay。
-                            XLog.ls(
-                                "NOTIFY_OLD_TASK_REMOVED task=$removedTaskId " +
+                            XLog.d(
+                                "$TAG: NOTIFY_OLD_TASK_REMOVED task=$removedTaskId " +
                                     "display=$managedDisplayId keepWindow=true"
                             )
                         } else {
@@ -934,8 +934,8 @@ object FreeformManager : IFreeformManager.Stub() {
         displayId: Int,
         taskId: Int
     ) {
-        XLog.ls(
-            "PENDING_SEND_REQUEST display=$displayId task=$taskId " +
+        XLog.d(
+            "$TAG: PENDING_SEND_REQUEST display=$displayId task=$taskId " +
                 "creator=${pendingIntent?.creatorPackage} activity=${pendingIntent?.isActivity}"
         )
         if (pendingIntent == null || displayId < 0) return
@@ -968,8 +968,8 @@ object FreeformManager : IFreeformManager.Stub() {
                     null,
                     options
                 )
-                XLog.ls(
-                    "PENDING_SEND_OK display=$displayId task=$taskId " +
+                XLog.d(
+                    "$TAG: PENDING_SEND_OK display=$displayId task=$taskId " +
                         "creator=${pendingIntent.creatorPackage}"
                 )
                 XLog.d(
