@@ -5,6 +5,8 @@ import android.content.res.Resources
 import android.view.Display
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
+import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.providers.RemoteSettings
 import io.relimus.zflow.xposed.hook.utils.XLog
 
 /**
@@ -47,6 +49,10 @@ object HookStatusBarDimenBridge {
     @Volatile
     private var currentDisplayId: Int = Display.DEFAULT_DISPLAY
 
+    /** 开关状态；由 Activity.onResume 刷新。默认 true，与设置页默认值一致。 */
+    @Volatile
+    private var featureEnabled: Boolean = true
+
     /** `android:dimen/status_bar_height` 在本进程资源里的 id；-1 = 尚未解析。 */
     @Volatile
     private var statusBarHeightResId: Int = -1
@@ -87,6 +93,13 @@ object HookStatusBarDimenBridge {
                     val displayId = runCatching { activity.display?.displayId }
                         .getOrNull() ?: return
                     currentDisplayId = displayId
+
+                    // onResume 时刷新开关（频率低，读取带缓存，失败按 default 兜底）
+                    featureEnabled = RemoteSettings.isFeatureEnabled(
+                        activity,
+                        ZFlow.KEY_HOOK_STATUSBAR_DIMEN,
+                        true
+                    )
                 }
             }
         )
@@ -102,6 +115,7 @@ object HookStatusBarDimenBridge {
             "getDimensionPixelSize",
             object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (!featureEnabled) return
                     if (currentDisplayId == Display.DEFAULT_DISPLAY) return
 
                     val res = param.thisObject as? Resources ?: return

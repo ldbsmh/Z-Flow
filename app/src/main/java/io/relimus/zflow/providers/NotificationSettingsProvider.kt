@@ -2,11 +2,13 @@ package io.relimus.zflow.providers
 
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.room.DatabaseRepository
 
 /**
@@ -27,6 +29,21 @@ class NotificationSettingsProvider : ContentProvider() {
         const val EXTRA_RESULT = "enabledApps"
         const val EXTRA_ENABLED = "enabled"
         const val EXTRA_MAX = "maxFreeform"
+
+        /** 读取兼容性修复开关：extras 传 key，返回 flag_value */
+        const val METHOD_GET_FEATURE_FLAG = "get_feature_flag"
+        const val EXTRA_FLAG_KEY = "flag_key"
+        const val EXTRA_FLAG_VALUE = "flag_value"
+
+        /**
+         * 允许跨进程读取的开关白名单。
+         * 本 Provider 是 exported 的，必须显式限制，
+         * 否则等于把任意设置项暴露给其它进程。
+         */
+        private val ALLOWED_FEATURE_FLAGS = setOf(
+            ZFlow.KEY_HOOK_WECHAT_STATUSBAR,
+            ZFlow.KEY_HOOK_STATUSBAR_DIMEN,
+        )
     }
 
     override fun onCreate(): Boolean = true
@@ -77,6 +94,21 @@ class NotificationSettingsProvider : ContentProvider() {
 
                 Bundle().apply {
                     putInt(EXTRA_MAX, max)
+                }
+            }
+
+            METHOD_GET_FEATURE_FLAG -> {
+                val key = extras?.getString(EXTRA_FLAG_KEY).orEmpty()
+                val enabled = if (key in ALLOWED_FEATURE_FLAGS) {
+                    context?.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+                        ?.getBoolean(key, true) ?: true
+                } else {
+                    Log.w(TAG, "feature flag not allowed: $key")
+                    false
+                }
+
+                Bundle().apply {
+                    putBoolean(EXTRA_FLAG_VALUE, enabled)
                 }
             }
 

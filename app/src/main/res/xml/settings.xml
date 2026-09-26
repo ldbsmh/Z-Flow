@@ -163,6 +163,23 @@
                 android:summary="@string/preference_landscape_apps_summary"
                 app:iconSpaceReserved="false"/>
         </PreferenceCategory>
+
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            android:title="@string/category_compat_fix">
+            <SwitchPreference
+                android:key="hook_wechat_statusbar_fix"
+                android:title="@string/hook_wechat_statusbar_fix_title"
+                android:summary="@string/hook_wechat_statusbar_fix_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="hook_statusbar_dimen"
+                android:title="@string/hook_statusbar_dimen_title"
+                android:summary="@string/hook_statusbar_dimen_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
+        </PreferenceCategory>
     </PreferenceScreen>
 
     <!-- 通知 -->

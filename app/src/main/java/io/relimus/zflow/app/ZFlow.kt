@@ -26,6 +26,14 @@ class ZFlow : Application() {
         const val PACKAGE_NAME = "io.relimus.zflow"
         const val VERSION_PRIVACY = 1
         const val APP_SETTINGS_NAME = "app_settings"
+
+        // ===== 兼容性修复开关 =====
+        // 这两个 key 同时被以下位置引用，改动需一致：
+        //   - res/xml/settings.xml（开关项）
+        //   - NotificationSettingsProvider（跨进程白名单）
+        //   - WeChatStatusBarFix / HookStatusBarDimenBridge（读取并生效）
+        const val KEY_HOOK_WECHAT_STATUSBAR = "hook_wechat_statusbar_fix"
+        const val KEY_HOOK_STATUSBAR_DIMEN = "hook_statusbar_dimen"
     }
 
     override fun onCreate() {

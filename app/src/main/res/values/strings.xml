@@ -166,6 +166,11 @@
     <string name="freeform_dock_style_title">Dock handle reveal width</string>
     <string name="freeform_dock_style_summary">Percentage of the app icon shown when the window docks to the screen edge (28%-100%)</string>
     <string name="freeform_dimming_amount_title">小窗背景变暗程度</string>
+    <string name="category_compat_fix">Compatibility fixes</string>
+    <string name="hook_wechat_statusbar_fix_title">Fix duplicated WeChat title bar in freeform</string>
+    <string name="hook_wechat_statusbar_fix_summary">Fixes the duplicated title bar shown by WeChat in a freeform window. Requires enabling WeChat in the LSPosed scope first. Switching takes effect after returning WeChat to the foreground</string>
+    <string name="hook_statusbar_dimen_title">Fix blank strip at top of freeform window</string>
+    <string name="hook_statusbar_dimen_summary">Fixes apps that reserve a status-bar-height blank strip at the top of a freeform window (e.g. Qidian). Requires enabling that app in the LSPosed scope first. Switching takes effect after returning the app to the foreground</string>
     <string name="max_freeform_windows_title">最多同时小窗数量</string>
     <string name="max_freeform_windows_summary">同时存在的小窗上限（1~5）。超出时自动关闭最早的小窗</string>
     <string name="popup_open_by_freeform">以小窗打开</string>

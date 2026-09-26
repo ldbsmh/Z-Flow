@@ -15,12 +15,49 @@ object RemoteSettings {
 
     private const val CACHE_MS = 250L
 
+    /** 开关缓存稍长一些：热路径（如 Resources 取尺寸）会频繁命中 */
+    private const val FLAG_CACHE_MS = 3000L
+
     private val cache = ConcurrentHashMap<String, CacheEntry>()
 
     private class CacheEntry(val value: Any?, val at: Long)
 
     fun clearCache() {
         cache.clear()
+    }
+
+    /**
+     * 读取一个兼容性修复开关。
+     *
+     * 供运行在被 hook 应用进程里的补丁使用——那边读不到 Z-Flow 的
+     * SharedPreferences，只能跨进程问 Provider。
+     *
+     * @param key 必须是 [NotificationSettingsProvider] 白名单内的 key
+     * @param default 查询失败时的兜底值（保证不因为读不到设置而误改行为）
+     */
+    fun isFeatureEnabled(context: Context, key: String, default: Boolean): Boolean {
+        val cacheKey = "flag:$key"
+        val now = android.os.SystemClock.uptimeMillis()
+        val cached = cache[cacheKey]
+        if (cached != null && now - cached.at < FLAG_CACHE_MS) {
+            return cached.value as? Boolean ?: default
+        }
+
+        val value = runCatching {
+            val uri = Uri.parse("content://${NotificationSettingsProvider.AUTHORITY}")
+            val extras = Bundle().apply {
+                putString(NotificationSettingsProvider.EXTRA_FLAG_KEY, key)
+            }
+            context.contentResolver.call(
+                uri,
+                NotificationSettingsProvider.METHOD_GET_FEATURE_FLAG,
+                null,
+                extras
+            )?.getBoolean(NotificationSettingsProvider.EXTRA_FLAG_VALUE, default)
+        }.getOrNull() ?: default
+
+        cache[cacheKey] = CacheEntry(value, now)
+        return value
     }
 
     /**

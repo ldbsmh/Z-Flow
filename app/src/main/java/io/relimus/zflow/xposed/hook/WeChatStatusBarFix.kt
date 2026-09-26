@@ -4,6 +4,8 @@ import android.content.Context
 import android.view.Display
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
+import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.providers.RemoteSettings
 import io.relimus.zflow.xposed.hook.utils.XLog
 
 /**
@@ -110,6 +112,9 @@ object WeChatStatusBarFix {
         val context = param.args.getOrNull(0) as? Context ?: return
         val displayId = runCatching { context.display?.displayId }.getOrNull() ?: return
         if (displayId == Display.DEFAULT_DISPLAY) return
+
+        // 开关关闭时完全不改行为。读取带缓存，失败则按 default 兜底。
+        if (!RemoteSettings.isFeatureEnabled(context, ZFlow.KEY_HOOK_WECHAT_STATUSBAR, true)) return
 
         param.result = 0
     }
