@@ -8,7 +8,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.SharedPreferences
-import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.UserHandle
@@ -19,6 +18,7 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
+import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.providers.BlacklistProvider
@@ -253,8 +253,9 @@ object HookLauncher {
                 runCatching {
                     val imageView = param.args[0] as ImageView
                     val context = getUserContext()
-                    moduleDrawable(context, "ic_popup_freeform")?.let(imageView::setImageDrawable)
-                    imageView.contentDescription = moduleString(context, "popup_open_by_freeform")
+                    imageView.setImageDrawable(context.getDrawable(R.drawable.ic_popup_freeform))
+                    imageView.contentDescription =
+                        context.getString(R.string.popup_open_by_freeform)
                     param.result = null
                 }.onFailure {
                     XLog.e("$TAG setIconAndContentDescriptionFor failed", it)
@@ -268,47 +269,19 @@ object HookLauncher {
                     val iconView = param.args[0] as View
                     val labelView = param.args[1] as TextView
                     val context = getUserContext()
-                    val drawable = moduleDrawable(context, "ic_popup_freeform")
+                    val drawable = context.getDrawable(R.drawable.ic_popup_freeform)
                     if (iconView is ImageView) {
                         iconView.setImageDrawable(drawable)
                     } else {
                         iconView.background = drawable
                     }
-                    labelView.text = moduleString(context, "popup_open_by_freeform")
+                    labelView.text = context.getString(R.string.popup_open_by_freeform)
                     param.result = null
                 }.onFailure {
                     XLog.e("$TAG setIconAndLabelFor failed", it)
                 }
             }
         }
-    }
-
-    /**
-     * 按名称取模块自己的字符串资源。
-     *
-     * 为什么不能直接用 `R.string.xxx`：那是编译期固化的数字 id，而这段代码运行在
-     * 宿主（launcher / SystemUI）进程里，资源表来自**当前已安装**的模块 APK。
-     * 模块一更新——哪怕只是新增一条字符串，AAPT 也会重排后续所有 string 的 id——
-     * 宿主进程里仍在运行的旧代码就会拿旧 id 命中别的条目（曾出现「以小窗打开」
-     * 显示成隐私政策文案）。按名称查则始终对应当前资源表，不受 id 重排影响。
-     */
-    private fun moduleString(
-        context: Context,
-        name: String,
-        fallback: String = "以小窗打开"
-    ): String {
-        return runCatching {
-            val id = context.resources.getIdentifier(name, "string", ZFlow.PACKAGE_NAME)
-            if (id != 0) context.getString(id) else fallback
-        }.getOrDefault(fallback)
-    }
-
-    /** 按名称取模块自己的 drawable，理由同 [moduleString]。 */
-    private fun moduleDrawable(context: Context, name: String): Drawable? {
-        return runCatching {
-            val id = context.resources.getIdentifier(name, "drawable", ZFlow.PACKAGE_NAME)
-            if (id != 0) context.getDrawable(id) else null
-        }.getOrNull()
     }
 
     private fun getUserContext(): Context {
