@@ -2607,6 +2607,7 @@ class FreeformWindow(
     }
 
     private fun releaseVirtualSurface() {
+        runCatching { VirtualStatusBarController.detach(displayId) }
         runCatching { if (::virtualDisplay.isInitialized) virtualDisplay.surface = null }
         virtualSurface?.let { runCatching { it.release() } }
         virtualSurface = null
@@ -2623,6 +2624,8 @@ class FreeformWindow(
                 virtualDisplay = createdDisplay
                 displayId = virtualDisplay.display.displayId
                 markVirtualDisplaySpecApplied()
+                // 最小验证：给虚拟屏挂一条状态栏 inset，让应用不再以为「顶部有状态栏」
+                VirtualStatusBarController.attach(displayId)
                 XLog.d("$TAG: [$traceId] VirtualDisplay created displayId=$displayId size=${freeformScreenWidth}x$freeformScreenHeight dpi=$freeformDpi")
                 try {
                     val wmHidden = Refine.unsafeCast<WindowManagerHidden>(Instances.windowManager)
