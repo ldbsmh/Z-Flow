@@ -24,7 +24,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
                 HookFramework.init()
                 HookSystem.init()
                 HookImeInsetsBridge.init()
-                HookTopInsetsBridge.init()
                 HookImeAdjustResize.init()
                 HookReload.init()
                 HookPredictiveBack.init()
