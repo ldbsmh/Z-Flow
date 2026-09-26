@@ -19,6 +19,11 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         // 热重载：取消所有旧钩子，并标记各 Hook 重新初始化
         HookRegistry.reset()
 
+        // 通用补丁：非主屏上把框架 status_bar_height 归零。
+        // 见 HookStatusBarDimenBridge 的类注释。
+        runCatching { HookStatusBarDimenBridge.init(lpparam.classLoader) }
+            .onFailure { XLog.e("HookStatusBarDimenBridge.init failed", it) }
+
         when (lpparam.packageName) {
             "android" -> {
                 HookFramework.init()
@@ -36,6 +41,13 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
             "com.android.systemui" -> {
                 HookSystemUI.init()
                 HookNotificationAction.init()
+            }
+
+            "com.tencent.mm" -> {
+                // 微信小窗双标题栏修复：非主屏时状态栏高度归零。
+                // 见 WeChatStatusBarFix 的类注释。
+                runCatching { WeChatStatusBarFix.init(lpparam.classLoader) }
+                    .onFailure { XLog.e("WeChatStatusBarFix.init failed", it) }
             }
 
             else -> {
