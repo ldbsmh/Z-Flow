@@ -24,11 +24,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         runCatching { HookStatusBarDimenBridge.init(lpparam.classLoader) }
             .onFailure { XLog.e("HookStatusBarDimenBridge.init failed", it) }
 
-        // 通用补丁：带着系统 PiP 状态落地到小窗时退出 PiP。
-        // 见 HookPipExitBridge 的类注释。
-        runCatching { HookPipExitBridge.init(lpparam.classLoader) }
-            .onFailure { XLog.e("HookPipExitBridge.init failed", it) }
-
         when (lpparam.packageName) {
             "android" -> {
                 HookFramework.init()
