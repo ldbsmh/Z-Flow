@@ -43,6 +43,7 @@ class NotificationSettingsProvider : ContentProvider() {
         private val ALLOWED_FEATURE_FLAGS = setOf(
             ZFlow.KEY_HOOK_WECHAT_STATUSBAR,
             ZFlow.KEY_HOOK_STATUSBAR_DIMEN,
+            ZFlow.KEY_HOOK_TELEGRAM_PIP_DISABLE,
         )
     }
 

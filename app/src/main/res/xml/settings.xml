@@ -179,6 +179,12 @@
                 android:summary="@string/hook_statusbar_dimen_summary"
                 android:defaultValue="true"
                 app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="hook_telegram_pip_disable"
+                android:title="@string/hook_telegram_pip_disable_title"
+                android:summary="@string/hook_telegram_pip_disable_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
         </PreferenceCategory>
     </PreferenceScreen>
 

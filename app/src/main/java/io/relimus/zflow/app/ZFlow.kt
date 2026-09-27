@@ -34,6 +34,7 @@ class ZFlow : Application() {
         //   - WeChatStatusBarFix / HookStatusBarDimenBridge（读取并生效）
         const val KEY_HOOK_WECHAT_STATUSBAR = "hook_wechat_statusbar_fix"
         const val KEY_HOOK_STATUSBAR_DIMEN = "hook_statusbar_dimen"
+        const val KEY_HOOK_TELEGRAM_PIP_DISABLE = "hook_telegram_pip_disable"
     }
 
     override fun onCreate() {

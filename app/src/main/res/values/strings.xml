@@ -171,6 +171,8 @@
     <string name="hook_wechat_statusbar_fix_summary">Fixes the duplicated title bar shown by WeChat in a freeform window. Requires enabling WeChat in the LSPosed scope first. Switching takes effect after returning WeChat to the foreground</string>
     <string name="hook_statusbar_dimen_title">Fix blank strip at top of freeform window</string>
     <string name="hook_statusbar_dimen_summary">Fixes apps that reserve a status-bar-height blank strip at the top of a freeform window (e.g. Qidian). Requires enabling that app in the LSPosed scope first. Switching takes effect after returning the app to the foreground</string>
+    <string name="hook_telegram_pip_disable_title">Disable Telegram picture-in-picture</string>
+    <string name="hook_telegram_pip_disable_summary">Fixes the tiny leftover video shown by Telegram apps in a freeform window. Note this also disables picture-in-picture on the main screen. Requires enabling the app in the LSPosed scope first</string>
     <string name="max_freeform_windows_title">最多同时小窗数量</string>
     <string name="max_freeform_windows_summary">同时存在的小窗上限（1~5）。超出时自动关闭最早的小窗</string>
     <string name="popup_open_by_freeform">以小窗打开</string>

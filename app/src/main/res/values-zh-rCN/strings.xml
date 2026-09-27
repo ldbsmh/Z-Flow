@@ -239,6 +239,8 @@
     <string name="hook_wechat_statusbar_fix_summary">修正微信在小窗中标题栏重复出现的问题。需先将微信加入 LSPosed 作用域；开关切换后切回微信前台即生效</string>
     <string name="hook_statusbar_dimen_title">小窗顶部空白修复</string>
     <string name="hook_statusbar_dimen_summary">修正部分应用在小窗顶部预留状态栏高度、导致空白的问题（如起点读书）。需先将该应用加入 LSPosed 作用域；开关切换后切回应用前台即生效</string>
+    <string name="hook_telegram_pip_disable_title">关闭 Telegram 画中画</string>
+    <string name="hook_telegram_pip_disable_summary">修正 Telegram 系应用在小窗中只剩角落一个小画面的问题。注意：主屏上也会一并失去画中画；需先将应用加入 LSPosed 作用域</string>
     <string name="freeform_settings_title">小窗设置</string>
     <string name="category_sidebar">侧边栏</string>
     <string name="other_settings_title">其他设置</string>

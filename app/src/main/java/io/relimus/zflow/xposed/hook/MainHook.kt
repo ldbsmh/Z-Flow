@@ -24,6 +24,11 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         runCatching { HookStatusBarDimenBridge.init(lpparam.classLoader) }
             .onFailure { XLog.e("HookStatusBarDimenBridge.init failed", it) }
 
+        // Telegram 系：关闭画中画。仅当进程内存在 Telegram 的 PiP 类时才生效，
+        // 因此不依赖包名，能覆盖官方版与各种 fork。见 TelegramPipDisableFix。
+        runCatching { TelegramPipDisableFix.init(lpparam.classLoader) }
+            .onFailure { XLog.e("TelegramPipDisableFix.init failed", it) }
+
         when (lpparam.packageName) {
             "android" -> {
                 HookFramework.init()
