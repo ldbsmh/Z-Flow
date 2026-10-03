@@ -28,13 +28,19 @@ class ZFlow : Application() {
         const val APP_SETTINGS_NAME = "app_settings"
 
         // ===== 兼容性修复开关 =====
-        // 这两个 key 同时被以下位置引用，改动需一致：
+        // 这些 key 同时被以下位置引用，改动需一致：
         //   - res/xml/settings.xml（开关项）
         //   - NotificationSettingsProvider（跨进程白名单）
-        //   - WeChatStatusBarFix / HookStatusBarDimenBridge（读取并生效）
+        //   - WeChatStatusBarFix / HookStatusBarDimenBridge / HookLauncher（读取并生效）
         const val KEY_HOOK_WECHAT_STATUSBAR = "hook_wechat_statusbar_fix"
         const val KEY_HOOK_STATUSBAR_DIMEN = "hook_statusbar_dimen"
         const val KEY_HOOK_TELEGRAM_PIP_DISABLE = "hook_telegram_pip_disable"
+
+        /** 桌面长按 → 打开小窗 入口开关 */
+        const val KEY_POPUP_FREEFORM_ENABLE = "popup_freeform_enable"
+
+        /** 屏蔽桌面长按 → 消息气泡（Android 17+）开关 */
+        const val KEY_POPUP_BUBBLE_BLOCK = "popup_bubble_block"
     }
 
     override fun onCreate() {

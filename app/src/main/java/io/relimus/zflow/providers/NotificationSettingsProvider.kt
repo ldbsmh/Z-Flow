@@ -44,6 +44,8 @@ class NotificationSettingsProvider : ContentProvider() {
             ZFlow.KEY_HOOK_WECHAT_STATUSBAR,
             ZFlow.KEY_HOOK_STATUSBAR_DIMEN,
             ZFlow.KEY_HOOK_TELEGRAM_PIP_DISABLE,
+            ZFlow.KEY_POPUP_FREEFORM_ENABLE,
+            ZFlow.KEY_POPUP_BUBBLE_BLOCK,
         )
     }
 

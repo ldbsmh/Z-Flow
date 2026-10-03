@@ -7,7 +7,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
-import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.os.UserHandle
@@ -22,6 +21,7 @@ import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.providers.BlacklistProvider
+import io.relimus.zflow.providers.RemoteSettings
 import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.hook.utils.XLog
 import java.lang.ref.WeakReference
@@ -188,21 +188,20 @@ object HookLauncher {
 
     /**
      * 读取 Z-Flow 的设置开关。
-     * 在 Launcher 进程里读到的是 Z-Flow 应用的 SharedPreferences。
+     *
+     * ⚠️ 不能直接 getSharedPreferences：本 Hook 跑在 Launcher 进程（不同 UID），
+     * 直接读 "app_settings" 拿到的是 Launcher 自己的空配置，永远返回默认值，
+     * 于是「关掉开关」完全不起作用（用户反馈的 bug 根因）。
+     *
+     * 必须与项目其它跨进程开关一致，通过 exported 的
+     * [io.relimus.zflow.providers.NotificationSettingsProvider] 查询。
      */
     private fun readEnabled(
         context: Context,
         key: String,
         default: Boolean
     ): Boolean {
-        return runCatching {
-            val sp: SharedPreferences =
-                context.getSharedPreferences(
-                    ZFlow.APP_SETTINGS_NAME,
-                    Context.MODE_PRIVATE
-                )
-            sp.getBoolean(key, default)
-        }.getOrDefault(default)
+        return RemoteSettings.isFeatureEnabled(context, key, default)
     }
 
 

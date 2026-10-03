@@ -238,33 +238,91 @@ object HookImeInsetsBridge {
     }
 
     private fun applyImeState(imeProvider: Any?, targetDisplayContent: Any, frame: Rect, visible: Boolean) {
+        // 说明：setServerVisible / setClientVisible / getSource 声明在父类
+        // InsetsSourceProvider 上，而 ezxhelper 3.1.1-rc1 的
+        // invokeMethodBestMatch 在跨父类查找时存在缺陷（findSuper 会丢失
+        // clazz），对这些方法一律抛 NoSuchMethodException。一旦抛出，
+        // applyImeState 后半段（raw insets / notifyInsetsChanged /
+        // requestTraversal）全部被跳过，IME 镜像失效；更糟的是异常会冒泡回
+        // system_server 的被 hook 方法。这里改用 invokeMethodDeep（自建、
+        // 遍历整个继承链），并对每一步 runCatching，任何单点失败都不再中断链路。
         if (imeProvider != null) {
-            invokeMethodBestMatch(imeProvider, "updateSourceFrame", null, Rect(frame))
-            invokeMethodBestMatch(imeProvider, "setServerVisible", null, visible)
-            invokeMethodBestMatch(imeProvider, "setClientVisible", null, visible)
+            invokeMethodDeep(imeProvider, "updateSourceFrame", Rect(frame))
+            invokeMethodDeep(imeProvider, "setServerVisible", visible)
+            invokeMethodDeep(imeProvider, "setClientVisible", visible)
 
-            val source = XposedHelpers.callMethod(imeProvider, "getSource")
+            val source = runCatching { XposedHelpers.callMethod(imeProvider, "getSource") }.getOrNull()
             if (source != null) {
-                invokeMethodBestMatch(source, "setFrame", null, Rect(frame))
-                invokeMethodBestMatch(source, "setVisible", null, visible)
+                invokeMethodDeep(source, "setFrame", Rect(frame))
+                invokeMethodDeep(source, "setVisible", visible)
             }
-            invokeMethodBestMatch(imeProvider, "onSourceChanged")
+            invokeMethodDeep(imeProvider, "onSourceChanged")
         }
 
         applyImeStateToRawInsets(targetDisplayContent, frame, visible)
 
         val insetsStateController = invokeMethodBestMatch(targetDisplayContent, "getInsetsStateController")
         if (insetsStateController != null) {
-            invokeMethodBestMatch(insetsStateController, "notifyInsetsChanged")
+            invokeMethodDeep(insetsStateController, "notifyInsetsChanged")
         }
 
-        runCatching { invokeMethodBestMatch(targetDisplayContent, "updateImeInputAndControlTarget", null, false) }
-        runCatching { invokeMethodBestMatch(targetDisplayContent, "updateImeInputAndControlTarget") }
-        invokeMethodBestMatch(targetDisplayContent, "setLayoutNeeded")
+        invokeMethodDeep(targetDisplayContent, "updateImeInputAndControlTarget", false)
+        invokeMethodDeep(targetDisplayContent, "updateImeInputAndControlTarget")
+        invokeMethodDeep(targetDisplayContent, "setLayoutNeeded")
 
-        val wms = ObjectUtil.getObjectUntilSuperclass(targetDisplayContent, "mWmService")!!
-        val placer = getObject(wms, "mWindowPlacerLocked")!!
-        invokeMethodBestMatch(placer, "requestTraversal")
+        val wms = ObjectUtil.getObjectUntilSuperclass(targetDisplayContent, "mWmService") ?: return
+        val placer = getObject(wms, "mWindowPlacerLocked") ?: return
+        invokeMethodDeep(placer, "requestTraversal")
+    }
+
+    /**
+     * 沿整个继承链查找并调用方法，兼容包装类型与基本类型。
+     *
+     * 不依赖 ezxhelper 的 findSuper（3.1.1-rc1 有缺陷），自己遍历；
+     * 找不到或调用失败都返回 null，绝不抛异常——避免异常冒泡进 system_server。
+     */
+    private fun invokeMethodDeep(obj: Any, methodName: String, vararg args: Any?): Any? {
+        val actual = args.map { it?.let { a -> a::class.java } }.toTypedArray()
+        var clazz: Class<*>? = obj::class.java
+        while (clazz != null) {
+            for (method in clazz.declaredMethods) {
+                if (method.name != methodName) continue
+                if (!paramsCompatible(method.parameterTypes, actual)) continue
+                return runCatching {
+                    method.isAccessible = true
+                    method.invoke(obj, *args)
+                }.getOrNull()
+            }
+            clazz = clazz.superclass
+        }
+        return null
+    }
+
+    private fun paramsCompatible(
+        formal: Array<Class<*>>,
+        actual: Array<Class<*>?>
+    ): Boolean {
+        if (formal.size != actual.size) return false
+        for (i in formal.indices) {
+            val a = actual[i] ?: continue
+            val f = formal[i]
+            if (f.isAssignableFrom(a)) continue
+            if (toPrimitiveType(f) == toPrimitiveType(a)) continue
+            return false
+        }
+        return true
+    }
+
+    private fun toPrimitiveType(clazz: Class<*>): Class<*> = when (clazz) {
+        java.lang.Boolean::class.java -> Boolean::class.javaPrimitiveType!!
+        java.lang.Byte::class.java -> Byte::class.javaPrimitiveType!!
+        java.lang.Short::class.java -> Short::class.javaPrimitiveType!!
+        java.lang.Integer::class.java -> Int::class.javaPrimitiveType!!
+        java.lang.Long::class.java -> Long::class.javaPrimitiveType!!
+        java.lang.Float::class.java -> Float::class.javaPrimitiveType!!
+        java.lang.Double::class.java -> Double::class.javaPrimitiveType!!
+        java.lang.Character::class.java -> Char::class.javaPrimitiveType!!
+        else -> clazz
     }
 
     private fun applyImeStateToRawInsets(targetDisplayContent: Any, frame: Rect, visible: Boolean) {
