@@ -13,6 +13,7 @@ import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil.getObject
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil.invokeMethodBestMatch
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHooks
 import io.relimus.zflow.utils.cast
+import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.services.FreeformManager
 import kotlin.math.max
 import kotlin.math.min
@@ -20,12 +21,57 @@ import kotlin.math.roundToInt
 
 object HookImeInsetsBridge {
 
-    private val imeInsetsSourceProviderClass = loadClass("com.android.server.wm.ImeInsetsSourceProvider")
-    private val insetsPolicyClass = loadClass("com.android.server.wm.InsetsPolicy")
-    private val insetsSourceClass = loadClass("android.view.InsetsSource")
+    private const val TAG = "HookImeInsetsBridge"
 
-    private val imeSourceId = XposedHelpers.getStaticIntField(insetsSourceClass, "ID_IME")
-    private val imeInsetsType = WindowInsets.Type.ime()
+    /**
+     * 这些类在 system_server 里按需加载。
+     *
+     * 注意：**不要在对象静态初始化时直接 loadClass / getStaticIntField**。
+     * 本对象是在 `MainHook.handleLoadPackage`（system_server 进程）里被触发的，
+     * 静态初始化抛出的异常会直接冒泡出 handleLoadPackage，导致 system_server
+     * 崩溃重启（表现为「软重启 / 开机循环」）。因此这里一律用 lazy + runCatching，
+     * 把不兼容版本降级为「功能不可用」而不是「系统崩溃」。
+     */
+    private val imeInsetsSourceProviderClass: Class<*>? by lazy {
+        runCatching { loadClass("com.android.server.wm.ImeInsetsSourceProvider") }.getOrNull()
+    }
+    private val insetsPolicyClass: Class<*>? by lazy {
+        runCatching { loadClass("com.android.server.wm.InsetsPolicy") }.getOrNull()
+    }
+    private val insetsSourceClass: Class<*>? by lazy {
+        runCatching { loadClass("android.view.InsetsSource") }.getOrNull()
+    }
+
+    private val imeInsetsType: Int by lazy { WindowInsets.Type.ime() }
+
+    /**
+     * IME 的 inset 源 id，按系统版本解析：
+     *
+     * - Android 14 (UPSIDE_DOWN_CAKE) 及以后：`InsetsSource` 引入 `ID_IME`
+     *   （`InsetsSource.createId(null, 0, ime())`），用它作为源的唯一 id。
+     * - Android 13 (TIRAMISU) 及以前：`InsetsSource` **没有** `ID_IME` 常量，
+     *   `InsetsState` 用内部类型 `ITYPE_IME`（= 19）作为数组下标，
+     *   此时源 id 就等于 `ITYPE_IME`。
+     *
+     * 旧代码无条件 `getStaticIntField(insetsSourceClass, "ID_IME")`，在 A13 上抛
+     * `NoSuchFieldError` 并把 system_server 带崩。这里改为运行时探测，缺失即回退。
+     */
+    private val imeSourceId: Int by lazy { resolveImeSourceId() }
+
+    private fun resolveImeSourceId(): Int {
+        insetsSourceClass?.let { cls ->
+            runCatching { XposedHelpers.getStaticIntField(cls, "ID_IME") }
+                .getOrNull()
+                ?.let { return it }
+        }
+
+        runCatching {
+            XposedHelpers.getStaticIntField(loadClass("android.view.InsetsState"), "ITYPE_IME")
+        }.getOrNull()?.let { return it }
+
+        // ITYPE_IME 的历史稳定值，作为最后兜底。
+        return 19
+    }
 
     private data class ImeSourceState(val visible: Boolean, val frame: Rect)
     private data class AppliedImeState(val visible: Boolean, val height: Int)
@@ -38,8 +84,13 @@ object HookImeInsetsBridge {
         hookGeneration = HookRegistry.generation
         inited = false
 
-        hookProviderMethods()
-        hookInsetsPolicyAdjustVisibility()
+        runCatching {
+            hookProviderMethods()
+            hookInsetsPolicyAdjustVisibility()
+        }.onFailure {
+            // 绝不让异常逃出 handleLoadPackage：system_server 里那等于软重启。
+            XLog.e("$TAG: init failed", it)
+        }
 
         inited = true
     }
@@ -48,12 +99,17 @@ object HookImeInsetsBridge {
     private var hookGeneration = -1L
 
     private fun hookProviderMethods() {
+        val providerClass = imeInsetsSourceProviderClass ?: run {
+            XLog.w("$TAG: ImeInsetsSourceProvider unavailable, skip provider hooks")
+            return
+        }
+
         listOf(
             "updateSourceFrame", "setServerVisible", "setClientVisible",
             "onSourceChanged", "updateVisibility", "scheduleShowImePostLayout"
         ).forEach { methodName ->
             runCatching {
-                MethodFinder.fromClass(imeInsetsSourceProviderClass)
+                MethodFinder.fromClass(providerClass)
                     .filterByName(methodName)
                     .toList()
                     .takeIf { it.isNotEmpty() }
@@ -65,12 +121,19 @@ object HookImeInsetsBridge {
     }
 
     private fun hookInsetsPolicyAdjustVisibility() {
-        MethodFinder.fromClass(insetsPolicyClass)
-            .filterByName("adjustVisibilityForIme")
-            .toList()
-            .createHooks {
-                after { patchImeDispatchStateIfNeeded(it) }
-            }
+        val policyClass = insetsPolicyClass ?: run {
+            XLog.w("$TAG: InsetsPolicy unavailable, skip adjustVisibilityForIme hook")
+            return
+        }
+
+        runCatching {
+            MethodFinder.fromClass(policyClass)
+                .filterByName("adjustVisibilityForIme")
+                .toList()
+                .createHooks {
+                    after { patchImeDispatchStateIfNeeded(it) }
+                }
+        }
     }
 
     private fun handleImeSourceProviderUpdated(provider: Any?) {
@@ -207,10 +270,35 @@ object HookImeInsetsBridge {
     private fun applyImeStateToRawInsets(targetDisplayContent: Any, frame: Rect, visible: Boolean) {
         val insetsStateController = invokeMethodBestMatch(targetDisplayContent, "getInsetsStateController") ?: return
         val insetsState = invokeMethodBestMatch(insetsStateController, "getRawInsetsState") ?: return
-        val imeSource = invokeMethodBestMatch(insetsState, "getOrCreateSource", null, imeSourceId, imeInsetsType) ?: return
+        val imeSource = resolveOrCreateImeSource(insetsState) ?: return
         invokeMethodBestMatch(imeSource, "setFrame", null, Rect(frame))
         invokeMethodBestMatch(imeSource, "setVisibleFrame", null, Rect(frame))
         invokeMethodBestMatch(imeSource, "setVisible", null, visible)
+    }
+
+    /**
+     * 取 IME 的 InsetsSource，兼容两套 API：
+     * - Android 14+：`getOrCreateSource(id, type)` / `peekSource(id)`
+     * - Android 13-：无 `getOrCreateSource`，用 `getSource(ITYPE_IME)`
+     *
+     * 注意：`invokeMethodBestMatch` 找不到方法时**抛 NoSuchMethodException**
+     * （不是返回 null），所以每次尝试都要 runCatching。
+     */
+    private fun resolveOrCreateImeSource(insetsState: Any): Any? {
+        runCatching { invokeMethodBestMatch(insetsState, "getOrCreateSource", null, imeSourceId, imeInsetsType) }
+            .getOrNull()?.let { return it }
+        return runCatching { invokeMethodBestMatch(insetsState, "getSource", null, imeSourceId) }
+            .getOrNull()
+    }
+
+    /** 只读地取 IME 源，不创建。兼容同上。 */
+    private fun resolveImeSource(insetsState: Any): Any? {
+        runCatching { invokeMethodBestMatch(insetsState, "peekSource", null, imeSourceId) }
+            .getOrNull()?.let { return it }
+        runCatching { invokeMethodBestMatch(insetsState, "getOrCreateSource", null, imeSourceId, imeInsetsType) }
+            .getOrNull()?.let { return it }
+        return runCatching { invokeMethodBestMatch(insetsState, "getSource", null, imeSourceId) }
+            .getOrNull()
     }
 
     private fun patchImeDispatchStateIfNeeded(param: XC_MethodHook.MethodHookParam) {
@@ -239,9 +327,7 @@ object HookImeInsetsBridge {
         val targetFrame = Rect(displayBounds.left, displayBounds.bottom - targetImeHeight, displayBounds.right, displayBounds.bottom)
         val patchedState = runCatching { XposedHelpers.newInstance(dispatchState.javaClass, dispatchState) }.getOrNull() ?: dispatchState
 
-        val imeSource = invokeMethodBestMatch(patchedState, "peekSource", null, imeSourceId)
-            ?: invokeMethodBestMatch(patchedState, "getOrCreateSource", null, imeSourceId, imeInsetsType)
-            ?: return
+        val imeSource = resolveImeSource(patchedState) ?: return
 
         invokeMethodBestMatch(imeSource, "setFrame", null, Rect(targetFrame))
         invokeMethodBestMatch(imeSource, "setVisibleFrame", null, Rect(targetFrame))

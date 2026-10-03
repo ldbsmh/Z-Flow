@@ -71,10 +71,15 @@ object HookLauncher {
                 loadClass("com.android.launcher3.popup.SystemShortcut", classLoader)
             val installClazz =
                 loadClass("com.android.launcher3.popup.SystemShortcut\$Install", classLoader)
-            val bubbleClazz =
-                loadClass("com.android.launcher3.popup.SystemShortcut\$BubbleShortcut", classLoader)
             val factoryClazz =
                 loadClass("com.android.launcher3.popup.SystemShortcut\$Factory", classLoader)
+
+            // BubbleShortcut 是 Android 17 才加入的嵌套类（消息气泡入口）。
+            // 在 Android 13/14 或厂商精简过的 Launcher 里不存在，缺失属正常情况，
+            // 不能因为加载不到它就让整个长按菜单 Hook 失效。
+            val bubbleClazz = runCatching {
+                loadClass("com.android.launcher3.popup.SystemShortcut\$BubbleShortcut", classLoader)
+            }.getOrNull()
 
             XposedHelpers.setStaticObjectField(
                 systemShortcutClazz,
@@ -82,21 +87,32 @@ object HookLauncher {
                 createPopupFactory(factoryClazz, installClazz, classLoader, isFreeformEntry = true)
             )
 
-            XposedHelpers.setStaticObjectField(
-                systemShortcutClazz,
-                "BUBBLE_SHORTCUT",
-                createPopupFactory(factoryClazz, bubbleClazz, classLoader, isFreeformEntry = false)
-            )
+            if (bubbleClazz != null) {
+                runCatching {
+                    XposedHelpers.setStaticObjectField(
+                        systemShortcutClazz,
+                        "BUBBLE_SHORTCUT",
+                        createPopupFactory(factoryClazz, bubbleClazz, classLoader, isFreeformEntry = false)
+                    )
+                }.onFailure {
+                    XLog.e("$TAG hookPopup bubble shortcut failed", it)
+                }
+            } else {
+                XLog.w("$TAG hookPopup: BubbleShortcut not present, skip bubble entry")
+            }
 
             hookProxyMethod(systemShortcutClazz, "onClick")
             hookProxyMethod(installClazz, "onClick")
-            hookProxyMethod(bubbleClazz, "onClick")
             hookProxyMethod(systemShortcutClazz, "setIconAndContentDescriptionFor")
             hookProxyMethod(installClazz, "setIconAndContentDescriptionFor")
-            hookProxyMethod(bubbleClazz, "setIconAndContentDescriptionFor")
             hookProxyMethod(systemShortcutClazz, "setIconAndLabelFor")
             hookProxyMethod(installClazz, "setIconAndLabelFor")
-            hookProxyMethod(bubbleClazz, "setIconAndLabelFor")
+
+            if (bubbleClazz != null) {
+                hookProxyMethod(bubbleClazz, "onClick")
+                hookProxyMethod(bubbleClazz, "setIconAndContentDescriptionFor")
+                hookProxyMethod(bubbleClazz, "setIconAndLabelFor")
+            }
         }.onFailure {
             XLog.e("$TAG hookPopup failed", it)
         }

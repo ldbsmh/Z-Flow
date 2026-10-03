@@ -31,12 +31,28 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 
         when (lpparam.packageName) {
             "android" -> {
-                HookFramework.init()
-                HookSystem.init()
-                HookImeInsetsBridge.init()
-                HookImeAdjustResize.init()
-                HookReload.init()
-                HookPredictiveBack.init()
+                // 这些 Hook 都跑在 system_server 里。
+                // 任何一个在初始化阶段抛异常，异常都会冒泡出 handleLoadPackage，
+                // 直接导致 system_server 崩溃 → 系统软重启（开机循环）。
+                // 这里逐个 runCatching 兜底：单个 Hook 不兼容时只禁用该功能，
+                // 绝不让它带崩系统进程。
+                runCatching { HookFramework.init() }
+                    .onFailure { XLog.e("HookFramework.init failed", it) }
+
+                runCatching { HookSystem.init() }
+                    .onFailure { XLog.e("HookSystem.init failed", it) }
+
+                runCatching { HookImeInsetsBridge.init() }
+                    .onFailure { XLog.e("HookImeInsetsBridge.init failed", it) }
+
+                runCatching { HookImeAdjustResize.init() }
+                    .onFailure { XLog.e("HookImeAdjustResize.init failed", it) }
+
+                runCatching { HookReload.init() }
+                    .onFailure { XLog.e("HookReload.init failed", it) }
+
+                runCatching { HookPredictiveBack.init() }
+                    .onFailure { XLog.e("HookPredictiveBack.init failed", it) }
             }
 
             "io.relimus.zflow" -> {
