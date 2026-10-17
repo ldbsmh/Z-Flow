@@ -19,16 +19,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
         // 热重载：取消所有旧钩子，并标记各 Hook 重新初始化
         HookRegistry.reset()
 
-        // 通用补丁：非主屏上把框架 status_bar_height 归零。
-        // 见 HookStatusBarDimenBridge 的类注释。
-        runCatching { HookStatusBarDimenBridge.init(lpparam.classLoader) }
-            .onFailure { XLog.e("HookStatusBarDimenBridge.init failed", it) }
-
-        // Telegram 系：关闭画中画。仅当进程内存在 Telegram 的 PiP 类时才生效，
-        // 因此不依赖包名，能覆盖官方版与各种 fork。见 TelegramPipDisableFix。
-        runCatching { TelegramPipDisableFix.init(lpparam.classLoader) }
-            .onFailure { XLog.e("TelegramPipDisableFix.init failed", it) }
-
         when (lpparam.packageName) {
             "android" -> {
                 // 这些 Hook 都跑在 system_server 里。
@@ -62,13 +52,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
             "com.android.systemui" -> {
                 HookSystemUI.init()
                 HookNotificationAction.init()
-            }
-
-            "com.tencent.mm" -> {
-                // 微信小窗双标题栏修复：非主屏时状态栏高度归零。
-                // 见 WeChatStatusBarFix 的类注释。
-                runCatching { WeChatStatusBarFix.init(lpparam.classLoader) }
-                    .onFailure { XLog.e("WeChatStatusBarFix.init failed", it) }
             }
 
             else -> {
