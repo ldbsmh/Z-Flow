@@ -246,6 +246,7 @@
     <string name="preference_freeform_blacklist_apps_summary">黑名单中的应用不能以小窗模式打开</string>
     <string name="label_blacklist_apps">小窗黑名单应用选择</string>
     <string name="app_blacklisted">该应用已在小窗黑名单中</string>
+    <string name="freeform_start_failed">无法打开小窗：Z-Flow 服务未就绪（请确认 LSPosed 已激活并重启系统框架）</string>
     <string name="accessibility_start_timeout">无障碍启动超时，请尝试关闭后重新开启</string>
     <string name="accessibility_keep_alive_failed">添加无障碍保活失败，请尝试重启无障碍服务</string>
     <string name="accessibility_authorized_not_running">无障碍已授权，但服务尚未完全连接</string>

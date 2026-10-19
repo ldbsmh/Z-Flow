@@ -240,19 +240,19 @@ object HookNotificationAction {
                 return
             }
 
-            val intent = Intent("io.relimus.zflow.action.start.intent").apply {
-                setClassName(
-                    "io.relimus.zflow",
-                    "io.relimus.zflow.xposed.services.FreeformService"
-                )
+            // 走广播：本 hook 运行在被 hook 的第三方进程里，
+            // 不能直接 startService 本应用的内部组件（exported=false）。
+            val intent = Intent("io.relimus.zflow.start_freeform").apply {
                 setPackage("io.relimus.zflow")
+                putExtra("packageName", component.packageName)
+                putExtra("activityName", component.className)
                 putExtra(Intent.EXTRA_COMPONENT_NAME, component)
                 putExtra(Intent.EXTRA_INTENT, launchIntent)
                 if (contentIntent != null) {
                     putExtra("notification_content_intent", contentIntent)
                 }
             }
-            context.startService(intent)
+            context.sendBroadcast(intent)
         }.onFailure {
             XLog.e("$TAG launchFreeform failed: pkg=$packageName", it)
         }

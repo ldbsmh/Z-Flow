@@ -185,6 +185,7 @@
     <string name="preference_freeform_blacklist_apps_summary">Apps in the blacklist cannot be opened in freeform mode</string>
     <string name="label_blacklist_apps">Freeform blacklist app selection</string>
     <string name="app_blacklisted">This app is in the freeform blacklist</string>
+    <string name="freeform_start_failed">Cannot open freeform: Z-Flow service not ready. Check that LSPosed is enabled and the system framework has been restarted.</string>
     <string name="accessibility_start_timeout">Accessibility startup timed out, please try disabling and re-enabling it</string>
     <string name="accessibility_keep_alive_failed">Failed to add accessibility keep-alive overlay, please restart accessibility service</string>
     <string name="accessibility_authorized_not_running">Accessibility is enabled but not fully connected yet</string>

@@ -89,6 +89,19 @@
             </intent-filter>
         </service>
         <!--
+            小窗请求中转 Service。
+            exported=false：只有本应用进程（悬浮窗选择器、通知钩子转发后的广播接收器）
+            能启动它。Xposed 侧运行在别的进程，统一改走
+            io.relimus.zflow.start_freeform 广播 → StartFreeformReceiver。
+            去掉原来的 exported=true + intent-filter，避免第三方应用伪造
+            taskId/component 驱动 system_server 的窗口管理。
+        -->
+        <service
+            android:name=".xposed.services.FreeformService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!--
             前台服务：specialUse（悬浮窗保活）。
             stopWithTask=false：用户划掉最近任务后保活，符合悬浮窗类应用预期；
             同时必须提供 PROPERTY_SPECIAL_USE_FGS_SUBTYPE 才能在 Android 14+ 上架。

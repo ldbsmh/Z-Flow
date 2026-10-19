@@ -1,7 +1,6 @@
 package io.relimus.zflow.ui.floating
 
 import android.annotation.SuppressLint
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -15,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
@@ -23,7 +23,7 @@ import io.relimus.zflow.ui.floating_apps_sort.FloatingAppsSortActivity
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
 import io.relimus.zflow.room.FreeFormAppsEntity
 import io.relimus.zflow.utils.cast
-import io.relimus.zflow.xposed.services.FreeformService
+import io.relimus.zflow.service.FreeformRequestHandler
 
 /**
  * @author sunshine
@@ -108,29 +108,28 @@ class ChooseAppFloatingAdapter(
                         .into(holder.icon)
                     holder.appName.text = getLabel(appInfo, apps[position - 1].userId)
                     holder.click.setOnClickListener {
-                        context.startService(
-                            Intent(context, FreeformService::class.java)
-                                .setAction(FreeformService.ACTION_START_INTENT)
-                                .putExtra(Intent.EXTRA_USER, apps[position - 1].userId)
-                                .putExtra(Intent.EXTRA_INTENT,
-                                    Intent(Intent.ACTION_MAIN)
-                                        .setComponent(ComponentName(packageName, activityName))
-                                        .setPackage(packageName)
-                                        .addCategory(Intent.CATEGORY_LAUNCHER)
-                                )
+                        // 直接转发到 system_server，跳过 FreeformService 组件启动
+                        val launched = FreeformRequestHandler.launch(
+                            context = context,
+                            packageName = packageName,
+                            activityName = activityName,
+                            userId = apps[position - 1].userId
                         )
+                        if (!launched) {
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.freeform_start_failed),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@setOnClickListener
+                        }
                         callback.onClick()
                     }
                     //长按进入排序界面
                     holder.click.setOnLongClickListener {
+                        // 长按只负责打开排序页并收起悬浮窗，
+                        // 原本这里还会 startService 把自己当小窗内容打开（无意义且会失败）。
                         context.startActivity(Intent(context, FloatingAppsSortActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
-                        context.startService(
-                            Intent(context, FreeformService::class.java)
-                                .setAction(FreeformService.ACTION_START_INTENT)
-                                .putExtra(Intent.EXTRA_INTENT,
-                                    Intent(context, FloatingAppsSortActivity::class.java)
-                                )
-                        )
                         callback.onClick()
                         true
                     }

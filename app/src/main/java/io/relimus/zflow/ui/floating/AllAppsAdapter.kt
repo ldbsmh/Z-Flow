@@ -1,8 +1,6 @@
 package io.relimus.zflow.ui.floating
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
 import android.content.pm.LauncherActivityInfo
 import android.content.pm.PackageManager
 import android.view.LayoutInflater
@@ -18,7 +16,7 @@ import com.github.promeg.pinyinhelper.Pinyin
 import io.relimus.zflow.R
 import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.systemapi.UserHandle
-import io.relimus.zflow.xposed.services.FreeformService
+import io.relimus.zflow.service.FreeformRequestHandler
 
 class AllAppsAdapter(
     private val context: Context,
@@ -64,18 +62,22 @@ class AllAppsAdapter(
                     return@setOnClickListener
                 }
 
-                context.startService(
-                    Intent(context, FreeformService::class.java)
-                        .setAction(FreeformService.ACTION_START_INTENT)
-                        .putExtra(Intent.EXTRA_USER, userId)
-                        .putExtra(
-                            Intent.EXTRA_INTENT,
-                            Intent(Intent.ACTION_MAIN)
-                                .setComponent(ComponentName(packageName, activityName))
-                                .setPackage(packageName)
-                                .addCategory(Intent.CATEGORY_LAUNCHER)
-                        )
+                // 直接转发给 system_server 的 FreeformManager：
+                // 不再依赖 startService(FreeformService)，避免组件启动被后台限制拦截。
+                val launched = FreeformRequestHandler.launch(
+                    context = context,
+                    packageName = packageName,
+                    activityName = activityName,
+                    userId = userId
                 )
+                if (!launched) {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.freeform_start_failed),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@setOnClickListener
+                }
                 callback.onClick()
             }
         } catch (_: PackageManager.NameNotFoundException) {}

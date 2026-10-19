@@ -2208,6 +2208,13 @@ object HookSwipeGesture {
         }
     }
 
+    /**
+     * 读取 Provider 的名单版本号。
+     *
+     * 注意：`call()` 本身要跨进程，版本号的作用是省掉“取具体名单”的额外往返，
+     * 不是把热路径变成纯本地。命中缓存时总开销从 2 次 Binder 降到 1 次轻量调用。
+     * Provider 不支持该方法（返回 null）时返回 null，调用方退化为“每次都查”。
+     */
     private fun providerVersion(
         context: Context,
         authority: String,
