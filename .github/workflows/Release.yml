@@ -1,14 +1,15 @@
 name: Build Z-Flow Release
 
 on:
+  # master 是正式发布分支；import 是当前的默认开发分支（推送到此即编译，便于验证修复）。
   push:
-    branches: [ master ]
+    branches: [ master, import ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - '**.txt'
   pull_request:
-    branches: [ master ]
+    branches: [ master, import ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
