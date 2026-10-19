@@ -22,6 +22,7 @@ import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.service.ForegroundService
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
+import io.relimus.zflow.ui.choose_apps.ChooseAppsViewModel
 import io.relimus.zflow.ui.permission.PermissionActivity
 import io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
 import io.relimus.zflow.utils.PermissionUtils
@@ -151,28 +152,28 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             key == "quick_floating_app" -> {
                 startActivity(
                     Intent(requireContext(), ChooseAppsActivity::class.java)
-                        .putExtra("type", ChooseAppsActivity.TYPE_FLOATING)
+                        .putExtra("type", ChooseAppsViewModel.TYPE_FLOATING)
                 )
             }
 
             key == "notification_freeform_apps" -> {
                 startActivity(
                     Intent(requireContext(), ChooseAppsActivity::class.java)
-                        .putExtra("type", ChooseAppsActivity.TYPE_NOTIFICATION)
+                        .putExtra("type", ChooseAppsViewModel.TYPE_NOTIFICATION)
                 )
             }
 
             key == "freeform_blacklist_apps" -> {
                 startActivity(
                     Intent(requireContext(), ChooseAppsActivity::class.java)
-                        .putExtra("type", ChooseAppsActivity.TYPE_BLACKLIST)
+                        .putExtra("type", ChooseAppsViewModel.TYPE_BLACKLIST)
                 )
             }
 
             key == "landscape_apps" -> {
                 startActivity(
                     Intent(requireContext(), ChooseAppsActivity::class.java)
-                        .putExtra("type", ChooseAppsActivity.TYPE_LANDSCAPE)
+                        .putExtra("type", ChooseAppsViewModel.TYPE_LANDSCAPE)
                 )
             }
 

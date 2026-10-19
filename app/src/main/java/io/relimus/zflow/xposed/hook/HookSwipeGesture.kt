@@ -137,6 +137,10 @@ object HookSwipeGesture {
     private val landscapeAppCache =
         ConcurrentHashMap<String, Boolean>()
 
+    /** 横屏名单版本号；与 Provider 自增的版本号比对，决定缓存是否有效。 */
+    @Volatile
+    private var landscapeListVersion: Long? = null
+
     private val unavailableErrorReported =
         AtomicBoolean(false)
 
@@ -2109,6 +2113,12 @@ object HookSwipeGesture {
         }
     }
 
+    private val blacklistCache =
+        ConcurrentHashMap<String, Boolean>()
+
+    @Volatile
+    private var blacklistVersion: Long? = null
+
     private fun isBlacklisted(
         context: Context,
         componentName: ComponentName?,
@@ -2118,7 +2128,21 @@ object HookSwipeGesture {
             componentName?.packageName
                 ?: return false
 
+        val cacheKey = "$packageName|$userId"
+
         return try {
+            val version = providerVersion(
+                context,
+                BlacklistProvider.AUTHORITY,
+                BlacklistProvider.METHOD_GET_VERSION
+            )
+            if (version != null && version == blacklistVersion) {
+                blacklistCache[cacheKey]?.let { return it }
+            } else if (version != null) {
+                blacklistVersion = version
+                blacklistCache.clear()
+            }
+
             context.contentResolver.call(
                 Uri.parse(
                     "content://${BlacklistProvider.AUTHORITY}"
@@ -2139,9 +2163,9 @@ object HookSwipeGesture {
             )?.getBoolean(
                 BlacklistProvider.EXTRA_RESULT,
                 false
-            ) ?: false
+            )?.also { blacklistCache[cacheKey] = it } ?: false
         } catch (_: Throwable) {
-            false
+            blacklistCache[cacheKey] ?: false
         }
     }
 
@@ -2150,32 +2174,53 @@ object HookSwipeGesture {
         packageName: String
     ): Boolean {
         return try {
-            val result =
-                context.contentResolver.call(
-                    Uri.parse(
-                        "content://${LandscapeAppsProvider.AUTHORITY}"
-                    ),
-                    LandscapeAppsProvider.METHOD_IS_LANDSCAPE,
-                    null,
-                    Bundle().apply {
-                        putString(
-                            LandscapeAppsProvider.EXTRA_PACKAGE_NAME,
-                            packageName
-                        )
-                    }
-                )?.getBoolean(
-                    LandscapeAppsProvider.EXTRA_RESULT,
-                    false
-                ) ?: false
+            /*
+             * 名单在设置页被修改时 Provider 的版本号会自增。
+             * 版本没变就直接命中本地缓存，避免手势热路径（每次缩放回调）
+             * 都做一次 Binder 往返。
+             */
+            val version = providerVersion(
+                context,
+                LandscapeAppsProvider.AUTHORITY,
+                LandscapeAppsProvider.METHOD_GET_VERSION
+            )
+            if (version != null && version == landscapeListVersion) {
+                landscapeAppCache[packageName]?.let { return it }
+            } else if (version != null) {
+                landscapeListVersion = version
+                landscapeAppCache.clear()
+            }
 
-            landscapeAppCache[packageName] =
-                result
+            val result = context.contentResolver.call(
+                Uri.parse("content://${LandscapeAppsProvider.AUTHORITY}"),
+                LandscapeAppsProvider.METHOD_IS_LANDSCAPE,
+                null,
+                Bundle().apply {
+                    putString(LandscapeAppsProvider.EXTRA_PACKAGE_NAME, packageName)
+                }
+            )?.getBoolean(LandscapeAppsProvider.EXTRA_RESULT, false) ?: false
 
+            landscapeAppCache[packageName] = result
             result
         } catch (_: Throwable) {
-            landscapeAppCache[packageName]
-                ?: false
+            // Provider 暂不可用时退回缓存值，缓存也为空则按“非横屏”处理
+            landscapeAppCache[packageName] ?: false
         }
+    }
+
+    private fun providerVersion(
+        context: Context,
+        authority: String,
+        method: String
+    ): Long? = try {
+        context.contentResolver.call(
+            Uri.parse("content://$authority"),
+            method,
+            null,
+            null
+        )?.getLong("version", 0L)
+    } catch (_: Throwable) {
+        null
     }
 
     private fun scheduleMiniLaunch(
