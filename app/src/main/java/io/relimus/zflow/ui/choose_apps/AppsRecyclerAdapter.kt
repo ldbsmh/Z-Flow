@@ -13,51 +13,75 @@ import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import io.relimus.zflow.R
-import io.relimus.zflow.room.FreeFormAppsEntity
-import io.relimus.zflow.room.FreeformBlacklistEntity
-import io.relimus.zflow.room.NotificationAppsEntity
 import io.relimus.zflow.systemapi.UserHandle
-import io.relimus.zflow.utils.cast
 
-class AppsRecyclerAdapter<T>(
+/**
+ * 应用选择列表。
+ *
+ * 勾选状态以 `packageName|userId` 为键维护在本地 [checkedKeys] 中：
+ * 点击时直接改集合并只刷新受影响的两行，不再整表 notifyDataSetChanged。
+ */
+class AppsRecyclerAdapter(
     private var allAppsList: ArrayList<LauncherActivityInfo>,
     private val viewModel: ChooseAppsViewModel,
-    private val appsList: ArrayList<T>,
+    selectedKeys: List<String>,
     private val type: Int,
     private val context: Context
 ) : RecyclerView.Adapter<AppsRecyclerAdapter.ViewHolder>() {
 
-    private var filterAllAppsList = allAppsList
-    private var checkedPackages: Set<String> = emptySet()
+    /** 已选置顶 + 过滤后的展示列表。 */
+    private var items: MutableList<LauncherActivityInfo> = ArrayList(allAppsList)
 
-    init {
-        // 初始化时根据已勾选列表构建置顶包名集合
-        checkedPackages = collectCheckedPackages()
-        sortCheckedToTop()
-    }
+    private val checkedKeys: MutableSet<String> = selectedKeys.toMutableSet()
 
-    /**
-     * 根据 type 从 appsList 中提取已勾选应用的包名集合。
-     */
-    private fun collectCheckedPackages(): Set<String> {
-        return when (type) {
-            ChooseAppsActivity.TYPE_FLOATING -> appsList.mapNotNull { (it as? FreeFormAppsEntity)?.packageName }.toSet()
-            ChooseAppsActivity.TYPE_NOTIFICATION -> appsList.mapNotNull { (it as? NotificationAppsEntity)?.packageName }.toSet()
-            ChooseAppsActivity.TYPE_BLACKLIST -> appsList.mapNotNull { (it as? FreeformBlacklistEntity)?.packageName }.toSet()
-            ChooseAppsActivity.TYPE_LANDSCAPE -> appsList.mapNotNull { it as? String }.toSet()
-            else -> emptySet()
+    private fun keyOf(packageName: String, userId: Int) = "$packageName|$userId"
+
+    private fun keyOf(info: LauncherActivityInfo): String {
+        val packageName = info.applicationInfo.packageName
+        val userId = if (type == ChooseAppsViewModel.TYPE_LANDSCAPE) {
+            -1
+        } else {
+            UserHandle.getUserId(info.user, info.applicationInfo.uid)
         }
+        return keyOf(packageName, userId)
     }
 
     /**
-     * 把已勾选的应用（在 checkedPackages 中）移到列表前面，
-     * 保持它们之间的相对顺序不变，未勾选的维持原顺序在后。
+     * 搜索过滤结果。
+     * 注意：filterAllAppsList 是“已选置顶”后的视图，过滤应该作用在它上面
+     * 才能保证搜索时仍保持置顶顺序，这里直接用传入的完整列表重建。
      */
+    @android.annotation.SuppressLint("NotifyDataSetChanged")
+    fun submitFilter(filtered: List<LauncherActivityInfo>) {
+        allAppsList = ArrayList(filtered)
+        sortCheckedToTop()
+        notifyDataSetChanged()
+    }
+
+    /** 供全选/全不选使用的完整数据源。 */
+    fun allApps(): List<LauncherActivityInfo> = allAppsList
+
+    /**
+     * 勾选状态变化（全选 / 全不选 / LiveData 回流）时刷新。
+     * keys 已经带上 userId，直接使用。
+     */
+    fun updateChecked(keys: List<String>) {
+        checkedKeys.clear()
+        checkedKeys.addAll(keys)
+        sortCheckedToTop()
+        notifyItemRangeChanged(0, items.size, PAYLOAD_CHECKED)
+    }
+
     private fun sortCheckedToTop() {
-        if (checkedPackages.isEmpty()) return
-        val checked = filterAllAppsList.filter { it.applicationInfo.packageName in checkedPackages }
-        val unchecked = filterAllAppsList.filter { it.applicationInfo.packageName !in checkedPackages }
-        filterAllAppsList = ArrayList(checked + unchecked)
+        items = if (checkedKeys.isEmpty()) {
+            ArrayList(allAppsList)
+        } else {
+            val checked = ArrayList<LauncherActivityInfo>()
+            val unchecked = ArrayList<LauncherActivityInfo>()
+            allAppsList.forEach { if (keyOf(it) in checkedKeys) checked.add(it) else unchecked.add(it) }
+            checked.addAll(unchecked)
+            checked
+        }
     }
 
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -69,162 +93,62 @@ class AppsRecyclerAdapter<T>(
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        return ViewHolder(LayoutInflater.from(parent.context).inflate(R.layout.item_app2, parent, false))
+        return ViewHolder(
+            LayoutInflater.from(parent.context).inflate(R.layout.item_app2, parent, false)
+        )
     }
 
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val item = filterAllAppsList[position]
-        val userId = UserHandle.getUserId(item.user, item.applicationInfo.uid)
-        val packageName = item.applicationInfo.packageName
+    override fun getItemCount(): Int = items.size
 
-        Glide.with(context)
-            .load(item.applicationInfo.loadIcon(context.packageManager))
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        bind(holder, items[position])
+    }
+
+    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.contains(PAYLOAD_CHECKED)) {
+            holder.switch.isChecked = keyOf(items[position]) in checkedKeys
+            return
+        }
+        onBindViewHolder(holder, position)
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun bind(holder: ViewHolder, info: LauncherActivityInfo) {
+        val appInfo = info.applicationInfo
+        holder.name.text = info.label?.toString() ?: appInfo.packageName
+        holder.packageName.text = appInfo.packageName
+        Glide.with(holder.icon)
+            .load(info.getBadgedIcon(0))
             .transition(DrawableTransitionOptions.withCrossFade())
             .into(holder.icon)
 
-        holder.name.text = if (userId == 0) item.label else "${item.label}-分身${userId}"
-        holder.packageName.text = packageName
+        val key = keyOf(info)
+        holder.switch.setOnCheckedChangeListener(null)
+        holder.switch.isChecked = key in checkedKeys
 
-        holder.switch.isChecked = when (type) {
-            ChooseAppsActivity.TYPE_FLOATING -> contains(FreeFormAppsEntity(-1, packageName, userId))
-            ChooseAppsActivity.TYPE_NOTIFICATION -> contains(NotificationAppsEntity(packageName, userId))
-            ChooseAppsActivity.TYPE_BLACKLIST -> contains(FreeformBlacklistEntity(packageName, userId))
-            ChooseAppsActivity.TYPE_LANDSCAPE -> containsLandscape(packageName)
-            else -> false
-        }
-
-        holder.view.setOnClickListener {
-            holder.switch.isChecked = !holder.switch.isChecked
-            if (holder.switch.isChecked) {
-                insert(position)
-            } else {
-                delete(position)
-            }
+        holder.itemView.setOnClickListener { toggle(key, holder, info) }
+        holder.switch.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked == (key in checkedKeys)) return@setOnCheckedChangeListener
+            toggle(key, holder, info)
         }
     }
 
-    override fun getItemCount(): Int = filterAllAppsList.size
-
-    @SuppressLint("NotifyDataSetChanged")
-    fun updateDate(newAllAppsList: ArrayList<LauncherActivityInfo>) {
-        filterAllAppsList = newAllAppsList
-        // 搜索过滤后仍保持已勾选应用置顶
-        if (checkedPackages.isNotEmpty()) {
-            val checked = filterAllAppsList.filter { it.applicationInfo.packageName in checkedPackages }
-            val unchecked = filterAllAppsList.filter { it.applicationInfo.packageName !in checkedPackages }
-            filterAllAppsList = ArrayList(checked + unchecked)
-        }
-        notifyDataSetChanged()
+    /** 单点切换：本地集合即时更新（开关控件已自带动画），再交给 ViewModel 落库。 */
+    private fun toggle(key: String, holder: ViewHolder, info: LauncherActivityInfo) {
+        val checked = key !in checkedKeys
+        if (checked) checkedKeys.add(key) else checkedKeys.remove(key)
+        // 不重建列表，保持滚动位置；下一次全量刷新时再置顶
+        holder.switch.setOnCheckedChangeListener(null)
+        holder.switch.isChecked = checked
+        viewModel.toggleApp(
+            packageName = info.applicationInfo.packageName,
+            userId = if (type == ChooseAppsViewModel.TYPE_LANDSCAPE) -1
+            else UserHandle.getUserId(info.user, info.applicationInfo.uid),
+            checked = checked
+        )
     }
 
-    private fun insert(position: Int) {
-        val packageName = filterAllAppsList[position].applicationInfo.packageName
-        val userId = UserHandle.getUserId(filterAllAppsList[position].user, filterAllAppsList[position].applicationInfo.uid)
-        viewModel.insertApps(packageName, userId)
-
-        when (type) {
-            ChooseAppsActivity.TYPE_FLOATING -> {
-                appsList.add(FreeFormAppsEntity(-1, packageName, userId).cast())
-            }
-            ChooseAppsActivity.TYPE_NOTIFICATION -> {
-                appsList.add(NotificationAppsEntity(packageName, userId).cast())
-            }
-            ChooseAppsActivity.TYPE_BLACKLIST -> {
-                appsList.add(FreeformBlacklistEntity(packageName, userId).cast())
-            }
-            ChooseAppsActivity.TYPE_LANDSCAPE -> {
-                appsList.add(packageName.cast())
-            }
-        }
-    }
-
-    private fun delete(position: Int) {
-        val packageName = filterAllAppsList[position].applicationInfo.packageName
-        val userId = UserHandle.getUserId(filterAllAppsList[position].user, filterAllAppsList[position].applicationInfo.uid)
-        viewModel.deleteApps(packageName, userId)
-
-        when (type) {
-            ChooseAppsActivity.TYPE_FLOATING -> remove(FreeFormAppsEntity(-1, packageName, userId))
-            ChooseAppsActivity.TYPE_NOTIFICATION -> remove(NotificationAppsEntity(packageName, userId))
-            ChooseAppsActivity.TYPE_BLACKLIST -> remove(FreeformBlacklistEntity(packageName, userId))
-            ChooseAppsActivity.TYPE_LANDSCAPE -> removeLandscape(packageName)
-        }
-    }
-
-    // ===== Entity-based contains (原有) =====
-
-    private fun contains(item: FreeFormAppsEntity): Boolean {
-        appsList.forEach {
-            val castItem = it.cast<FreeFormAppsEntity>()
-            if (castItem.userId == item.userId && castItem.packageName == item.packageName) return true
-        }
-        return false
-    }
-
-    private fun contains(item: NotificationAppsEntity): Boolean {
-        appsList.forEach {
-            val castItem = it.cast<NotificationAppsEntity>()
-            if (castItem.userId == item.userId && castItem.packageName == item.packageName) return true
-        }
-        return false
-    }
-
-    private fun contains(item: FreeformBlacklistEntity): Boolean {
-        appsList.forEach {
-            val castItem = it.cast<FreeformBlacklistEntity>()
-            if (castItem.userId == item.userId && castItem.packageName == item.packageName) return true
-        }
-        return false
-    }
-
-    // ===== Landscape (String-based) =====
-
-    private fun containsLandscape(packageName: String): Boolean {
-        appsList.forEach {
-            if (it as String == packageName) return true
-        }
-        return false
-    }
-
-    private fun removeLandscape(packageName: String) {
-        appsList.remove(packageName.cast())
-    }
-
-    // ===== Entity-based remove (原有) =====
-
-    private fun remove(item: FreeFormAppsEntity) {
-        var toBeRemovedItem: T? = null
-        appsList.forEach {
-            val castItem = it.cast<FreeFormAppsEntity>()
-            if (castItem.userId == item.userId && castItem.packageName == item.packageName) {
-                toBeRemovedItem = it
-                return@forEach
-            }
-        }
-        appsList.remove(toBeRemovedItem)
-    }
-
-    private fun remove(item: NotificationAppsEntity) {
-        var toBeRemovedItem: T? = null
-        appsList.forEach {
-            val castItem = it.cast<NotificationAppsEntity>()
-            if (castItem.userId == item.userId && castItem.packageName == item.packageName) {
-                toBeRemovedItem = it
-                return@forEach
-            }
-        }
-        appsList.remove(toBeRemovedItem)
-    }
-
-    private fun remove(item: FreeformBlacklistEntity) {
-        var toBeRemovedItem: T? = null
-        appsList.forEach {
-            val castItem = it.cast<FreeformBlacklistEntity>()
-            if (castItem.userId == item.userId && castItem.packageName == item.packageName) {
-                toBeRemovedItem = it
-                return@forEach
-            }
-        }
-        appsList.remove(toBeRemovedItem)
+    private companion object {
+        const val PAYLOAD_CHECKED = "payload:checked"
     }
 }

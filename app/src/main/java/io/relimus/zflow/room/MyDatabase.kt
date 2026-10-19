@@ -13,17 +13,22 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotificationAppsEntity::class,
         FreeformBlacklistEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class MyDatabase : RoomDatabase() {
     abstract val freeFormAppsDao: FreeFormAppsDao
     abstract val notificationAppsDao: NotificationAppsDao
+    abstract val notificationSyncDao: NotificationSyncDao
     abstract val freeformBlacklistDao: FreeformBlacklistDao
 
     companion object {
         private var database: MyDatabase? = null
 
+        /**
+         * 已移除 allowMainThreadQueries()：主线程访问数据库会直接抛异常，
+         * 强迫所有写操作走 [DatabaseRepository] 的挂起方法。
+         */
         @Synchronized
         fun getDatabase(context: Context): MyDatabase {
             if (database == null) {
@@ -32,12 +37,14 @@ abstract class MyDatabase : RoomDatabase() {
                     MyDatabase::class.java,
                     "database.db"
                 )
-                    .allowMainThreadQueries()
-                    .addMigrations(MIGRATION_1_2)
-                    .addMigrations(MIGRATION_2_3)
-                    .addMigrations(MIGRATION_3_4)
-                    .addMigrations(MIGRATION_4_5)
-                    .addMigrations(MIGRATION_5_6)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7
+                    )
                     .build()
             }
             return database!!
@@ -99,6 +106,29 @@ abstract class MyDatabase : RoomDatabase() {
                             "PRIMARY KEY('packageName', 'userId')" +
                             ")"
                 )
+            }
+        }
+
+        /**
+         * 6 -> 7：NotificationAppsEntity 主键由 (packageName) 改为 (packageName, userId)。
+         * SQLite 不支持修改主键，按 Room 官方做法重建表并迁移数据。
+         * 旧数据本身不会重复，因此 INSERT OR IGNORE 不会丢行。
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE 'NotificationAppsEntity' RENAME TO 'NotificationAppsEntity_OLD'")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS 'NotificationAppsEntity' (" +
+                            "'packageName' TEXT NOT NULL, " +
+                            "'userId' INTEGER NOT NULL DEFAULT 0, " +
+                            "PRIMARY KEY('packageName', 'userId')" +
+                            ")"
+                )
+                db.execSQL(
+                    "INSERT OR IGNORE INTO 'NotificationAppsEntity'('packageName', 'userId') " +
+                            "SELECT packageName, userId FROM 'NotificationAppsEntity_OLD'"
+                )
+                db.execSQL("DROP TABLE 'NotificationAppsEntity_OLD'")
             }
         }
     }

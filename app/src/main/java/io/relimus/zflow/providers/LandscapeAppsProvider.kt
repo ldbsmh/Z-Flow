@@ -6,20 +6,37 @@ import android.content.Context
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 
+/**
+ * 横屏应用名单。
+ *
+ * 调用方：
+ * - 本应用设置页 / 选择页：读 + 写（同进程，UID 校验直接放行）
+ * - 被 hook 的应用进程（HookSwipeGesture）：只读
+ *
+ * 写操作在 [ProviderAccess.allowWrite] 中限制为本应用 / system / root，
+ * 被 hook 的第三方进程无法修改或清空用户的横屏配置。
+ */
 class LandscapeAppsProvider : ContentProvider() {
 
     companion object {
+        private const val TAG = "LandscapeAppsProvider"
+
         const val AUTHORITY = "io.relimus.zflow.landscape.provider"
         const val METHOD_IS_LANDSCAPE = "is_landscape_app"
         const val METHOD_GET_ALL = "get_all"
         const val METHOD_ADD = "add"
         const val METHOD_REMOVE = "remove"
         const val METHOD_CLEAR_ALL = "clear_all"
+        /** 名单版本号：每次写入自增，供 system_server 侧缓存失效判断。 */
+        const val METHOD_GET_VERSION = "get_version"
+        const val EXTRA_VERSION = "version"
         const val EXTRA_PACKAGE_NAME = "package_name"
         const val EXTRA_PACKAGE_LIST = "package_list"
         const val EXTRA_RESULT = "result"
         private const val PREFS_NAME = "landscape_apps"
+        private const val KEY_VERSION = "__version__"
     }
 
     private val prefs by lazy {
@@ -28,36 +45,54 @@ class LandscapeAppsProvider : ContentProvider() {
 
     override fun onCreate(): Boolean = true
 
-    override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
+    override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         return when (method) {
             METHOD_IS_LANDSCAPE -> {
-                val pkg = extras?.getString(EXTRA_PACKAGE_NAME) ?: ""
+                val pkg = extras?.getString(EXTRA_PACKAGE_NAME).orEmpty()
                 Bundle().apply {
                     putBoolean(EXTRA_RESULT, pkg.isNotEmpty() && prefs.getBoolean(pkg, false))
                 }
             }
-            METHOD_GET_ALL -> {
-                Bundle().apply {
-                    putStringArrayList(EXTRA_PACKAGE_LIST, ArrayList(prefs.all.keys))
-                }
+            METHOD_GET_ALL -> Bundle().apply {
+                putStringArrayList(EXTRA_PACKAGE_LIST, ArrayList(prefs.all.keys))
+            }
+            METHOD_GET_VERSION -> Bundle().apply {
+                putLong(EXTRA_VERSION, prefs.getLong(KEY_VERSION, 0L))
             }
             METHOD_ADD -> {
-                extras?.getString(EXTRA_PACKAGE_NAME)?.let {
-                    prefs.edit().putBoolean(it, true).apply()
+                if (!ProviderAccess.allowWrite(TAG, method)) {
+                    return ProviderAccess.denied("write not allowed")
                 }
-                null
+                val pkg = extras?.getString(EXTRA_PACKAGE_NAME)
+                if (!isValidPackageName(pkg)) {
+                    return ProviderAccess.denied("invalid package name")
+                }
+                prefs.edit().putBoolean(pkg, true).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
+                Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }
             METHOD_REMOVE -> {
-                extras?.getString(EXTRA_PACKAGE_NAME)?.let {
-                    prefs.edit().remove(it).apply()
+                if (!ProviderAccess.allowWrite(TAG, method)) {
+                    return ProviderAccess.denied("write not allowed")
                 }
-                null
+                val pkg = extras?.getString(EXTRA_PACKAGE_NAME)
+                if (!isValidPackageName(pkg)) {
+                    return ProviderAccess.denied("invalid package name")
+                }
+                prefs.edit().remove(pkg).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
+                Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }
             METHOD_CLEAR_ALL -> {
-                prefs.edit().clear().apply()
-                null
+                if (!ProviderAccess.allowWrite(TAG, method)) {
+                    return ProviderAccess.denied("write not allowed")
+                }
+                val version = prefs.getLong(KEY_VERSION, 0L) + 1
+                prefs.edit().clear().putLong(KEY_VERSION, version).apply()
+                Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }
-            else -> null
+            else -> {
+                Log.w(TAG, "Unknown method: $method")
+                ProviderAccess.denied("unknown method")
+            }
         }
     }
 

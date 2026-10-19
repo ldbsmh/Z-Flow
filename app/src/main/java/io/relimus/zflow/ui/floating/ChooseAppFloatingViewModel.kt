@@ -16,7 +16,7 @@ class ChooseAppFloatingViewModel(context: Context) {
         return repository.getAllFreeFormAppsByFlow()
     }
 
-    fun deleteNotInstall(notInstallList: List<FreeFormAppsEntity>) {
+    suspend fun deleteNotInstall(notInstallList: List<FreeFormAppsEntity>) {
         repository.deleteMore(notInstallList)
     }
 }

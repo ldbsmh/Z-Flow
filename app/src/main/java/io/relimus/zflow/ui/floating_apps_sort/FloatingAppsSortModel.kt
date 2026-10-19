@@ -3,8 +3,10 @@ package io.relimus.zflow.ui.floating_apps_sort
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.viewModelScope
 import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.room.FreeFormAppsEntity
+import kotlinx.coroutines.launch
 
 /**
  * @author sunshine
@@ -17,11 +19,22 @@ class FloatingAppsSortModel(application: Application) : AndroidViewModel(applica
         return repository.getAllFreeForm()
     }
 
-    fun update(entity: FreeFormAppsEntity) {
-        repository.update(entity)
+    /**
+     * 把拖动后的顺序整份写回。
+     * sortNum 是主键，逐条 update 会在交换过程中撞主键；
+     * [DatabaseRepository.updateFreeFormSort] 在同一事务里完成，顺序与界面一致。
+     */
+    fun saveOrder(list: List<FreeFormAppsEntity>) {
+        if (list.isEmpty()) return
+        viewModelScope.launch {
+            repository.updateFreeFormSort(list)
+        }
     }
 
     fun deleteNotInstall(notInstallList: List<FreeFormAppsEntity>) {
-        repository.deleteMore(notInstallList)
+        if (notInstallList.isEmpty()) return
+        viewModelScope.launch {
+            repository.deleteMore(notInstallList)
+        }
     }
 }

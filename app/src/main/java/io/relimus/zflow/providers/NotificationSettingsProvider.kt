@@ -12,10 +12,13 @@ import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.room.DatabaseRepository
 
 /**
- * 向其它进程（SystemUI）暴露“接管通知”的应用名单。
+ * 向其它进程（SystemUI 等）暴露“接管通知”的应用名单与少量开关。
  *
- * 方案 A：Z-Flow 不再取消原通知，而是由 SystemUI 进程为勾选应用的通知行
- * 注入“打开小窗”按钮。SystemUI 进程通过本 Provider 查询哪些应用被勾选。
+ * 安全策略：
+ * - 全部方法只读，没有写入口；
+ * - 开关通过 [ALLOWED_FEATURE_FLAGS] 白名单收敛，不把任意设置项当查询接口；
+ * - 失败时返回带 [ProviderAccess.EXTRA_DENIED] 的 Bundle，调用方可以据此
+ *   区分“查询失败”和“确实为空”，而不是误以为用户关掉了全部接管。
  */
 class NotificationSettingsProvider : ContentProvider() {
 
@@ -30,10 +33,21 @@ class NotificationSettingsProvider : ContentProvider() {
         const val EXTRA_ENABLED = "enabled"
         const val EXTRA_MAX = "maxFreeform"
 
+        /** 通知名单版本号：每次事务写入后自增（见 DatabaseRepository.notifyListChanged） */
+        const val METHOD_GET_APP_LIST_VERSION = "get_app_list_version"
+        const val EXTRA_VERSION = "version"
+
         /** 读取兼容性修复开关：extras 传 key，返回 flag_value */
         const val METHOD_GET_FEATURE_FLAG = "get_feature_flag"
         const val EXTRA_FLAG_KEY = "flag_key"
         const val EXTRA_FLAG_VALUE = "flag_value"
+
+        private const val PREFS_NAME = "app_settings"
+        private const val KEY_NOTIFY_FREEFORM = "notify_freeform"
+        private const val KEY_MAX_FREEFORM = "max_freeform_windows"
+        private const val DEFAULT_MAX_FREEFORM = 2
+        private const val MAX_FREEFORM_UPPER_BOUND = 5
+        const val KEY_APP_LIST_VERSION = "notification_apps_version"
 
         /**
          * 允许跨进程读取的开关白名单。
@@ -51,70 +65,59 @@ class NotificationSettingsProvider : ContentProvider() {
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         return when (method) {
             METHOD_GET_ENABLED_APPS -> {
-                val ctx = context
-                val apps = if (ctx != null) {
-                    try {
-                        DatabaseRepository(ctx).getAllNotificationPackageNames()
-                            ?.toTypedArray()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "get_enabled_apps failed", e)
-                        null
-                    }
-                } else {
-                    null
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                val apps = try {
+                    DatabaseRepository(ctx).getAllNotificationPackageNames()?.toTypedArray()
+                } catch (e: Exception) {
+                    Log.e(TAG, "get_enabled_apps failed", e)
+                    return ProviderAccess.denied("database unavailable")
                 }
 
                 Bundle().apply {
-                    putStringArray(EXTRA_RESULT, apps)
+                    putStringArray(EXTRA_RESULT, apps ?: emptyArray())
                 }
             }
 
             METHOD_IS_FREEFORM_ENABLED -> {
-                val ctx = context
-                val enabled = ctx?.let {
-                    it.getSharedPreferences(
-                        "app_settings",
-                        android.content.Context.MODE_PRIVATE
-                    ).getBoolean("notify_freeform", true)
-                } ?: false
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                val enabled = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(KEY_NOTIFY_FREEFORM, true)
 
-                Bundle().apply {
-                    putBoolean(EXTRA_ENABLED, enabled)
-                }
+                Bundle().apply { putBoolean(EXTRA_ENABLED, enabled) }
             }
 
             METHOD_GET_MAX_FREEFORM -> {
-                val ctx = context
-                val max = ctx?.let {
-                    it.getSharedPreferences(
-                        "app_settings",
-                        android.content.Context.MODE_PRIVATE
-                    ).getInt("max_freeform_windows", 2).coerceIn(1, 5)
-                } ?: 2
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                val max = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .getInt(KEY_MAX_FREEFORM, DEFAULT_MAX_FREEFORM)
+                    .coerceIn(1, MAX_FREEFORM_UPPER_BOUND)
 
-                Bundle().apply {
-                    putInt(EXTRA_MAX, max)
-                }
+                Bundle().apply { putInt(EXTRA_MAX, max) }
             }
 
             METHOD_GET_FEATURE_FLAG -> {
                 val key = extras?.getString(EXTRA_FLAG_KEY).orEmpty()
-                val enabled = if (key in ALLOWED_FEATURE_FLAGS) {
-                    context?.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
-                        ?.getBoolean(key, true) ?: true
-                } else {
+                if (key !in ALLOWED_FEATURE_FLAGS) {
                     Log.w(TAG, "feature flag not allowed: $key")
-                    false
+                    return ProviderAccess.denied("flag not allowed")
                 }
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                val enabled = ctx.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(key, true)
 
-                Bundle().apply {
-                    putBoolean(EXTRA_FLAG_VALUE, enabled)
-                }
+                Bundle().apply { putBoolean(EXTRA_FLAG_VALUE, enabled) }
+            }
+
+            METHOD_GET_APP_LIST_VERSION -> {
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                val version = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .getLong(KEY_APP_LIST_VERSION, 0L)
+                Bundle().apply { putLong(EXTRA_VERSION, version) }
             }
 
             else -> {
                 Log.w(TAG, "Unknown method: $method")
-                Bundle.EMPTY
+                ProviderAccess.denied("unknown method")
             }
         }
     }

@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.REORDER_TASKS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECEIVE_USER_PRESENT" />
+    <!-- 开机自启需要；缺少时 BOOT_COMPLETED 广播在多数 ROM 上被丢弃 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"
         tools:ignore="ForegroundServicesPolicy" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -86,20 +88,21 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
-        <service android:name=".xposed.services.FreeformService"
-            android:enabled="true"
-            android:exported="true"
-            tools:ignore="ExportedService">
-            <intent-filter>
-                <action android:name="io.relimus.zflow.ui.freeform.FreeformService"/>
-            </intent-filter>
-        </service>
-
+        <!--
+            前台服务：specialUse（悬浮窗保活）。
+            stopWithTask=false：用户划掉最近任务后保活，符合悬浮窗类应用预期；
+            同时必须提供 PROPERTY_SPECIAL_USE_FGS_SUBTYPE 才能在 Android 14+ 上架。
+        -->
         <service
             android:name="io.relimus.zflow.service.ForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="保持全局悬浮按钮与快速小窗入口常驻" />
+        </service>
 
         <!-- ServiceProvider for receiving binder from system_server via Xposed -->
         <provider
@@ -110,21 +113,29 @@
             android:multiprocess="false"
             tools:ignore="ExportedContentProvider" />
             
+        <!--
+            以下 Provider 需要被 launcher / SystemUI / 被 hook 的第三方进程读取
+            （这些进程 UID 各不相同，无法用单一 permission 表达），因此 exported。
+            安全边界在代码里：写操作只允许本应用/system/root
+            （见 providers/ProviderAccess.kt），第三方进程只能读到只读结果。
+        -->
         <provider
             android:name=".providers.BlacklistProvider"
             android:authorities="io.relimus.zflow.blacklist.provider"
-            android:exported="true" />
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
 
-        <!-- 横屏小窗 Provider（新增） -->
         <provider
             android:name=".providers.LandscapeAppsProvider"
             android:authorities="io.relimus.zflow.landscape.provider"
-            android:exported="true" />
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
 
         <provider
             android:name=".providers.NotificationSettingsProvider"
             android:authorities="io.relimus.zflow.notification.provider"
-            android:exported="true" />
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
 
         <receiver
             android:name="io.relimus.zflow.broadcast.BootBroadcastReceiver"

@@ -1,7 +1,6 @@
 package io.relimus.zflow.ui.floating_apps_sort
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
 import android.os.UserHandle
@@ -20,17 +19,22 @@ import io.relimus.zflow.room.FreeFormAppsEntity
 import io.relimus.zflow.utils.cast
 
 /**
- * @author sunshine
- * @date 2021/1/31
- * 小窗应用回收布局适配器
+ * 小窗应用排序列表。
+ *
+ * 数据源由适配器自己持有（[moveItem] 只动内部列表），
+ * 拖动结束后由 Activity 调用 [currentList] 一次性落库。
  */
 class AppsSortRecyclerAdapter(
-        private val pm: PackageManager,
-        private val appsList: ArrayList<FreeFormAppsEntity>
+    private val pm: PackageManager,
+    appsList: ArrayList<FreeFormAppsEntity>
 ) : RecyclerView.Adapter<AppsSortRecyclerAdapter.ViewHolder>() {
 
-    private lateinit var context: Context
-    private lateinit var launcherApps: LauncherApps
+    private val items = ArrayList(appsList)
+
+    private var context: Context? = null
+    private var launcherApps: LauncherApps? = null
+
+    /** 每次重建列表时刷新：拖动结束后以这里的数据（含新序号）写库。 */
     private val userHandleMap = HashMap<Int, UserHandle>()
 
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -40,40 +44,60 @@ class AppsSortRecyclerAdapter(
         val switch: SwitchCompat = itemView.findViewById(R.id.switch_app)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        context = parent.context
-        val userManager = context.getSystemService(Context.USER_SERVICE).cast<UserManager>()
-        launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE).cast()
+    fun currentList(): List<FreeFormAppsEntity> = items
 
+
+    /** 交换两项位置；失败（位置越界）返回 false。 */
+    fun moveItem(from: Int, to: Int): Boolean {
+        if (from !in items.indices || to !in items.indices) return false
+        val moved = items.removeAt(from)
+        items.add(to, moved)
+        notifyItemMoved(from, to)
+        return true
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val ctx = parent.context
+        context = ctx
+        launcherApps = ctx.getSystemService(Context.LAUNCHER_APPS_SERVICE).cast()
+        val userManager = ctx.getSystemService(Context.USER_SERVICE).cast<UserManager>()
+        userHandleMap.clear()
         userManager.userProfiles.forEach {
             userHandleMap[io.relimus.zflow.systemapi.UserHandle.getUserId(it)] = it
         }
-
-        return ViewHolder(LayoutInflater.from(parent.context).inflate(R.layout.item_app, parent, false))
+        return ViewHolder(LayoutInflater.from(ctx).inflate(R.layout.item_app, parent, false))
     }
+
+    override fun getItemCount(): Int = items.size
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        //val applicationInfo = pm.getApplicationInfo(appsList[position].packageName, 0)
-        val userHandle = if (userHandleMap.containsKey(appsList[position].userId)) userHandleMap[appsList[position].userId]!! else userHandleMap[0]!!
-        val applicationInfo = launcherApps.getApplicationInfo(appsList[position].packageName, 0, userHandle)
-        Glide.with(context)
-            .load(applicationInfo.loadIcon(context.packageManager))
+        val ctx = context ?: return
+        val entity = items[position]
+        val userHandle = userHandleMap[entity.userId] ?: userHandleMap[0] ?: return
+
+        val applicationInfo = try {
+            launcherApps?.getApplicationInfo(entity.packageName, 0, userHandle)
+        } catch (e: Exception) {
+            null
+        }
+
+        if (applicationInfo == null) {
+            // 应用可能刚被卸载：显示包名，避免整个列表绑定崩溃
+            holder.name.text = entity.packageName
+            holder.switch.isChecked = false
+            return
+        }
+
+        Glide.with(ctx)
+            .load(applicationInfo.loadIcon(ctx.packageManager))
             .transition(DrawableTransitionOptions.withCrossFade())
             .into(holder.icon)
-        holder.name.text = getLabel(applicationInfo, appsList[position].userId)
-        holder.switch.visibility = View.GONE
-        holder.view.setOnClickListener {  }
-    }
 
-    private fun getLabel(applicationInfo: ApplicationInfo, userId: Int): CharSequence {
-        return if (userId == 0) {
-            pm.getApplicationLabel(applicationInfo)
+        holder.name.text = if (entity.userId == 0) {
+            applicationInfo.loadLabel(ctx.packageManager)
         } else {
-            "${pm.getApplicationLabel(applicationInfo)}-分身${userId}"
+            "${applicationInfo.loadLabel(ctx.packageManager)}-分身${entity.userId}"
         }
-    }
-
-    override fun getItemCount(): Int {
-        return appsList.size
+        holder.switch.isChecked = true
     }
 }

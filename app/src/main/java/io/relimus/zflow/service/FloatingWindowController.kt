@@ -20,7 +20,6 @@ import androidx.core.content.edit
 import androidx.core.net.toUri
 import io.relimus.zflow.R
 import io.relimus.zflow.ui.floating.ChooseAppFloatingView
-import io.relimus.zflow.xposed.services.FreeformService
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -118,7 +117,6 @@ class FloatingWindowController(
 
         initConfig()
         chooseAppFloatingView = ChooseAppFloatingView(context, config.positionX, this)
-        context.startService(Intent(context, FreeformService::class.java))
     }
 
     fun detach() {
@@ -128,7 +126,6 @@ class FloatingWindowController(
         if (isShowingFloating) removeFloating()
         runCatching { displayManager.unregisterDisplayListener(displayListener) }
         runCatching { sp.unregisterOnSharedPreferenceChangeListener(this) }
-        runCatching { context.stopService(Intent(context, FreeformService::class.java)) }
     }
 
     private fun updateScreenSize() {

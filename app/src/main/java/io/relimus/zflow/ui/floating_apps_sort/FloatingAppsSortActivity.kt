@@ -18,136 +18,137 @@ import io.relimus.zflow.utils.PackageUtils
 import io.relimus.zflow.utils.cast
 import java.util.Collections
 
+/**
+ * 悬浮窗应用排序。
+ *
+ * 排序模型：列表里的每一项就是一个 (packageName, userId)，sortNum 是这一项的
+ * 位置序号，拖动结束后整体重排并写回。
+ *
+ * 修正点：旧实现拖动时交换两个实体的 sortNum 再调用两次 update ——
+ * sortNum 是主键，先写会造成主键冲突，冲突被静默吞掉后排序就“丢了”；
+ * 现在改为一次事务批量写回，结果与界面上看到的一致。
+ */
 class FloatingAppsSortActivity : AppCompatActivity() {
 
     private lateinit var viewModel: FloatingAppsSortModel
     private lateinit var binding: ActivityFloatingAppsSortBinding
+
+    private var firstInit = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityFloatingAppsSortBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
-        supportActionBar!!.title = getString(R.string.label_sort_apps)
-        supportActionBar!!.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.title = getString(R.string.label_sort_apps)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         viewModel = ViewModelProvider(this)[FloatingAppsSortModel::class.java]
 
-        var firstInit = true
-
-        //处理多用户
         val launcherApps: LauncherApps = getSystemService(LAUNCHER_APPS_SERVICE).cast()
         val userManager = getSystemService(USER_SERVICE).cast<UserManager>()
         val userHandleMap = HashMap<Int, UserHandle>()
-
-
         userManager.userProfiles.forEach {
             userHandleMap[io.relimus.zflow.systemapi.UserHandle.getUserId(it)] = it
         }
 
-        viewModel.getAllApps().observe(this) {
-
-            val appsList = it.cast<ArrayList<FreeFormAppsEntity>>()
+        viewModel.getAllApps().observe(this) { list ->
+            val appsList = list.orEmpty().toMutableList().cast<ArrayList<FreeFormAppsEntity>>()
 
             if (firstInit) {
-                //删除已经卸载的app
-                val noInstallAppsList = ArrayList<FreeFormAppsEntity>()
-                appsList.forEach { entity ->
-                    if (entity.userId == 0) {
-                        if (!PackageUtils.hasInstallThisPackage(entity.packageName, packageManager)) {
-                            noInstallAppsList.add(entity)
-                        }
-                    } else {
-                        val userHandle = if (userHandleMap.containsKey(entity.userId)) userHandleMap[entity.userId]!! else userHandleMap[0]!!
-                        if (!PackageUtils.hasInstallThisPackageWithUserId(entity.packageName, launcherApps, userHandle)) {
-                            noInstallAppsList.add(entity)
-                        }
-                    }
+                firstInit = false
+                val noInstallAppsList = appsList.filter {
+                    !isInstalled(it, userHandleMap, launcherApps)
                 }
-                viewModel.deleteNotInstall(noInstallAppsList)
-                //有需要删除的应用时不加载，等删除后再加载
-                if (noInstallAppsList.isEmpty()) {
-                    firstInit = false
-
-                    //加载条关闭
-                    binding.progress.isIndeterminate = false
-                    binding.progress.visibility = View.GONE
-
-                    Collections.sort(appsList, AppsComparable())
-
-                    binding.recyclerApps.layoutManager = LinearLayoutManager(this)
-                    binding.recyclerApps.adapter = null
-                    binding.recyclerApps.adapter = AppsSortRecyclerAdapter(packageManager, appsList)
-
-                    val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.Callback() {
-                        override fun getMovementFlags(
-                            recyclerView: RecyclerView,
-                            viewHolder: RecyclerView.ViewHolder
-                        ): Int {
-                            val swipeFlags = 0
-                            val dragFlags = ItemTouchHelper.UP or
-                                    ItemTouchHelper.DOWN
-                            return makeMovementFlags(dragFlags, swipeFlags)
-                        }
-
-                        override fun onMove(
-                                recyclerView: RecyclerView,
-                                viewHolder: RecyclerView.ViewHolder,
-                                target: RecyclerView.ViewHolder
-                        ): Boolean {
-                            val fromPosition = viewHolder.bindingAdapterPosition
-                            val targetPosition = target.bindingAdapterPosition
-
-                            if (fromPosition < targetPosition) {
-                                for (i in fromPosition until targetPosition) {
-                                    Collections.swap(appsList, i, i + 1)
-                                }
-                            } else {
-                                for (i in fromPosition downTo targetPosition + 1) {
-                                    Collections.swap(appsList, i, i - 1)
-                                }
-                            }
-                            recyclerView.adapter?.notifyItemMoved(fromPosition, targetPosition)
-
-                            val tempPackage = appsList[fromPosition].packageName
-                            val tempUser = appsList[fromPosition].userId
-                            appsList[fromPosition].packageName = appsList[targetPosition].packageName
-                            appsList[fromPosition].userId = appsList[targetPosition].userId
-                            appsList[targetPosition].packageName = tempPackage
-                            appsList[targetPosition].userId = tempUser
-
-                            viewModel.update(appsList[fromPosition])
-                            viewModel.update(appsList[targetPosition])
-
-                            Collections.sort(appsList, AppsComparable())
-
-                            return true
-                        }
-
-                        override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-
-                        }
-                    })
-
-                    itemTouchHelper.attachToRecyclerView(binding.recyclerApps)
+                if (noInstallAppsList.isNotEmpty()) {
+                    // 清理后 LiveData 会再次回调，那时再渲染列表
+                    viewModel.deleteNotInstall(noInstallAppsList)
+                    return@observe
                 }
             }
+
+            binding.progress.isIndeterminate = false
+            binding.progress.visibility = View.GONE
+
+            Collections.sort(appsList, AppsComparable())
+            buildList(appsList)
         }
+    }
+
+    private fun isInstalled(
+        entity: FreeFormAppsEntity,
+        userHandleMap: Map<Int, UserHandle>,
+        launcherApps: LauncherApps
+    ): Boolean {
+        return if (entity.userId == 0) {
+            PackageUtils.hasInstallThisPackage(entity.packageName, packageManager)
+        } else {
+            val userHandle = userHandleMap[entity.userId] ?: userHandleMap[0] ?: return true
+            PackageUtils.hasInstallThisPackageWithUserId(entity.packageName, launcherApps, userHandle)
+        }
+    }
+
+    private fun buildList(list: List<FreeFormAppsEntity>) {
+        val appsList = ArrayList(list)
+
+        binding.recyclerApps.layoutManager = LinearLayoutManager(this)
+        binding.recyclerApps.adapter = null
+        binding.recyclerApps.adapter = AppsSortRecyclerAdapter(packageManager, appsList)
+
+        val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.Callback() {
+            override fun getMovementFlags(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ): Int {
+                val dragFlags = ItemTouchHelper.UP or ItemTouchHelper.DOWN
+                return makeMovementFlags(dragFlags, NO_SWIPE)
+            }
+
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                // 由适配器维护自己的数据源，这里只做位置交换
+                (recyclerView.adapter as? AppsSortRecyclerAdapter)?.moveItem(
+                    viewHolder.bindingAdapterPosition,
+                    target.bindingAdapterPosition
+                ) ?: return false
+                return true
+            }
+
+            override fun isLongPressDragEnabled(): Boolean = true
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                // 拖动结束后一次性写回整份顺序：
+                // sortNum 是主键，逐条交换会撞主键并静默失败；Repository 在
+                // 单个事务内先把旧主键挪到负数区，再按新顺序写回。
+                val adapter = recyclerView.adapter as? AppsSortRecyclerAdapter ?: return
+                viewModel.saveOrder(adapter.currentList())
+            }
+        })
+
+        itemTouchHelper.attachToRecyclerView(binding.recyclerApps)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when(item.itemId) {
-            android.R.id.home -> {
-                finish()
-            }
+        if (item.itemId == android.R.id.home) {
+            finish()
+            return true
         }
-        return true
+        return super.onOptionsItemSelected(item)
     }
 
-    class AppsComparable: Comparator<FreeFormAppsEntity> {
+    private companion object {
+        const val NO_SWIPE = 0
+    }
 
+    class AppsComparable : Comparator<FreeFormAppsEntity> {
         override fun compare(o1: FreeFormAppsEntity?, o2: FreeFormAppsEntity?): Int {
-            return o1!!.sortNum.compareTo(o2!!.sortNum)
+            return (o1?.sortNum ?: 0).compareTo(o2?.sortNum ?: 0)
         }
     }
 }

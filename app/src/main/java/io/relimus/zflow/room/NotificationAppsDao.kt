@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface NotificationAppsDao {
 
-    @Query("INSERT INTO NotificationAppsEntity(packageName, userId) VALUES(:packageName, :userId)")
+    /** 重复 (packageName, userId) 视为无操作，不抛主键冲突。 */
+    @Query("INSERT OR IGNORE INTO NotificationAppsEntity(packageName, userId) VALUES(:packageName, :userId)")
     fun insert(packageName: String, userId: Int)
 
     @Query("DELETE FROM NotificationAppsEntity WHERE packageName = :packageName and userId = :userId")
@@ -24,9 +25,14 @@ interface NotificationAppsDao {
     @Query("SELECT * FROM NotificationAppsEntity")
     fun getAllByFlow() : Flow<List<NotificationAppsEntity>?>
 
-    @Query("SELECT packageName FROM NotificationAppsEntity")
-    fun getAllPackageNames() : List<String>?
+    @Query("SELECT COUNT(*) FROM NotificationAppsEntity WHERE packageName = :packageName AND userId = :userId")
+    fun count(packageName: String, userId: Int): Int
 
     @Query("DELETE FROM NotificationAppsEntity")
     fun deleteAll()
+
+    /** 批量写入用（需在事务中调用）。 */
+    fun insertLists(list: List<NotificationAppsEntity>) {
+        list.forEach { insert(it.packageName, it.userId) }
+    }
 }

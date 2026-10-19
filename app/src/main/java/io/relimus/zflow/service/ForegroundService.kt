@@ -44,6 +44,7 @@ class ForegroundService : Service(),
         isRunning = true
         floatingController = FloatingWindowController(this)
         floatingController.attach()
+
     }
 
     override fun onBind(intent: Intent): IBinder? = null

@@ -1,10 +1,7 @@
 package io.relimus.zflow.ui.choose_apps
 
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.content.pm.LauncherActivityInfo
-import android.content.pm.LauncherApps
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.UserManager
 import android.view.Menu
@@ -17,139 +14,120 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import io.relimus.zflow.R
 import io.relimus.zflow.databinding.ActivityChooseAppsBinding
 import io.relimus.zflow.utils.cast
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.text.Collator
 
+/**
+ * 应用选择页。
+ *
+ * 生命周期约定：应用列表的加载与缓存都在 [ChooseAppsViewModel] 中完成，
+ * Activity 只负责把状态渲染到当前仍然有效的 ViewBinding 上，
+ * 因此旋转屏幕、快速退出都不会再出现“后台任务回调旧 Activity”的问题。
+ */
 class ChooseAppsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityChooseAppsBinding
     private lateinit var viewModel: ChooseAppsViewModel
-
-    private lateinit var pm: PackageManager
-    private val allAppsList = ArrayList<LauncherActivityInfo>()
-    private var appsList: ArrayList<*>? = null
-
     private lateinit var userManager: UserManager
-    private lateinit var launcherApps: LauncherApps
 
-    private var needToUpdateView = false
-    private var firstObserver = true
-    private var type = TYPE_FLOATING
-    private var adapter: AppsRecyclerAdapter<*>? = null
+    private var adapter: AppsRecyclerAdapter? = null
     private val filter = AppNameFilter()
+
+    /** 最近一次渲染用的应用列表，供搜索过滤与全选使用。 */
+    private var renderedApps: ArrayList<LauncherActivityInfo> = ArrayList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityChooseAppsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
-        supportActionBar!!.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         viewModel = ViewModelProvider(this)[ChooseAppsViewModel::class.java]
-
-        pm = packageManager
         userManager = getSystemService(USER_SERVICE).cast<UserManager>()
-        launcherApps = getSystemService(LAUNCHER_APPS_SERVICE).cast<LauncherApps>()
 
-        type = intent.getIntExtra("type", TYPE_FLOATING)
+        val type = intent.getIntExtra("type", ChooseAppsViewModel.TYPE_FLOATING)
         viewModel.type = type
 
+        supportActionBar?.title = getString(
+            when (type) {
+                ChooseAppsViewModel.TYPE_BLACKLIST -> R.string.label_blacklist_apps
+                ChooseAppsViewModel.TYPE_LANDSCAPE -> R.string.label_landscape_apps
+                ChooseAppsViewModel.TYPE_NOTIFICATION -> R.string.label_notification_apps
+                else -> R.string.label_floating_apps
+            }
+        )
+
+        viewModel.state.observe(this) { state ->
+            when (state) {
+                is ChooseAppsViewModel.LoadState.Loading -> Unit
+                is ChooseAppsViewModel.LoadState.Failed -> hideLoading()
+                is ChooseAppsViewModel.LoadState.Success -> render(type, state)
+            }
+        }
+
+        // 已有缓存时直接复用，只有首次进入或 forceRefresh 才真正查询
+        viewModel.loadApps(userManager, forceRefresh = false)
+        observeSelectedList(type)
+    }
+
+    /** 悬浮窗 / 通知 / 黑名单：数据库里的勾选状态变化后增量刷新列表。 */
+    private fun observeSelectedList(type: Int) {
         when (type) {
-            TYPE_FLOATING -> {
-                supportActionBar!!.title = getString(R.string.label_floating_apps)
+            ChooseAppsViewModel.TYPE_FLOATING ->
                 viewModel.getAllApps().observe(this) { list ->
-                    appsList = list.cast<ArrayList<*>>()
-                    showAppsList(type)
+                    adapter?.updateChecked(list.orEmpty().map { "${it.packageName}|${it.userId}" })
                 }
-            }
-            TYPE_BLACKLIST -> {
-                supportActionBar!!.title = getString(R.string.label_blacklist_apps)
-                viewModel.getAllBlacklistApps().observe(this) { list ->
-                    appsList = list.cast<ArrayList<*>>()
-                    showAppsList(type)
-                }
-            }
-            TYPE_LANDSCAPE -> {
-                supportActionBar!!.title = getString(R.string.label_landscape_apps)
-                val landscapePkgs = viewModel.getAllLandscapeApps()
-                appsList = ArrayList(landscapePkgs)
-                showAppsList(type)
-            }
-            else -> {
-                supportActionBar!!.title = getString(R.string.label_notification_apps)
+            ChooseAppsViewModel.TYPE_NOTIFICATION ->
                 viewModel.getAllNotificationApps().observe(this) { list ->
-                    appsList = list.cast<ArrayList<*>>()
-                    showAppsList(type)
+                    adapter?.updateChecked(list.orEmpty().map { "${it.packageName}|${it.userId}" })
                 }
-            }
+            ChooseAppsViewModel.TYPE_BLACKLIST ->
+                viewModel.getAllBlacklistApps().observe(this) { list ->
+                    adapter?.updateChecked(list.orEmpty().map { "${it.packageName}|${it.userId}" })
+                }
+            else -> Unit
         }
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
-    private fun showAppsList(type: Int) {
-        if (firstObserver || needToUpdateView) {
-            GlobalScope.launch(Dispatchers.IO) {
-                if (allAppsList.isEmpty()) {
-                    userManager.userProfiles.forEach {
-                        allAppsList.addAll(launcherApps.getActivityList(null, it))
-                    }
+    private fun render(type: Int, state: ChooseAppsViewModel.LoadState.Success) {
+        hideLoading()
 
-                    allAppsList.sortWith { o1, o2 ->
-                        Collator.getInstance().compare(
-                            o1!!.applicationInfo.loadLabel(packageManager),
-                            o2!!.applicationInfo.loadLabel(packageManager)
-                        )
-                    }
-                }
-
-                withContext(Dispatchers.Main) {
-                    binding.lottieView.cancelAnimation()
-                    binding.lottieView.animate().alpha(0f).setDuration(300).start()
-
-                    binding.recyclerApps.layoutManager = LinearLayoutManager(this@ChooseAppsActivity)
-                    adapter = AppsRecyclerAdapter(allAppsList, viewModel, appsList!!, type, this@ChooseAppsActivity)
-                    binding.recyclerApps.adapter = adapter
-
-                    firstObserver = false
-                    needToUpdateView = false
-                }
-            }
+        if (adapter != null && renderedApps.size == state.allApps.size) {
+            // 同一份数据（例如旋转屏幕后重建）：只更新勾选状态，不重建列表
+            adapter?.updateChecked(state.selected)
+            return
         }
+
+        renderedApps = ArrayList(state.allApps)
+        binding.recyclerApps.layoutManager = LinearLayoutManager(this)
+        adapter = AppsRecyclerAdapter(renderedApps, viewModel, state.selected, type, this)
+        binding.recyclerApps.adapter = adapter
+    }
+
+    private fun hideLoading() {
+        binding.lottieView.cancelAnimation()
+        binding.lottieView.animate().alpha(0f).setDuration(300).start()
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_choose_apps, menu)
-        val searchItem = menu.findItem(R.id.app_bar_search)
-        val searchView = searchItem?.actionView.cast<SearchView>()
-        searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
-            override fun onQueryTextSubmit(query: String): Boolean = false
+        menu.findItem(R.id.app_bar_search)?.actionView.cast<SearchView>()?.setOnQueryTextListener(
+            object : SearchView.OnQueryTextListener {
+                override fun onQueryTextSubmit(query: String): Boolean = false
 
-            override fun onQueryTextChange(newText: String): Boolean {
-                filter.filter(newText)
-                return true
+                override fun onQueryTextChange(newText: String): Boolean {
+                    filter.filter(newText)
+                    return true
+                }
             }
-        })
-
+        )
         return super.onCreateOptionsMenu(menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             android.R.id.home -> finish()
-            R.id.choose_all -> {
-                needToUpdateView = true
-                viewModel.insertAllApps(allAppsList, userManager)
-            }
-            R.id.choose_all_cancel -> {
-                if (appsList != null && appsList!!.isNotEmpty()) {
-                    needToUpdateView = true
-                    viewModel.deleteAll()
-                }
-            }
+            R.id.choose_all -> viewModel.insertAllApps(renderedApps)
+            R.id.choose_all_cancel -> viewModel.deleteAll()
         }
         return super.onOptionsItemSelected(item)
     }
@@ -157,33 +135,19 @@ class ChooseAppsActivity : AppCompatActivity() {
     inner class AppNameFilter : Filter() {
         override fun performFiltering(constraint: CharSequence): FilterResults {
             val results = FilterResults()
-            var newAllAppsList = ArrayList<LauncherActivityInfo>()
-
-            if (constraint.isBlank()) {
-                newAllAppsList = allAppsList
+            val source = renderedApps
+            results.values = if (constraint.isBlank()) {
+                ArrayList(source)
             } else {
-                allAppsList.forEach {
-                    if (it.label.contains(constraint, ignoreCase = true)) {
-                        newAllAppsList.add(it)
-                    }
-                }
+                ArrayList(source.filter { it.label.contains(constraint, ignoreCase = true) })
             }
-
-            results.values = newAllAppsList
-            results.count = newAllAppsList.size
+            results.count = (results.values as ArrayList<*>).size
             return results
         }
 
         @SuppressLint("NotifyDataSetChanged")
         override fun publishResults(constraint: CharSequence, results: FilterResults) {
-            adapter?.updateDate(results.values.cast<ArrayList<LauncherActivityInfo>>())
+            adapter?.submitFilter(results.values.cast<ArrayList<LauncherActivityInfo>>())
         }
-    }
-
-    companion object {
-        const val TYPE_FLOATING = 1
-        const val TYPE_NOTIFICATION = 2
-        const val TYPE_BLACKLIST = 3
-        const val TYPE_LANDSCAPE = 4
     }
 }

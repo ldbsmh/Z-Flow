@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface FreeformBlacklistDao {
 
-    @Query("INSERT INTO FreeformBlacklistEntity(packageName, userId) VALUES(:packageName, :userId)")
+    @Query("INSERT OR IGNORE INTO FreeformBlacklistEntity(packageName, userId) VALUES(:packageName, :userId)")
     fun insert(packageName: String, userId: Int)
 
     @Query("DELETE FROM FreeformBlacklistEntity WHERE packageName = :packageName AND userId = :userId")
@@ -27,6 +27,12 @@ interface FreeformBlacklistDao {
     @Query("SELECT * FROM FreeformBlacklistEntity WHERE packageName = :packageName AND userId = :userId LIMIT 1")
     fun findOne(packageName: String, userId: Int): FreeformBlacklistEntity?
 
+    @Query("SELECT packageName, userId FROM FreeformBlacklistEntity")
+    fun getAllWithUser(): List<FreeformBlacklistEntity>
+
+    @Query("SELECT DISTINCT packageName FROM FreeformBlacklistEntity")
+    fun getAllPackageNames(): List<String>
+
     @Query("SELECT COUNT(*) FROM FreeformBlacklistEntity WHERE packageName = :packageName AND userId = :userId")
     fun count(packageName: String, userId: Int): Int
 
@@ -35,4 +41,9 @@ interface FreeformBlacklistDao {
 
     @Delete
     fun deleteList(list: List<FreeformBlacklistEntity>)
+
+    /** 批量写入用（需在事务中调用）。 */
+    fun insertLists(list: List<FreeformBlacklistEntity>) {
+        list.forEach { insert(it.packageName, it.userId) }
+    }
 }

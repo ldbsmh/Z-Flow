@@ -217,7 +217,8 @@ class ChooseAppFloatingView(
         )
 
         if (noInstallAppsList.isNotEmpty()) {
-            scope.launch(Dispatchers.IO) {
+            // 清理已卸载应用：走 Repository 的挂起方法，本身已切到 IO
+            scope.launch {
                 chooseAppFloatingViewModel.deleteNotInstall(noInstallAppsList)
             }
         }
@@ -261,13 +262,20 @@ class ChooseAppFloatingView(
             scope.launch(Dispatchers.IO) {
                 allAppsList.clear()
 
+                // 一次性取回黑名单，避免每个应用都做一次数据库查询（O(n) -> O(1)）
+                val blacklistedUids = repository.getAllBlacklistByFlow().first()
+                    .orEmpty()
+                    .map { "${it.packageName}|${it.userId}" }
+                    .toHashSet()
+
                 userManager.userProfiles.forEach { userHandle ->
                     launcherApps.getActivityList(null, userHandle).forEach { app ->
                         val userId = io.relimus.zflow.systemapi.UserHandle.getUserId(
                             app.user,
                             app.applicationInfo.uid
                         )
-                        if (!repository.isBlacklisted(app.applicationInfo.packageName, userId)) {
+                        val key = "${app.applicationInfo.packageName}|$userId"
+                        if (key !in blacklistedUids) {
                             allAppsList.add(app)
                         }
                     }
