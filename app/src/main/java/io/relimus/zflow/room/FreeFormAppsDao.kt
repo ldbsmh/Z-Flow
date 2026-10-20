@@ -29,7 +29,7 @@ interface FreeFormAppsDao {
     @Query("SELECT * FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAllByFlow() : Flow<List<FreeFormAppsEntity>?>
 
-    @Query("SELECT sortNum, packageName, userId FROM FreeFormAppsEntity ORDER BY sortNum ASC")
+    @Query("SELECT id, sortNum, packageName, userId FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAllWithUser(): List<FreeFormAppsEntity>
 
     @Query("SELECT packageName FROM FreeFormAppsEntity ORDER BY sortNum ASC")
