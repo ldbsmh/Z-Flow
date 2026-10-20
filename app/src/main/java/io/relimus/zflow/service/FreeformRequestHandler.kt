@@ -38,30 +38,10 @@ object FreeformRequestHandler {
     /** 队列上限：正常用户操作远达不到，只有异常连发才会触发丢弃。 */
     private const val MAX_PENDING = 16
 
-    /** 正在排队/执行中的请求键，用于合并重复请求。 */
-    private val inFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val requestGate = RequestGate()
 
-    /**
-     * 每个目标最近一次入队的时间。
-     *
-     * [inFlight] 只能拦住“同一时刻还在队列里”的请求，一旦创建很快完成，
-     * 紧接着来的重复广播就会再次放行。这里补一个短时间窗口，
-     * 把同一次手势/长按产生的重复请求合并掉。
-     */
-    private val recentRequests = java.util.concurrent.ConcurrentHashMap<String, Long>()
-
-    /** 同一目标的重复请求合并窗口。取 1.2s：覆盖手势重复提交，又不影响正常连点。 */
     @Volatile
     var duplicateWindowMs = 1_200L
-
-    /** 只保留最近一小段时间的记录，避免无界增长。 */
-    private fun pruneRecent(now: Long) {
-        if (recentRequests.size < 64) return
-        val it = recentRequests.entries.iterator()
-        while (it.hasNext()) {
-            if (now - it.next().value > duplicateWindowMs) it.remove()
-        }
-    }
 
     /** 单线程 + 有界队列：超出上限的请求由调用线程自己执行 CallerRuns 会阻塞主线程，故直接拒绝。 */
     val executor: ThreadPoolExecutor = ThreadPoolExecutor(
@@ -90,7 +70,8 @@ object FreeformRequestHandler {
         source: String,
         sourceRotation: Int,
         sourceScreenWidth: Int,
-        sourceScreenHeight: Int
+        sourceScreenHeight: Int,
+        onComplete: (() -> Unit)? = null
     ): Boolean {
         val resolvedComponent = target.component ?: resolveLauncherComponent(context, packageName)
         val pkg = resolvedComponent?.packageName ?: packageName
@@ -107,15 +88,10 @@ object FreeformRequestHandler {
          * 带上 taskId 就等于把“同一个请求”算成两个不同请求，窗口会开两个。
          * 用户对同一个应用连点两次的场景由 [duplicateWindowMs] 的短窗口兜住。
          */
-        val key = "$pkg|${resolvedComponent?.className}|$userId"
-        val now = System.currentTimeMillis()
-        pruneRecent(now)
-        val lastAt = recentRequests.put(key, now)
-        if (!inFlight.add(key) || (lastAt != null && now - lastAt < duplicateWindowMs)) {
-            XLog.w(
-                "$TAG [source=$source] duplicate request ignored $key " +
-                    "(last=${if (lastAt == null) "none" else "${now - lastAt}ms ago"})"
-            )
+        val key = RequestGate.key(pkg, userId)
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!requestGate.acquire(key, now, duplicateWindowMs)) {
+            XLog.w("$TAG [source=$source] duplicate request ignored $key")
             return false
         }
 
@@ -141,17 +117,20 @@ object FreeformRequestHandler {
                     if (!ok) {
                         XLog.w("$TAG [source=$source] create rejected for $resolvedComponent user=$userId")
                     }
+                } catch (t: Throwable) {
+                    XLog.e("$TAG [source=$source] worker failed", t)
                 } finally {
-                    inFlight.remove(key)
+                    requestGate.complete(key)
+                    onComplete?.invoke()
                 }
             }
             true
         } catch (e: java.util.concurrent.RejectedExecutionException) {
-            inFlight.remove(key)
+            requestGate.complete(key, retryable = true)
             XLog.w("$TAG [source=$source] queue full (${executor.queue.size}), drop $key")
             false
         } catch (t: Throwable) {
-            inFlight.remove(key)
+            requestGate.complete(key, retryable = true)
             XLog.e("$TAG [source=$source] enqueue failed", t)
             false
         }
@@ -176,7 +155,7 @@ object FreeformRequestHandler {
      */
     fun handleIntent(context: Context, intent: Intent): Boolean {
         val action = intent.action
-        val proxy = ZFlow.me.freeformManagerProxy
+        val proxy = FreeformManagerProxy
 
         if (action == io.relimus.zflow.xposed.services.FreeformService.ACTION_DESTROY_FREEFORM) {
             if (!proxy.isConnected) return false
@@ -267,7 +246,7 @@ object FreeformRequestHandler {
             return false
         }
 
-        val proxy = ZFlow.me.freeformManagerProxy
+        val proxy = FreeformManagerProxy
         if (!proxy.isConnected) {
             XLog.w("$TAG create: FreeformManager not connected (LSPosed 未激活或系统服务未就绪)")
             return false

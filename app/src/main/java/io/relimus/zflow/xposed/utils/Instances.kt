@@ -43,17 +43,21 @@ object Instances {
     lateinit var iStatusBarService: IStatusBarService
         private set
 
-    private lateinit var activityManagerService: Any
-
     lateinit var systemContext: Context
         private set
 
-    val systemUiContext: Context
-        get() = ObjectUtil.getObject(activityManagerService, "mUiContext").cast()
+    lateinit var systemUiContext: Context
+        private set
 
     fun init(activityManagerService: Any) {
-        Instances.activityManagerService = activityManagerService
-        systemContext = ObjectUtil.getObject(activityManagerService, "mContext").cast()
+        systemContext = requireNotNull(
+            ObjectUtil.getObject(activityManagerService, "mContext") as? Context
+        ) { "ActivityManagerService.mContext is unavailable" }
+        // Resolve before FreeformManager becomes ready, not during window construction.
+        // A ROM mismatch is reported by systemReady instead of crashing a later request.
+        systemUiContext = requireNotNull(
+            ObjectUtil.getObject(activityManagerService, "mUiContext") as? Context
+        ) { "ActivityManagerService.mUiContext is unavailable" }
 
         windowManager = systemContext.getSystemService(WindowManager::class.java)
         iWindowManager = IWindowManager.Stub.asInterface(ServiceManager.getService("window"))
