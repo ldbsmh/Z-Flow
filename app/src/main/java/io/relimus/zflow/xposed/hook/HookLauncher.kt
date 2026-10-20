@@ -243,6 +243,7 @@ object HookLauncher {
 
                     val app = AndroidAppHelper.currentApplication() ?: return@runCatching
                     val intent = StartFreeformReceiver.newIntent(
+                        context = app,
                         packageName = componentName.packageName,
                         activityName = componentName.className,
                         userId = userId,

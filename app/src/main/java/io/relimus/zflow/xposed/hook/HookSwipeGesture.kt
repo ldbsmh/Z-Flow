@@ -2369,6 +2369,7 @@ object HookSwipeGesture {
                     // 统一出口构造广播：必须带 StartFreeformReceiver.EXTRA_SENDER，
                     // 否则接收端会按“伪造请求”丢弃。
                     val intent = StartFreeformReceiver.newIntent(
+                        context = context,
                         packageName = topComponent.packageName,
                         activityName = topComponent.className,
                         userId = userId,

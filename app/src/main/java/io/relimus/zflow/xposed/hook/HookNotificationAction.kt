@@ -246,6 +246,7 @@ object HookNotificationAction {
             // 统一用 StartFreeformReceiver.newIntent 构造，带上内部来源标记，
             // 否则接收端会按伪造请求丢弃。
             val intent = StartFreeformReceiver.newIntent(
+                context = context,
                 packageName = component.packageName,
                 activityName = component.className,
                 // 必须带上通知所属用户：工作资料 / 多用户下否则会按 userId=0 处理，
