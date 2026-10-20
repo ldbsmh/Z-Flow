@@ -70,21 +70,17 @@ class StorageAuditRegressionTest(unittest.TestCase):
                          [(0, 'com.example.x', 0), (1, 'com.example.y', 5)])
 
     def test_migration_7_8_rebuilds_table(self):
-        # 用旧表结构重新造数据再跑迁移
+        # 用旧表结构重新造数据，再按生产顺序完整跑 7->8 迁移
         self.db.execute('DROP TABLE FreeFormAppsEntity')
         self.db.execute('CREATE TABLE FreeFormAppsEntity(sortNum INTEGER NOT NULL PRIMARY KEY, packageName TEXT NOT NULL, userId INTEGER NOT NULL DEFAULT 0)')
         self.db.executemany('INSERT INTO FreeFormAppsEntity(sortNum, packageName, userId) VALUES(?,?,?)',
                             [(0, 'com.a', 0), (1, 'com.b', 10)])
-        self.db.execute('ALTER TABLE FreeFormAppsEntity RENAME TO FreeFormAppsEntity_OLD')
-        # 生产迁移中的建表与拷贝语句
         src = (BASE / 'room/MyDatabase.kt').read_text()
         block = src.split('private val MIGRATION_7_8',1)[1].split('}\n    }\n}',1)[0]
-        create = [''.join(re.findall(r'"([^"\n]*)"', s)) for s in re.findall(r'db\.execSQL\(((?:[^()]|\([^()]*\))*)\)', block)][0]
-        copy = [''.join(re.findall(r'"([^"\n]*)"', s)) for s in re.findall(r'db\.execSQL\(((?:[^()]|\([^()]*\))*)\)', block)][1]
-        drop = [''.join(re.findall(r'"([^"\n]*)"', s)) for s in re.findall(r'db\.execSQL\(((?:[^()]|\([^()]*\))*)\)', block)][2]
-        self.db.execute(create)
-        self.db.execute(copy)
-        self.db.execute(drop)
+        pat = re.compile(r'db\.execSQL\((.*?)\)\s*(?=\n\s*db\.execSQL|\n\s*})', re.S)
+        stmts = [''.join(re.findall(r'"([^"\n]*)"', s)) for s in pat.findall(block)]
+        for statement in stmts:
+            self.db.execute(statement)
         self.assertEqual(self.db.execute('SELECT id, sortNum, packageName, userId FROM FreeFormAppsEntity ORDER BY id').fetchall(),
                          [(0, 0, 'com.a', 0), (1, 1, 'com.b', 10)])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM FreeFormAppsEntity').fetchone()[0], 2)
