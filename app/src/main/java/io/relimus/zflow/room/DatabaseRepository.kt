@@ -50,17 +50,22 @@ class DatabaseRepository(context: Context) {
     /**
      * 整份写回拖拽后的顺序（浮窗排序页）。
      *
-     * 不能逐条 `@Update` 改 sortNum：sortNum 是自增主键，交换两项时会先写出
-     * 一个已存在的主键，Room 抛冲突后异常被吞掉，表现为“拖动结束顺序又弹回去”。
-     *
-     * 这里在一个事务里分两步：
-     *  1. 所有行主键挪到负数区（负数不在自增分配范围内，不会撞车）；
-     *  2. 按界面顺序写回 0..n-1。
+     * sortNum 已不是主键（迁移 7->8 后主键是独立自增 id），可以自由更新；
+     * 但仍在一个事务里先校验快照未过期、再整份写回 0..n-1，保证顺序一致。
      */
     suspend fun updateFreeFormSort(list: List<FreeFormAppsEntity>) =
         runWrite("updateFreeFormSort") {
             if (list.isEmpty()) return@runWrite
             database.withTransaction {
+                // Reject stale/partial snapshots before parking any sort keys.
+                val current = freeFormAppsDao.getAllWithUser()
+                val requestedKeys = list.map { it.packageName to it.userId }
+                val currentKeys = current.map { it.packageName to it.userId }
+                require(requestedKeys.size == requestedKeys.toSet().size &&
+                    requestedKeys.size == currentKeys.size &&
+                    requestedKeys.toSet() == currentKeys.toSet()) {
+                    "Freeform list changed; reload before sorting"
+                }
                 freeFormAppsDao.parkSortKeys()
                 list.forEachIndexed { index, entity ->
                     freeFormAppsDao.assignSortNum(entity.packageName, entity.userId, index)
@@ -245,7 +250,19 @@ class DatabaseRepository(context: Context) {
      */
     fun bumpVersion(key: String) {
         val sp = app.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        sp.edit { putLong(key, sp.getLong(key, 0L) + 1) }
+        // Shared across repository instances; apply publishes the value in memory
+        // before notifying readers (disk persistence remains asynchronous).
+        synchronized(VERSION_LOCK) {
+            sp.edit { putLong(key, sp.getLong(key, 0L) + 1) }
+        }
+        val authority = when (key) {
+            BlacklistProvider.KEY_BLACKLIST_VERSION -> BlacklistProvider.AUTHORITY
+            NotificationSettingsProvider.KEY_APP_LIST_VERSION -> NotificationSettingsProvider.AUTHORITY
+            else -> return
+        }
+        runCatching {
+            app.contentResolver.notifyChange(android.net.Uri.parse("content://$authority"), null)
+        }.onFailure { Log.w(TAG, "List invalidation notification failed", it) }
     }
 
     private suspend fun runWrite(tag: String, block: suspend () -> Unit): WriteReport {
@@ -262,5 +279,6 @@ class DatabaseRepository(context: Context) {
 
     companion object {
         private const val TAG = "DatabaseRepository"
+        private val VERSION_LOCK = Any()
     }
 }

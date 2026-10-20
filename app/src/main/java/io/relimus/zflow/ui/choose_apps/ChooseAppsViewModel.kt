@@ -216,7 +216,7 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 else -> {
                     repository.replaceFreeFormList(
                         allApps.mapIndexed { index, info ->
-                            FreeFormAppsEntity(index, info.applicationInfo.packageName, userIdOf(info))
+                            FreeFormAppsEntity(sortNum = index, packageName = info.applicationInfo.packageName, userId = userIdOf(info))
                         }
                     )
                 }

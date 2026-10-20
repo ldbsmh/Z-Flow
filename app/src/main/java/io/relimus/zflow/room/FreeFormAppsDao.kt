@@ -17,25 +17,25 @@ import kotlinx.coroutines.flow.Flow
 interface FreeFormAppsDao {
 
     /** 重复 (packageName, userId) 视为无操作，不抛主键冲突。 */
-    @Query("INSERT OR IGNORE INTO FreeFormAppsEntity(packageName, userId) VALUES(:packageName, :userId)")
+    @Query("INSERT OR IGNORE INTO FreeFormAppsEntity(packageName, userId) SELECT :packageName, :userId WHERE NOT EXISTS (SELECT 1 FROM FreeFormAppsEntity WHERE packageName = :packageName AND userId = :userId)")
     fun insert(packageName: String, userId: Int)
 
     @Query("DELETE FROM FreeFormAppsEntity WHERE packageName = :packageName and userId = :userId")
     fun delete(packageName: String, userId: Int)
 
-    @Query("SELECT * FROM FreeFormAppsEntity")
+    @Query("SELECT * FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAll() : LiveData<List<FreeFormAppsEntity>?>
 
-    @Query("SELECT * FROM FreeFormAppsEntity")
+    @Query("SELECT * FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAllByFlow() : Flow<List<FreeFormAppsEntity>?>
 
-    @Query("SELECT sortNum, packageName, userId FROM FreeFormAppsEntity")
+    @Query("SELECT sortNum, packageName, userId FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAllWithUser(): List<FreeFormAppsEntity>
 
-    @Query("SELECT packageName FROM FreeFormAppsEntity")
+    @Query("SELECT packageName FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAllName() : LiveData<List<String>?>
 
-    @Query("SELECT packageName FROM FreeFormAppsEntity")
+    @Query("SELECT packageName FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAllWithoutLiveData() : List<String>?
 
     @Query("SELECT COUNT(*) FROM FreeFormAppsEntity")
@@ -64,7 +64,7 @@ interface FreeFormAppsDao {
     @Query("UPDATE FreeFormAppsEntity SET sortNum = :sortNum WHERE packageName = :packageName AND userId = :userId")
     fun assignSortNum(packageName: String, userId: Int, sortNum: Int)
 
-    @Query("SELECT sortNum FROM FreeFormAppsEntity")
+    @Query("SELECT sortNum FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAllSortNums(): List<Int>
 
     /** 批量写入用（需在事务中调用）。 */

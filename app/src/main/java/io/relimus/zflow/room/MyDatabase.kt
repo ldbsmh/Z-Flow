@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotificationAppsEntity::class,
         FreeformBlacklistEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class MyDatabase : RoomDatabase() {
@@ -43,7 +43,8 @@ abstract class MyDatabase : RoomDatabase() {
                         MIGRATION_3_4,
                         MIGRATION_4_5,
                         MIGRATION_5_6,
-                        MIGRATION_6_7
+                        MIGRATION_6_7,
+                        MIGRATION_7_8
                     )
                     .build()
             }
@@ -129,6 +130,33 @@ abstract class MyDatabase : RoomDatabase() {
                             "SELECT packageName, userId FROM 'NotificationAppsEntity_OLD'"
                 )
                 db.execSQL("DROP TABLE 'NotificationAppsEntity_OLD'")
+            }
+        }
+
+        /**
+         * 7 -> 8：FreeFormAppsEntity 排序列从主键（自增）拆成普通排序列。
+         * SQLite 无法修改主键，重建表：显式单列主键 id，sortNum 只做排序。
+         * 这样 insert 与拖拽排序不再争夺同一列（原 4->5 后主键仍是 sortNum，
+         * 而 DAO insert 不写 sortNum，隐式自增与 UPDATE 排序互相覆盖）。
+         * 已存在的主键值直接作为 id，避免新列与旧值冲突。
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE 'FreeFormAppsEntity' RENAME TO 'FreeFormAppsEntity_OLD'")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS 'FreeFormAppsEntity' (" +
+                            "'id' INTEGER NOT NULL, " +
+                            "'sortNum' INTEGER NOT NULL DEFAULT 0, " +
+                            "'packageName' TEXT NOT NULL, " +
+                            "'userId' INTEGER NOT NULL DEFAULT 0, " +
+                            "PRIMARY KEY('id')" +
+                            ")"
+                )
+                db.execSQL(
+                    "INSERT INTO 'FreeFormAppsEntity'('id', 'sortNum', 'packageName', 'userId') " +
+                            "SELECT sortNum, sortNum, packageName, userId FROM 'FreeFormAppsEntity_OLD'"
+                )
+                db.execSQL("DROP TABLE 'FreeFormAppsEntity_OLD'")
             }
         }
     }

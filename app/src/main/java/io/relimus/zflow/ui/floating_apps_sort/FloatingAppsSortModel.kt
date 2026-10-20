@@ -21,7 +21,6 @@ class FloatingAppsSortModel(application: Application) : AndroidViewModel(applica
 
     /**
      * 把拖动后的顺序整份写回。
-     * sortNum 是主键，逐条 update 会在交换过程中撞主键；
      * [DatabaseRepository.updateFreeFormSort] 在同一事务里完成，顺序与界面一致。
      */
     fun saveOrder(list: List<FreeFormAppsEntity>) {

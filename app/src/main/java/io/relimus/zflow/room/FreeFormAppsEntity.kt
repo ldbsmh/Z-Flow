@@ -8,21 +8,22 @@ import androidx.room.PrimaryKey
  * @date 2021/1/31
  * 开启小窗数据库实体类
  *
- * [sortNum] 是自增主键，只作排序用，不承载业务含义。
- * 需要调整顺序时不要直接改它（主键不可变，且交换会撞主键），
- * 而是用 [DatabaseRepository.updateFreeFormSort]：它在单个事务里
- * 先挪到负数、再写回正数，把整份顺序一次性落库。
+ * [id] 是稳定自增主键，不承载业务含义；[sortNum] 只作排序用。
+ * 需要调整顺序时使用 [DatabaseRepository.updateFreeFormSort]：它在单个
+ * 事务里先校验快照未过期，再整体写入新顺序，避免主键与排序互相覆盖。
  */
 @Entity
 class FreeFormAppsEntity(
-    //用于排序
+    // 稳定主键：迁移 7->8 后由原 sortNum 值继承而来，新行自增
     @PrimaryKey(autoGenerate = true)
-    val sortNum: Int,
+    val id: Int = 0,
+    // 排序序号（非主键，可自由更新）
+    var sortNum: Int = 0,
     var packageName: String,
     //20210604新增用户标识
     var userId: Int = 0
 ) {
     override fun toString(): String {
-        return "FreeFormAppsEntity(sortNum=$sortNum, packageName='$packageName', userId=$userId)"
+        return "FreeFormAppsEntity(id=$id, sortNum=$sortNum, packageName='$packageName', userId=$userId)"
     }
 }

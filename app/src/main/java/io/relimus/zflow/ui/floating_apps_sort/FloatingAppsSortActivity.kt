@@ -25,7 +25,8 @@ import java.util.Collections
  * 位置序号，拖动结束后整体重排并写回。
  *
  * 修正点：旧实现拖动时交换两个实体的 sortNum 再调用两次 update ——
- * sortNum 是主键，先写会造成主键冲突，冲突被静默吞掉后排序就“丢了”；
+ * 先写会造成主键冲突（旧版 sortNum 同时是主键），冲突被静默吞掉后排序就“丢了”；
+ * 现改为 Repository 里单事务整份写回，排序与列表写操作不再互相覆盖。
  * 现在改为一次事务批量写回，结果与界面上看到的一致。
  */
 class FloatingAppsSortActivity : AppCompatActivity() {
@@ -124,8 +125,7 @@ class FloatingAppsSortActivity : AppCompatActivity() {
             override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
                 super.clearView(recyclerView, viewHolder)
                 // 拖动结束后一次性写回整份顺序：
-                // sortNum 是主键，逐条交换会撞主键并静默失败；Repository 在
-                // 单个事务内先把旧主键挪到负数区，再按新顺序写回。
+                // Repository 在单个事务内先校验快照、再整份写回新顺序。
                 val adapter = recyclerView.adapter as? AppsSortRecyclerAdapter ?: return
                 viewModel.saveOrder(adapter.currentList())
             }
