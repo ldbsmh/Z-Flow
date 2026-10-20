@@ -60,7 +60,9 @@ class ZFlow : Application() {
      */
     private fun checkServiceConnection() {
         Handler(mainLooper).postDelayed({
-            isRunning.postValue(FreeformManagerProxy.isConnected)
+            isRunning.postValue(
+                FreeformManagerProxy.isConnected && FreeformManagerProxy.isServiceReady()
+            )
         }, 500)
     }
 

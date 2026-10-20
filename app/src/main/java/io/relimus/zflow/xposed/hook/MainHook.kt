@@ -55,14 +55,12 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
             }
 
             else -> {
-                // Android 17 的 quickstep / Launcher 可能换包名或跑在独立进程，
-                // 这里放宽匹配，凡包含 launcher / quickstep 的包都尝试注入。
+                // Match supported package identities, not arbitrary name substrings.
+                // A separate process still has the same packageName.
                 val pkg = lpparam.packageName
                 val isLauncherLike =
                     pkg == "com.android.launcher3" ||
-                        pkg == "com.google.android.apps.nexuslauncher" ||
-                        pkg.contains("launcher", ignoreCase = true) ||
-                        pkg.contains("quickstep", ignoreCase = true)
+                        pkg == "com.google.android.apps.nexuslauncher"
 
                 if (isLauncherLike) {
                     runCatching { HookLauncher.init(lpparam.classLoader) }

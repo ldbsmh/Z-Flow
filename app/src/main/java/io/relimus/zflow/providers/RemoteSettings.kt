@@ -48,9 +48,9 @@ object RemoteSettings {
      * 注册通知名单变化监听：设置页修改名单后，SystemUI 进程能立刻清缓存，
      * 不需要等 250ms 的 TTL 自然过期。
      */
+    @Synchronized
     fun registerInvalidationObserver(context: Context) {
         if (observerRegistered) return
-        observerRegistered = true
         runCatching {
             context.contentResolver.registerContentObserver(
                 Uri.parse("content://${NotificationSettingsProvider.AUTHORITY}"),
@@ -61,6 +61,7 @@ object RemoteSettings {
                     }
                 }
             )
+            observerRegistered = true
         }
     }
 
@@ -193,12 +194,16 @@ object RemoteSettings {
         method: String,
         extras: Bundle?,
         authority: String? = null
-    ): Bundle? = context.contentResolver.call(
-        Uri.parse("content://${authority ?: NotificationSettingsProvider.AUTHORITY}"),
-        method,
-        null,
-        extras
-    )
+    ): Bundle? {
+        // Lazily register in every consuming process before the first read.
+        registerInvalidationObserver(context)
+        return context.contentResolver.call(
+            Uri.parse("content://${authority ?: NotificationSettingsProvider.AUTHORITY}"),
+            method,
+            null,
+            extras
+        )
+    }
 
     private fun Bundle?.isDenied(): Boolean = this?.getBoolean(ProviderAccess.EXTRA_DENIED, false) == true
 }

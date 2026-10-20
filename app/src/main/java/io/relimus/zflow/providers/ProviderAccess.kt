@@ -11,7 +11,7 @@ import android.util.Log
  * 背景：本模块的 Provider 必须被 launcher / SystemUI / 被 hook 的应用进程读取，
  * 这些进程的 UID 各不相同，无法用单一的 `android:permission` 表达，
  * 也不能简单地 exported=false。这里的策略是：
- *  1. 读方法放行所有进程（被 hook 的应用需要判断自己是否在黑名单/横屏名单中）；
+ *  1. 单包查询和白名单开关允许被 hook 的进程读取；完整名单另做 UID 校验；
  *  2. 写方法只允许本应用、system_server、root 发起；
  *  3. 失败时返回带错误标记的 Bundle，调用方可区分“未授权”和“没有配置”。
  */
@@ -31,6 +31,18 @@ internal object ProviderAccess {
             Log.w(TAG, "$provider: rejected write '$method' from uid=$uid")
         }
         return allowed
+    }
+
+    /** Bulk lists are private to settings/system consumers, unlike per-app lookups. */
+    fun allowBulkRead(context: android.content.Context, allowSystemUi: Boolean = false): Boolean {
+        val uid = callingUid()
+        if (uid == Process.myUid() || uid == Process.SYSTEM_UID || uid == Process.ROOT_UID) {
+            return true
+        }
+        return allowSystemUi && runCatching {
+            context.packageManager.getPackagesForUid(uid)
+                ?.contains("com.android.systemui") == true
+        }.getOrDefault(false)
     }
 
     /** 统一的失败返回：调用方必须检查 [EXTRA_DENIED]，不能把失败当成“无配置”。 */

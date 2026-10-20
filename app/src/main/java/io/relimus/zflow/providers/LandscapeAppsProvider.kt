@@ -50,6 +50,12 @@ class LandscapeAppsProvider : ContentProvider() {
         context!!.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    private fun notifyListChanged() {
+        runCatching {
+            context?.contentResolver?.notifyChange(Uri.parse("content://$AUTHORITY"), null)
+        }.onFailure { Log.w(TAG, "List invalidation notification failed", it) }
+    }
+
     override fun onCreate(): Boolean = true
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
@@ -60,8 +66,16 @@ class LandscapeAppsProvider : ContentProvider() {
                     putBoolean(EXTRA_RESULT, pkg.isNotEmpty() && prefs.getBoolean(pkg, false))
                 }
             }
-            METHOD_GET_ALL -> Bundle().apply {
-                putStringArrayList(EXTRA_PACKAGE_LIST, ArrayList(prefs.all.keys))
+            METHOD_GET_ALL -> {
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                if (!ProviderAccess.allowBulkRead(ctx)) {
+                    return ProviderAccess.denied("read not allowed")
+                }
+                Bundle().apply {
+                    putStringArrayList(EXTRA_PACKAGE_LIST, ArrayList(prefs.all.filter {
+                        isValidPackageName(it.key) && it.value == true
+                    }.keys))
+                }
             }
             METHOD_GET_VERSION -> Bundle().apply {
                 putLong(EXTRA_VERSION, prefs.getLong(KEY_VERSION, 0L))
@@ -75,6 +89,7 @@ class LandscapeAppsProvider : ContentProvider() {
                     return ProviderAccess.denied("invalid package name")
                 }
                 prefs.edit().putBoolean(pkg, true).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
+                notifyListChanged()
                 Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }
             METHOD_REMOVE -> {
@@ -86,6 +101,7 @@ class LandscapeAppsProvider : ContentProvider() {
                     return ProviderAccess.denied("invalid package name")
                 }
                 prefs.edit().remove(pkg).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
+                notifyListChanged()
                 Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }
             METHOD_REPLACE_ALL -> {
@@ -117,6 +133,7 @@ class LandscapeAppsProvider : ContentProvider() {
                 }
                 val version = prefs.getLong(KEY_VERSION, 0L) + 1
                 prefs.edit().clear().putLong(KEY_VERSION, version).apply()
+                notifyListChanged()
                 Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }
             else -> {

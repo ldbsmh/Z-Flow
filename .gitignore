@@ -19,6 +19,9 @@ keystore/
 # Log/OS Files
 *.log
 
+# Editor/backup copies may contain local credentials
+*.bak
+
 # Android Studio generated files and folders
 captures/
 .externalNativeBuild/

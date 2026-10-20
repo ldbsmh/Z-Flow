@@ -33,7 +33,7 @@ class NotificationSettingsProvider : ContentProvider() {
         const val EXTRA_ENABLED = "enabled"
         const val EXTRA_MAX = "maxFreeform"
 
-        /** 通知名单版本号：每次事务写入后自增（见 DatabaseRepository.notifyListChanged） */
+        /** 通知名单版本号：每次事务写入后自增（见 DatabaseRepository.bumpVersion） */
         const val METHOD_GET_APP_LIST_VERSION = "get_app_list_version"
         const val EXTRA_VERSION = "version"
 
@@ -66,6 +66,9 @@ class NotificationSettingsProvider : ContentProvider() {
         return when (method) {
             METHOD_GET_ENABLED_APPS -> {
                 val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                if (!ProviderAccess.allowBulkRead(ctx, allowSystemUi = true)) {
+                    return ProviderAccess.denied("read not allowed")
+                }
                 // null = 查询失败（数据库不可用），必须与“用户没配置任何应用”（空数组）区分：
                 // 前者返回 denied，让 SystemUI 侧保持原状/重试，而不是把通知接管全部关掉。
                 val apps = DatabaseRepository(ctx).getAllNotificationPackageNames()
@@ -129,6 +132,9 @@ class NotificationSettingsProvider : ContentProvider() {
     ): Cursor? {
         // 与 call() 等价：返回包名列表（用于不支持 call 的客户端）
         val ctx = context ?: return null
+        if (!ProviderAccess.allowBulkRead(ctx, allowSystemUi = true)) {
+            throw SecurityException("Notification list read not allowed")
+        }
         val entries = DatabaseRepository(ctx).getAllNotificationEntries() ?: return null
 
         // userId 一并返回：名单按 (packageName, userId) 存，缺失 userId 会让
