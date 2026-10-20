@@ -41,14 +41,31 @@ object HookSwipeGesture {
     private const val HINT_ANIM_DURATION = 150L
     private const val MINI_LAUNCH_DELAY_MS = 120L
 
+    /**
+     * 一次手势只允许产出一个窗口。
+     *
+     * Launcher3 在同一次上滑里可能把 runOnceAtState/onStateSetEndTarget 走两遍
+     * （onSwipeUpAnimationComplete 与状态机各一次），且 taskId 在两次之间可能已经
+     * 从 X 变成 X+1，导致下游按 "pkg|class|user|taskId" 去重拦不住。
+     * 这里用一个与 taskId 无关的时间闸门兜底：
+     * [MINI_LAUNCH_DEBOUNCE_MS] 内的重复提交直接丢弃，只认第一次。
+     */
+    private const val MINI_LAUNCH_DEBOUNCE_MS = 1_000L
+
     private const val DEBUG_TAG =
         "ZFlowSwipe-Diag"
 
     /*
      * 父类与子类的同一次 initStateCallbacks 调用可能均被 Hook。
      * 同一个 Handler 在该时间内只初始化一次。
+     *
+     * 32ms 太短：AbsSwipeUpHandler / LauncherSwipeHandlerV2 / FallbackSwipeHandler
+     * 三个 Hook 入口之间存在帧间隔，一旦跨过 32ms 就会对同一个 handler 再走一次
+     * beginGesture，gestureGeneration 递增，两代 runOnceAtState 回调各自成立，
+     * 于是同一次上滑发出两次广播（表现为一次手势开两个小窗）。
+     * 一个手势的完整生命周期远小于 600ms，取 600ms 只会合并同一次初始化。
      */
-    private const val INIT_DEDUPLICATION_MS = 32L
+    private const val INIT_DEDUPLICATION_MS = 600L
 
     /*
      * 父类与子类的 updateSysUiFlags Hook 可能在同一调用链中触发。
@@ -91,6 +108,10 @@ object HookSwipeGesture {
         Handler(Looper.getMainLooper())
 
     private var pendingMiniLaunch: Runnable? = null
+
+    /** 上次真正排入小窗启动的时间（uptimeMillis）；用于同手势重复提交的防抖。 */
+    @Volatile
+    private var lastMiniLaunchAt = 0L
 
     private var lastScreenWidth = 0
     private var lastScreenHeight = 0
@@ -1073,6 +1094,11 @@ object HookSwipeGesture {
         // releaseInDropTarget（raw-motion 命中测试）恒为 false。
         // 改以“提示框已展示（用户确实上滑到了提交区）”为准，
         // 同时保留 raw-motion 命中作为附加条件但不强制。
+        //
+        // ⚠️ 这两个标记必须**先读后清零**（下面的赋值就是消费动作）。
+        // runOnceAtState 的回调在同一个手势里可能被触发两次，如果只在函数出口
+        // 或 finally 里清理，第二次进来仍会读到 true 再发一次广播 —— 用户看到的就是
+        // “一次上滑弹出两个小窗”。
         val commitByHint =
             hintCommittedThisGesture &&
                 dropTargetShowing
@@ -1080,6 +1106,9 @@ object HookSwipeGesture {
         val shouldLaunch =
             commitByHint ||
                 releaseInDropTarget
+
+        hintCommittedThisGesture = false
+        releaseInDropTarget = false
 
         lifecycleLog(
             "GESTURE_END " +
@@ -2304,6 +2333,32 @@ object HookSwipeGesture {
         userId: Int,
         taskId: Int
     ) {
+        /*
+         * 同一个手势的重复提交闸门。
+         *
+         * 为什么不能只靠 handleGestureEnd 里的标记：Launcher3 的
+         * runOnceAtState(STATE_END_TARGET_SET) 回调在同一次上滑中会被
+         * onSwipeUpAnimationComplete 与状态机各触发一次，两次之间
+         * beginGesture 可能已经把 hintCommittedThisGesture 重新置为 true，
+         * 于是“消费式读取”也拦不住第二次。
+         *
+         * 这里用与 taskId 无关的时间窗口做最后一道闸：上一个窗口内已经排过启动，
+         * 本次直接丢弃（并清掉待发的回调，避免它延迟到窗口外再补一枪）。
+         */
+        val now = SystemClock.uptimeMillis()
+        val last = lastMiniLaunchAt
+        if (last != 0L && now - last < MINI_LAUNCH_DEBOUNCE_MS) {
+            pendingMiniLaunch?.let { mainHandler.removeCallbacks(it) }
+            pendingMiniLaunch = null
+            XLog.w(
+                "[ZFlowSwipe] duplicate mini launch suppressed " +
+                    "(${now - last}ms < ${MINI_LAUNCH_DEBOUNCE_MS}ms) " +
+                    "component=$topComponent taskId=$taskId"
+            )
+            return
+        }
+        lastMiniLaunchAt = now
+
         pendingMiniLaunch?.let {
             mainHandler.removeCallbacks(it)
         }

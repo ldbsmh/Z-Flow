@@ -41,6 +41,28 @@ object FreeformRequestHandler {
     /** 正在排队/执行中的请求键，用于合并重复请求。 */
     private val inFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /**
+     * 每个目标最近一次入队的时间。
+     *
+     * [inFlight] 只能拦住“同一时刻还在队列里”的请求，一旦创建很快完成，
+     * 紧接着来的重复广播就会再次放行。这里补一个短时间窗口，
+     * 把同一次手势/长按产生的重复请求合并掉。
+     */
+    private val recentRequests = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** 同一目标的重复请求合并窗口。取 1.2s：覆盖手势重复提交，又不影响正常连点。 */
+    @Volatile
+    var duplicateWindowMs = 1_200L
+
+    /** 只保留最近一小段时间的记录，避免无界增长。 */
+    private fun pruneRecent(now: Long) {
+        if (recentRequests.size < 64) return
+        val it = recentRequests.entries.iterator()
+        while (it.hasNext()) {
+            if (now - it.next().value > duplicateWindowMs) it.remove()
+        }
+    }
+
     /** 单线程 + 有界队列：超出上限的请求由调用线程自己执行 CallerRuns 会阻塞主线程，故直接拒绝。 */
     val executor: ThreadPoolExecutor = ThreadPoolExecutor(
         1, 1,
@@ -77,9 +99,23 @@ object FreeformRequestHandler {
             return false
         }
 
-        val key = "$pkg|${resolvedComponent?.className}|$userId|$taskId"
-        if (!inFlight.add(key)) {
-            XLog.w("$TAG [source=$source] duplicate request ignored $key")
+        /*
+         * 去重键**故意不含 taskId**。
+         *
+         * 同一次上滑的重复提交之间只隔几十毫秒，而 getRunningTask 读到的 taskId
+         * 在两次调用之间可能已经从 X 变成 X+1（最近任务正在切栈），
+         * 带上 taskId 就等于把“同一个请求”算成两个不同请求，窗口会开两个。
+         * 用户对同一个应用连点两次的场景由 [duplicateWindowMs] 的短窗口兜住。
+         */
+        val key = "$pkg|${resolvedComponent?.className}|$userId"
+        val now = System.currentTimeMillis()
+        pruneRecent(now)
+        val lastAt = recentRequests.put(key, now)
+        if (!inFlight.add(key) || (lastAt != null && now - lastAt < duplicateWindowMs)) {
+            XLog.w(
+                "$TAG [source=$source] duplicate request ignored $key " +
+                    "(last=${if (lastAt == null) "none" else "${now - lastAt}ms ago"})"
+            )
             return false
         }
 
