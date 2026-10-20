@@ -151,6 +151,19 @@
             tools:ignore="ExportedContentProvider" />
 
         <!--
+            小窗请求的能力下发 Provider（io.relimus.zflow.request.auth）。
+            exported：真实发送方（Launcher / SystemUI / 被 Hook 的第三方进程）
+            各不相同，无法用单一权限表达；授权在代码内基于 Binder 调用方 UID
+            （见 security/BroadcastAuth.kt），非信任进程拿不到能力。
+        -->
+        <provider
+            android:name="io.relimus.zflow.security.RequestAuthProvider"
+            android:authorities="io.relimus.zflow.request.auth"
+            android:enabled="true"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
+
+        <!--
             小窗请求的静态接收器。
 
             ⚠️ 不要加 android:permission。发送方是 Launcher / SystemUI /
@@ -170,7 +183,6 @@
                 <action android:name="io.relimus.zflow.start_freeform" />
             </intent-filter>
         </receiver>
-
         <receiver
             android:name="io.relimus.zflow.broadcast.BootBroadcastReceiver"
             android:enabled="true"
