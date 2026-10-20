@@ -93,7 +93,8 @@ class FreeformService : Service() {
 
         // 兜底再查一次黑名单：广播入口已查过，但悬浮窗 / 通知入口不一定查。
         // isBlacklisted 是同步调用，本 Service 由 Binder 线程执行，不阻塞主线程。
-        if (DatabaseRepository(this).isBlacklisted(packageName, userId)) {
+        // null = 查询失败，fail-closed：确认不了就不创建
+        if (DatabaseRepository(this).isBlacklisted(packageName, userId) != false) {
             XLog.d("FreeformService: $packageName user=$userId is blacklisted")
             return
         }

@@ -57,7 +57,8 @@ class AllAppsAdapter(
             holder.click.setOnClickListener {
                 val userId = UserHandle.getUserId(allAppsList[position].user, applicationInfo.uid)
 
-                if (repository.isBlacklisted(packageName, userId)) {
+                // null = 查询失败，按黑名单处理（宁可不启动）
+                if (repository.isBlacklisted(packageName, userId) != false) {
                     Toast.makeText(context, context.getString(R.string.app_blacklisted), Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }

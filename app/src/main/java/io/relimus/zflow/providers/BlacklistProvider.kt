@@ -48,6 +48,9 @@ class BlacklistProvider : ContentProvider() {
 
                 val result = try {
                     DatabaseRepository(ctx).isBlacklisted(packageName, userId)
+                        // null = 查询失败。fail-closed：无法确认时按“在黑名单”处理，
+                        // 宁可不下发小窗，也不要让被屏弊的应用被开成小窗。
+                        ?: return ProviderAccess.denied("database unavailable")
                 } catch (e: Exception) {
                     Log.e(TAG, "is_blacklisted failed: pkg=$packageName userId=$userId", e)
                     return ProviderAccess.denied("database unavailable")

@@ -150,6 +150,24 @@
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
 
+        <!--
+            小窗请求的静态接收器。
+            android:permission="android.permission.DUMP"：只有 system_server / root
+            （以及 adb shell）能发送。普通第三方应用拿不到该权限，无法伪造
+            packageName / userId / taskId 触发小窗。
+            使用静态声明是为了在 App 进程被杀、两种保活服务都没在跑时，
+            请求仍能把进程拉起来处理。
+        -->
+        <receiver
+            android:name="io.relimus.zflow.broadcast.FreeformRequestReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="io.relimus.zflow.start_freeform" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name="io.relimus.zflow.broadcast.BootBroadcastReceiver"
             android:enabled="true"

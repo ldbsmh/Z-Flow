@@ -141,8 +141,23 @@ object HookSwipeGesture {
     @Volatile
     private var landscapeListVersion: Long? = null
 
+    /** 上次校验横屏名单版本号的时间，语义同 [blacklistCheckedAt]。 */
+    @Volatile
+    private var landscapeCheckedAt = 0L
+
     private val unavailableErrorReported =
         AtomicBoolean(false)
+
+    /** 名单缓存的版本校验间隔：窗口内直接命中本地值，不发 Binder。 */
+    private const val CACHE_REVALIDATE_MS = 3_000L
+
+    /** 缓存条目上限；被 hook 的进程长期存活，超出后整体清空重新填充。 */
+    private const val CACHE_MAX_ENTRIES = 512
+
+    private fun ConcurrentHashMap<String, Boolean>.putBounded(key: String, value: Boolean) {
+        if (size >= CACHE_MAX_ENTRIES) clear()
+        put(key, value)
+    }
 
     private enum class ProgressZone {
         UNKNOWN,
@@ -2119,6 +2134,10 @@ object HookSwipeGesture {
     @Volatile
     private var blacklistVersion: Long? = null
 
+    /** 上次向 Provider 校验版本号的时间；窗口内不再发 Binder，见 [isBlacklisted]。 */
+    @Volatile
+    private var blacklistCheckedAt = 0L
+
     private fun isBlacklisted(
         context: Context,
         componentName: ComponentName?,
@@ -2131,15 +2150,32 @@ object HookSwipeGesture {
         val cacheKey = "$packageName|$userId"
 
         return try {
+            /*
+             * 手势热路径（每次缩放/滑动回调都会走到这里）：
+             * 只要缓存有效且距离上次版本校验还在 [CACHE_REVALIDATE_MS] 内，
+             * 就直接返回本地结果，一次 Binder 都不发。
+             * 超过窗口后才去取一次版本号，版本变了就整体失效。
+             *
+             * 代价是名单修改最迟 [CACHE_REVALIDATE_MS] 后才对手势生效，
+             * 对“把某应用加入黑名单”这种低频操作可以接受；
+             * 设置页写入后还会通过 [invalidateListCaches] 主动置零窗口立即生效。
+             */
+            val now = SystemClock.elapsedRealtime()
+            if (blacklistVersion != null && now - blacklistCheckedAt < CACHE_REVALIDATE_MS) {
+                blacklistCache[cacheKey]?.let { return it }
+            }
+
             val version = providerVersion(
                 context,
                 BlacklistProvider.AUTHORITY,
                 BlacklistProvider.METHOD_GET_VERSION
             )
             if (version != null && version == blacklistVersion) {
+                blacklistCheckedAt = now
                 blacklistCache[cacheKey]?.let { return it }
             } else if (version != null) {
                 blacklistVersion = version
+                blacklistCheckedAt = now
                 blacklistCache.clear()
             }
 
@@ -2163,7 +2199,7 @@ object HookSwipeGesture {
             )?.getBoolean(
                 BlacklistProvider.EXTRA_RESULT,
                 false
-            )?.also { blacklistCache[cacheKey] = it } ?: false
+            )?.also { blacklistCache.putBounded(cacheKey, it) } ?: false
         } catch (_: Throwable) {
             blacklistCache[cacheKey] ?: false
         }
@@ -2175,19 +2211,25 @@ object HookSwipeGesture {
     ): Boolean {
         return try {
             /*
-             * 名单在设置页被修改时 Provider 的版本号会自增。
-             * 版本没变就直接命中本地缓存，避免手势热路径（每次缩放回调）
-             * 都做一次 Binder 往返。
+             * 与黑名单同一套策略：时间窗口内的缓存直接命中，不发 Binder。
+             * 窗口外的首次调用才校验一次版本号。
              */
+            val now = SystemClock.elapsedRealtime()
+            if (landscapeListVersion != null && now - landscapeCheckedAt < CACHE_REVALIDATE_MS) {
+                landscapeAppCache[packageName]?.let { return it }
+            }
+
             val version = providerVersion(
                 context,
                 LandscapeAppsProvider.AUTHORITY,
                 LandscapeAppsProvider.METHOD_GET_VERSION
             )
             if (version != null && version == landscapeListVersion) {
+                landscapeCheckedAt = now
                 landscapeAppCache[packageName]?.let { return it }
             } else if (version != null) {
                 landscapeListVersion = version
+                landscapeCheckedAt = now
                 landscapeAppCache.clear()
             }
 
@@ -2200,12 +2242,24 @@ object HookSwipeGesture {
                 }
             )?.getBoolean(LandscapeAppsProvider.EXTRA_RESULT, false) ?: false
 
-            landscapeAppCache[packageName] = result
+            landscapeAppCache.putBounded(packageName, result)
             result
         } catch (_: Throwable) {
             // Provider 暂不可用时退回缓存值，缓存也为空则按“非横屏”处理
             landscapeAppCache[packageName] ?: false
         }
+    }
+
+    /**
+     * 主动让两份名单缓存立即失效。
+     *
+     * 设置页写入后会经由 Provider 自增版本号；同进程内（设置页与 hook 同属本应用
+     * 进程时）还可以直接调用这里把时间窗口清零，下一次判断立刻重新拉取，
+     * 不必等 [CACHE_REVALIDATE_MS] 自然过期。
+     */
+    fun invalidateListCaches() {
+        blacklistCheckedAt = 0L
+        landscapeCheckedAt = 0L
     }
 
     /**

@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.ui.floating.FloatingActivity
 import io.relimus.zflow.utils.cast
 
@@ -28,6 +29,15 @@ class ForegroundService : Service(),
 
     private lateinit var sp: SharedPreferences
     private lateinit var floatingController: FloatingWindowController
+
+    /**
+     * 前台服务模式同样要能接收小窗请求。
+     *
+     * 此前只有 KeepAliveService（无障碍模式）注册了接收器，用户切到前台服务保活
+     * 后桌面长按 / 通知按钮的小窗请求就没人接了。这里补上同样的注册，
+     * 权限保护交给系统（见 [StartFreeformReceiver.register]）。
+     */
+    private var freeformReceiver: StartFreeformReceiver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -45,6 +55,7 @@ class ForegroundService : Service(),
         floatingController = FloatingWindowController(this)
         floatingController.attach()
 
+        freeformReceiver = StartFreeformReceiver.register(this)
     }
 
     override fun onBind(intent: Intent): IBinder? = null
@@ -84,6 +95,8 @@ class ForegroundService : Service(),
 
     override fun onDestroy() {
         isRunning = false
+        freeformReceiver?.let { runCatching { unregisterReceiver(it) } }
+        freeformReceiver = null
         if (::floatingController.isInitialized) floatingController.detach()
         runCatching { sp.unregisterOnSharedPreferenceChangeListener(this) }
         super.onDestroy()
@@ -99,6 +112,7 @@ class ForegroundService : Service(),
     }
 
     companion object {
+        private const val TAG = "ForegroundService"
         private const val CHANNEL_ID = "CHANNEL_ID_SUNSHINE_FREEFORM_FOREGROUND"
         const val SERVICE_TYPE = 1
 

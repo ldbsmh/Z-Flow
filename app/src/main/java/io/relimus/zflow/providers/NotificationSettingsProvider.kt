@@ -66,15 +66,13 @@ class NotificationSettingsProvider : ContentProvider() {
         return when (method) {
             METHOD_GET_ENABLED_APPS -> {
                 val ctx = context ?: return ProviderAccess.denied("context unavailable")
-                val apps = try {
-                    DatabaseRepository(ctx).getAllNotificationPackageNames()?.toTypedArray()
-                } catch (e: Exception) {
-                    Log.e(TAG, "get_enabled_apps failed", e)
-                    return ProviderAccess.denied("database unavailable")
-                }
+                // null = 查询失败（数据库不可用），必须与“用户没配置任何应用”（空数组）区分：
+                // 前者返回 denied，让 SystemUI 侧保持原状/重试，而不是把通知接管全部关掉。
+                val apps = DatabaseRepository(ctx).getAllNotificationPackageNames()
+                    ?: return ProviderAccess.denied("database unavailable")
 
                 Bundle().apply {
-                    putStringArray(EXTRA_RESULT, apps ?: emptyArray())
+                    putStringArray(EXTRA_RESULT, apps.toTypedArray())
                 }
             }
 
@@ -131,12 +129,14 @@ class NotificationSettingsProvider : ContentProvider() {
     ): Cursor? {
         // 与 call() 等价：返回包名列表（用于不支持 call 的客户端）
         val ctx = context ?: return null
-        val apps = runCatching {
-            DatabaseRepository(ctx).getAllNotificationPackageNames()
-        }.getOrNull().orEmpty()
+        val entries = DatabaseRepository(ctx).getAllNotificationEntries() ?: return null
 
-        val cursor = MatrixCursor(arrayOf("packageName"))
-        apps.forEach { cursor.addRow(arrayOf(it)) }
+        // userId 一并返回：名单按 (packageName, userId) 存，缺失 userId 会让
+        // 工作资料里的同名应用与主用户混淆。
+        val cursor = MatrixCursor(arrayOf("packageName", "userId"))
+        entries.forEach { entry ->
+            cursor.addRow(arrayOf<Any>(entry.packageName, entry.userId))
+        }
         return cursor
     }
 

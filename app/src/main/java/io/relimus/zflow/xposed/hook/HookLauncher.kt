@@ -205,6 +205,18 @@ object HookLauncher {
     }
 
 
+    /**
+     * 小窗广播的接收器被 android.permission.DUMP 保护。
+     * 发送前先确认当前进程确实持有该权限（system_server / root 有，普通应用进程没有），
+     * 没有就直接跳过，省掉一次注定被系统丢弃的跨进程发送。
+     */
+    private fun canSignalZFlow(context: Context): Boolean = try {
+        context.checkSelfPermission(StartFreeformReceiver.PERMISSION_DUMP) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+    } catch (t: Throwable) {
+        false
+    }
+
     private fun hookProxyMethod(clazz: Class<*>, methodName: String) {
         HookRegistry.hookAll(clazz, methodName, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
@@ -250,7 +262,16 @@ object HookLauncher {
                         )
                     }
 
-                    AndroidAppHelper.currentApplication().sendBroadcast(intent)
+                    val app = AndroidAppHelper.currentApplication()
+                    if (!canSignalZFlow(app)) {
+                        // 接收器只接受 android.permission.DUMP 发送方；
+                        // 普通应用进程没有该权限，发出去会被系统直接丢弃。
+                        // 这种情况下退回到“直接拉起原应用”的既有行为之外不多做事，
+                        // 只在日志里明确记录原因，避免用户看到“点了没反应”。
+                        XLog.w("$TAG popup: sender lacks ${StartFreeformReceiver.PERMISSION_DUMP}, skip broadcast")
+                        return@runCatching
+                    }
+                    app.sendBroadcast(intent)
 
                     runCatching {
                         XposedHelpers.callMethod(thiz, "dismissTaskMenuView")

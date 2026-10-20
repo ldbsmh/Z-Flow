@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Drawable
 import android.service.notification.StatusBarNotification
+import io.relimus.zflow.broadcast.StartFreeformReceiver
 import android.view.View
 import android.widget.ImageView
 import de.robv.android.xposed.XposedHelpers
@@ -246,6 +247,13 @@ object HookNotificationAction {
                 setPackage("io.relimus.zflow")
                 putExtra("packageName", component.packageName)
                 putExtra("activityName", component.className)
+                // 必须带上通知所属用户：工作资料 / 多用户下否则会按 userId=0 处理，
+                // 既可能拉起错误用户的应用，也会用错黑名单键。
+                putExtra(StartFreeformReceiver.EXTRA_USER_ID, sbn.userId)
+                putExtra(
+                    StartFreeformReceiver.EXTRA_SOURCE,
+                    StartFreeformReceiver.SOURCE_NOTIFICATION
+                )
                 putExtra(Intent.EXTRA_COMPONENT_NAME, component)
                 putExtra(Intent.EXTRA_INTENT, launchIntent)
                 if (contentIntent != null) {

@@ -6,12 +6,14 @@ import android.content.pm.LauncherApps
 import android.net.Uri
 import android.os.Bundle
 import android.os.UserManager
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import io.relimus.zflow.providers.LandscapeAppsProvider
 import io.relimus.zflow.providers.NotificationSettingsProvider
+import io.relimus.zflow.providers.ProviderAccess
 import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.room.FreeFormAppsEntity
 import io.relimus.zflow.room.FreeformBlacklistEntity
@@ -117,7 +119,7 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
     private suspend fun querySelected(): List<String> = when (type) {
         TYPE_LANDSCAPE -> getAllLandscapeApps().map { "$it|$LANDSCAPE_USER" }
         TYPE_NOTIFICATION -> repository.getAllNotificationKeys()
-        TYPE_BLACKLIST -> repository.getAllBlacklistKeys()
+        TYPE_BLACKLIST -> repository.getAllBlacklistKeys().orEmpty()
         else -> repository.getAllFreeFormKeys()
     }
 
@@ -136,8 +138,11 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             when (type) {
                 TYPE_NOTIFICATION -> {
-                    repository.insertNotification(packageName, userId)
-                    notifyNotificationAppsChanged()
+                    // 写失败时不推进版本号：否则会让 SystemUI 侧缓存白白失效，
+                    // UI 也会误以为已经保存成功。
+                    val report = repository.insertNotification(packageName, userId)
+                    if (report.isSuccess) notifyNotificationAppsChanged()
+                    else Log.w(TAG, "insertNotification failed: $packageName/$userId", report.error)
                 }
                 TYPE_BLACKLIST -> repository.insertBlacklist(packageName, userId)
                 TYPE_LANDSCAPE -> addLandscapeApp(packageName)
@@ -150,8 +155,9 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             when (type) {
                 TYPE_NOTIFICATION -> {
-                    repository.deleteNotification(packageName, userId)
-                    notifyNotificationAppsChanged()
+                    val report = repository.deleteNotification(packageName, userId)
+                    if (report.isSuccess) notifyNotificationAppsChanged()
+                    else Log.w(TAG, "deleteNotification failed: $packageName/$userId", report.error)
                 }
                 TYPE_BLACKLIST -> repository.deleteBlacklist(packageName, userId)
                 TYPE_LANDSCAPE -> removeLandscapeApp(packageName)
@@ -164,8 +170,9 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             when (type) {
                 TYPE_NOTIFICATION -> {
-                    repository.deleteAllNotification()
-                    notifyNotificationAppsChanged()
+                    val report = repository.deleteAllNotification()
+                    if (report.isSuccess) notifyNotificationAppsChanged()
+                    else Log.w(TAG, "deleteAllNotification failed", report.error)
                 }
                 TYPE_BLACKLIST -> repository.deleteAllBlacklist()
                 TYPE_LANDSCAPE -> landscapeCall(LandscapeAppsProvider.METHOD_CLEAR_ALL, null)
@@ -183,16 +190,28 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             when (type) {
                 TYPE_NOTIFICATION -> {
-                    repository.replaceNotificationList(allApps.map { NotificationAppsEntity(it.applicationInfo.packageName, userIdOf(it)) })
-                    notifyNotificationAppsChanged()
+                    val report = repository.replaceNotificationList(
+                        allApps.map { NotificationAppsEntity(it.applicationInfo.packageName, userIdOf(it)) }
+                    )
+                    if (report.isSuccess) notifyNotificationAppsChanged()
+                    else Log.w(TAG, "replaceNotificationList failed", report.error)
                 }
                 TYPE_BLACKLIST -> {
                     repository.replaceBlacklist(allApps.map { FreeformBlacklistEntity(it.applicationInfo.packageName, userIdOf(it)) })
                 }
                 TYPE_LANDSCAPE -> withContext(Dispatchers.IO) {
-                    landscapeCall(LandscapeAppsProvider.METHOD_CLEAR_ALL, null)
-                    // Provider 写入是独立的 SharedPreferences.commit，逐条写入即可
-                    allApps.forEach { addLandscapeApp(it.applicationInfo.packageName) }
+                    // 一次 IPC + 一次 commit + 只推进一次版本号（原实现逐条写，N 次 IPC、
+                    // N 次缓存失效，中途失败还会留下半份名单）。
+                    val ok = landscapeCall(
+                        LandscapeAppsProvider.METHOD_REPLACE_ALL,
+                        Bundle().apply {
+                            putStringArrayList(
+                                LandscapeAppsProvider.EXTRA_PACKAGE_LIST,
+                                ArrayList(allApps.map { it.applicationInfo.packageName })
+                            )
+                        }
+                    )?.let { !ProviderAccess.isDenied(it) } ?: false
+                    if (!ok) Log.w(TAG, "replace landscape list failed")
                 }
                 else -> {
                     repository.replaceFreeFormList(
@@ -236,6 +255,8 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     companion object {
+        private const val TAG = "ChooseAppsViewModel"
+
         /** 横屏名单不分用户，统一用 -1 作为键的一部分。 */
         const val LANDSCAPE_USER = -1
 

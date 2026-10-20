@@ -31,7 +31,11 @@ import io.relimus.zflow.ui.view.WaveSideBarView
 import io.relimus.zflow.utils.PackageUtils
 import io.relimus.zflow.utils.cast
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -52,7 +56,21 @@ class ChooseAppFloatingView(
     private val displayManager: DisplayManager = context.getSystemService(Context.DISPLAY_SERVICE).cast()
     private val defaultDisplay: Display = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
 
-    private val scope = MainScope()
+    /**
+     * 视图级别的协程作用域。
+     *
+     * 窗口是“显示/隐藏”反复复用的对象，因此这里用 [SupervisorJob] 手工管理：
+     * [showFloatingView] 前重建，[release] 时整体取消。不能像以前那样用一个
+     * 永不 cancel 的 MainScope —— 窗口移除后仍然挂着已启动的任务，
+     * 它们会在 [floatingView] 已被置空的时刻去操作 View。
+     */
+    private var scope = newScope()
+
+    private fun newScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    @Volatile
+    private var released = false
 
     private val launcherApps: LauncherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE).cast()
     private val userManager: UserManager = context.getSystemService(Context.USER_SERVICE).cast()
@@ -83,6 +101,10 @@ class ChooseAppFloatingView(
     }
 
     fun showFloatingView() {
+        if (released) return
+        if (floatingView != null) return   // 幂等：重复调用不再叠加窗口
+        if (scope.coroutineContext[Job]?.isActive != true) scope = newScope()
+
         scope.launch(Dispatchers.IO) {
             allFreeFormApps = chooseAppFloatingViewModel.getAllFreeFormApps().first().cast()
             withContext(Dispatchers.Main) {
@@ -352,12 +374,32 @@ class ChooseAppFloatingView(
     }
 
     private fun removeWindow() {
-        try {
-            windowManager.removeViewImmediate(floatingView)
-        } catch (_: Exception) {
+        val view = floatingView
+        floatingView = null
+        allAppsView?.let { allAppsView = null }
+
+        if (view != null) {
+            try {
+                windowManager.removeViewImmediate(view)
+            } catch (_: Exception) {
+                // 窗口可能已被系统移除（旋转、权限撤销），忽略
+            }
         }
 
+        // 窗口已移除：仍在执行的加载任务应立刻停止，避免继续操作已释放的 View
+        scope.coroutineContext[Job]?.cancelChildren()
+
         removeCallback.onChooseAppWindowRemove()
+    }
+
+    /**
+     * 彻底释放：由 [io.relimus.zflow.service.FloatingWindowController.detach]
+     * 调用。取消所有任务并删除窗口，之后再次调用 [showFloatingView] 无效。
+     */
+    fun release() {
+        released = true
+        scope.cancel()
+        runCatching { removeWindow() }
     }
 
     class AppsComparable : Comparator<FreeFormAppsEntity> {

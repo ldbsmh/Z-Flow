@@ -116,6 +116,7 @@ class FloatingWindowController(
         displayRotation = defaultDisplay.rotation
 
         initConfig()
+        // 重新 attach 时重建视图（上一次 detach 已经 release，不能复用）
         chooseAppFloatingView = ChooseAppFloatingView(context, config.positionX, this)
     }
 
@@ -124,6 +125,8 @@ class FloatingWindowController(
         attached = false
 
         if (isShowingFloating) removeFloating()
+        // 释放悬浮视图：取消其内部协程并删除窗口，避免 detach 后仍有任务操作 View
+        chooseAppFloatingView.release()
         runCatching { displayManager.unregisterDisplayListener(displayListener) }
         runCatching { sp.unregisterOnSharedPreferenceChangeListener(this) }
     }

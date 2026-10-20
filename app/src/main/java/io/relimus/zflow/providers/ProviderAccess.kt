@@ -39,6 +39,10 @@ internal object ProviderAccess {
         putString(EXTRA_REASON, reason)
     }
 
+    /** 调用方用来判断返回的 Bundle 是“失败”还是“真的没配置”。 */
+    fun isDenied(bundle: Bundle?): Boolean =
+        bundle != null && bundle.getBoolean(EXTRA_DENIED, false)
+
     const val EXTRA_DENIED = "denied"
     const val EXTRA_REASON = "reason"
 }

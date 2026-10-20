@@ -8,23 +8,123 @@ import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.xposed.hook.utils.XLog
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /**
  * 小窗请求的统一出口。
  *
- * 所有入口（Xposed 手势广播、桌面长按广播、悬浮窗选择器、通知钩子）
- * 最终都走这里，直接调用 [FreeformManagerProxy] 转发到 system_server 的
- * [io.relimus.zflow.xposed.services.FreeformManager]，不再经过可被外部
- * startService 的组件。
+ * 所有入口（Xposed 手势/桌面长按广播、静态广播接收器、悬浮窗选择器、通知钩子、
+ * FreeformService）最终都走这里，直接调用 [FreeformManagerProxy] 转发到
+ * system_server 的 [io.relimus.zflow.xposed.services.FreeformManager]。
  *
- * 调用线程：除 [handleBroadcast] 外均为调用方线程；内部只做一次同步 DB count
- * 和一次 SharedPreferences 读取（已进程内缓存），耗时在毫秒级。
+ * ## 队列策略（背压）
+ * 窗口创建涉及跨进程窗口管理，不能并发执行，因此固定单线程串行。
+ * 但队列**有界**：客户端伪造或手势连发时，超出 [MAX_PENDING] 的请求直接丢弃并记日志，
+ * 而不是无限堆积 Intent / PendingResult 把进程内存吃光。
+ *
+ * 另外对相同 (component, userId, taskId) 的请求做**在途合并**：
+ * 同一目标在小窗已经排队/创建时，重复请求不会再排一个。
+ *
+ * ## 线程模型
+ * 除 [enqueueFromBroadcast] 外均为调用方线程；内部只做一次同步 DB count
+ * 和一次 SharedPreferences 读取（进程内已缓存），耗时在毫秒级。
  */
 object FreeformRequestHandler {
 
     private const val TAG = "FreeformRequest"
 
-    // ========== 入口 1：Intent（Service / 悬浮窗 / 通知钩子） ==========
+    /** 队列上限：正常用户操作远达不到，只有异常连发才会触发丢弃。 */
+    private const val MAX_PENDING = 16
+
+    /** 正在排队/执行中的请求键，用于合并重复请求。 */
+    private val inFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** 单线程 + 有界队列：超出上限的请求由调用线程自己执行 CallerRuns 会阻塞主线程，故直接拒绝。 */
+    val executor: ThreadPoolExecutor = ThreadPoolExecutor(
+        1, 1,
+        30L, TimeUnit.SECONDS,
+        LinkedBlockingQueue(MAX_PENDING),
+        { r -> Thread(r, "freeform-request").apply { isDaemon = true } },
+        ThreadPoolExecutor.AbortPolicy()
+    ).apply { allowCoreThreadTimeOut(true) }
+
+    // ========== 入口 1：广播（system_server / hook 进程） ==========
+
+    /**
+     * 广播入口：解析 → 排队 → 后台串行创建。
+     *
+     * @return false 表示被丢弃（队列已满或重复请求），调用方只需记日志。
+     */
+    fun enqueueFromBroadcast(
+        context: Context,
+        target: Intent,
+        packageName: String?,
+        userId: Int,
+        taskId: Int,
+        miniMode: Boolean,
+        pendingIntent: PendingIntent?,
+        source: String,
+        sourceRotation: Int,
+        sourceScreenWidth: Int,
+        sourceScreenHeight: Int
+    ): Boolean {
+        val resolvedComponent = target.component ?: resolveLauncherComponent(context, packageName)
+        val pkg = resolvedComponent?.packageName ?: packageName
+        if (pkg.isNullOrBlank()) {
+            XLog.w("$TAG broadcast: missing target package")
+            return false
+        }
+
+        val key = "$pkg|${resolvedComponent?.className}|$userId|$taskId"
+        if (!inFlight.add(key)) {
+            XLog.d("$TAG broadcast: duplicate request ignored $key")
+            return false
+        }
+
+        return try {
+            executor.execute {
+                try {
+                    create(
+                        context = context,
+                        componentName = resolvedComponent,
+                        pendingIntent = pendingIntent,
+                        userId = userId,
+                        taskId = taskId,
+                        miniMode = miniMode,
+                        sourceRotation = sourceRotation,
+                        sourceScreenWidth = sourceScreenWidth,
+                        sourceScreenHeight = sourceScreenHeight
+                    )
+                } finally {
+                    inFlight.remove(key)
+                }
+            }
+            true
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            inFlight.remove(key)
+            XLog.w("$TAG broadcast: queue full (${executor.queue.size}), drop $key")
+            false
+        } catch (t: Throwable) {
+            inFlight.remove(key)
+            XLog.e("$TAG broadcast: enqueue failed", t)
+            false
+        }
+    }
+
+    /** 广播只给了包名时，回退到该包的启动 Activity。 */
+    private fun resolveLauncherComponent(context: Context, packageName: String?): ComponentName? {
+        if (packageName.isNullOrBlank()) return null
+        return try {
+            context.packageManager.getLaunchIntentForPackage(packageName)?.component
+        } catch (t: Throwable) {
+            XLog.w("$TAG resolve launcher failed for $packageName")
+            null
+        }
+    }
+
+    // ========== 入口 2：Intent（FreeformService / 通知钩子） ==========
 
     /**
      * 从已构造好的 startService Intent 中解析参数并创建窗口。
@@ -73,32 +173,7 @@ object FreeformRequestHandler {
         )
     }
 
-    /**
-     * 兼容旧签名：广播接收器解析完字段后直接调用。
-     */
-    fun handle(
-        context: Context,
-        target: Intent,
-        userId: Int,
-        taskId: Int,
-        miniMode: Boolean,
-        pendingIntent: PendingIntent?,
-        sourceRotation: Int,
-        sourceScreenWidth: Int,
-        sourceScreenHeight: Int
-    ): Boolean = create(
-        context = context,
-        componentName = target.component,
-        pendingIntent = pendingIntent,
-        userId = userId,
-        taskId = taskId,
-        miniMode = miniMode,
-        sourceRotation = sourceRotation,
-        sourceScreenWidth = sourceScreenWidth,
-        sourceScreenHeight = sourceScreenHeight
-    )
-
-    // ========== 入口 2：悬浮窗 / 列表直接点选 ==========
+    // ========== 入口 3：悬浮窗 / 列表直接点选 ==========
 
     /**
      * 悬浮窗选择器与全部应用列表使用：给定包名 + Activity 直接开小窗。
@@ -154,14 +229,15 @@ object FreeformRequestHandler {
             return false
         }
 
-        if (DatabaseRepository(context).isBlacklisted(packageName, userId)) {
-            XLog.d("$TAG create: $packageName user=$userId blacklisted")
+        // fail-closed：数据库查不到结论时不放行，避免误开黑名单应用的小窗
+        if (DatabaseRepository(context).isBlacklistedOrBlock(packageName, userId)) {
+            XLog.d("$TAG create: $packageName user=$userId blacklisted or unknown")
             return false
         }
 
         val sp = context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
-        val freeformDpi = sp.getInt("freeform_scale", 0).takeIf { it > 0 }
-            ?: context.resources.displayMetrics.densityDpi
+        // 与 system_server 侧一致：DPI 实际跟随物理屏幕，这里仅作占位传递。
+        val freeformDpi = sp.getInt("freeform_scale", context.resources.displayMetrics.densityDpi)
         val freeformSize = sp.getInt("freeform_size", 75)
         val freeformSizeLand = sp.getInt("freeform_size_land", 90)
         val floatViewSize = sp.getInt("freeform_float_view_size", 25)

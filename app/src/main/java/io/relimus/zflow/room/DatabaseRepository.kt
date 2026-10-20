@@ -135,15 +135,38 @@ class DatabaseRepository(context: Context) {
     /**
      * 同步读取被勾选“接管通知”的应用包名。
      * 供 ContentProvider（SystemUI 等其它进程）的 Binder 线程查询使用。
+     *
+     * 失败语义：查询异常返回 null 而不是空列表 —— 空列表意味着“用户没有配置任何
+     * 通知接管”，而 null 表示“查不到”。调用方（Provider）必须把 null 转成
+     * [WriteReport] 之外的 denied 结果，不能让 SystemUI 把数据库故障当成“没配置”。
      */
-    fun getAllNotificationPackageNames(): List<String> =
-        runCatching { notificationSyncDao.getAllPackageNames() }
-            .onFailure { Log.e(TAG, "getAllNotificationPackageNames failed", it) }
-            .getOrDefault(emptyList())
+    fun getAllNotificationPackageNames(): List<String>? =
+        try {
+            notificationSyncDao.getAllPackageNames()
+        } catch (e: Exception) {
+            Log.e(TAG, "getAllNotificationPackageNames failed", e)
+            null
+        }
 
-    /** 同步读取通知名单已选项（`packageName|userId`）。 */
+    /** 同步读取通知名单完整实体（含 userId）。失败返回 null，与空名单区分。 */
+    fun getAllNotificationEntries(): List<NotificationAppsEntity>? =
+        try {
+            notificationSyncDao.getAllWithoutLiveData()
+        } catch (e: Exception) {
+            Log.e(TAG, "getAllNotificationEntries failed", e)
+            null
+        }
+
+    /**
+     * 已选通知名单的键（`packageName|userId`），保留真实用户 ID。
+     *
+     * 之前这里先查包名再统一拼 `|0`，会把工作资料（userId=10 等）的勾选错误
+     * 归到主用户，也让 UI 的勾选键与数据库主键对不上。
+     */
     fun getAllNotificationKeys(): List<String> =
-        getAllNotificationPackageNames().map { "$it|0" }
+        getAllNotificationEntries()
+            .orEmpty()
+            .map { "${it.packageName}|${it.userId}" }
 
     // ========== 黑名单 ==========
 
@@ -176,21 +199,40 @@ class DatabaseRepository(context: Context) {
     fun getAllBlacklistByFlow(): Flow<List<FreeformBlacklistEntity>?> =
         freeformBlacklistDao.getAllByFlow()
 
-    /** 同步读取黑名单包名（去重），必须在后台线程调用。 */
-    fun getAllBlacklistKeys(): List<String> =
-        runCatching { freeformBlacklistDao.getAllWithUser() }
-            .getOrDefault(emptyList())
-            .map { "${it.packageName}|${it.userId}" }
+    /** 同步读取黑名单键（`packageName|userId`），必须在后台线程调用。失败返回 null。 */
+    fun getAllBlacklistKeys(): List<String>? =
+        try {
+            freeformBlacklistDao.getAllWithUser().map { "${it.packageName}|${it.userId}" }
+        } catch (e: Exception) {
+            Log.e(TAG, "getAllBlacklistKeys failed", e)
+            null
+        }
 
-    /** 同步查询，必须在后台线程或 Binder 线程调用。 */
-    fun isBlacklisted(packageName: String, userId: Int): Boolean {
-        return try {
+    /**
+     * 同步查询黑名单，必须在后台线程或 Binder 线程调用。
+     *
+     * @return true 命中；false 明确未命中；**null 表示查询失败，结论未知**。
+     *
+     * 之前异常时直接返回 false，等于把“无法确认”当成“肯定不在黑名单”，
+     * 于是黑名单应用在小窗入口被放行。现在把未知态显式传给调用方，
+     * 由各入口按自己的策略决定放行还是拒绝（见 [isBlacklistedOrBlock]）。
+     */
+    fun isBlacklisted(packageName: String, userId: Int): Boolean? =
+        try {
             freeformBlacklistDao.count(packageName, userId) > 0
         } catch (e: Exception) {
             Log.e(TAG, "isBlacklisted failed: pkg=$packageName userId=$userId", e)
-            false
+            null
         }
-    }
+
+    /**
+     * 失败策略：**fail-closed**。
+     *
+     * 小窗/横屏这类会改变窗口管理状态的入口，宁可不响应也不能误放行黑名单应用。
+     * 数据库故障是瞬时且罕见的，代价是可接受的；而误开小窗会直接暴露不该出现的界面。
+     */
+    fun isBlacklistedOrBlock(packageName: String, userId: Int): Boolean =
+        isBlacklisted(packageName, userId) != false
 
     // ========== 名单变更通知（供其它进程的缓存失效）==========
 

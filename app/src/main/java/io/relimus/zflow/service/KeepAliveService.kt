@@ -34,7 +34,7 @@ class KeepAliveService : AccessibilityService(),
     private lateinit var windowManager: WindowManager
     private lateinit var floatingController: FloatingWindowController
 
-    private var startFreeformReceiver = StartFreeformReceiver()
+    private var startFreeformReceiver: StartFreeformReceiver? = null
 
     // 无障碍 1x1 保活 View
     private var aliveView: View? = null
@@ -79,11 +79,10 @@ class KeepAliveService : AccessibilityService(),
 
         stopService(Intent(this, ForegroundService::class.java))
 
-        registerReceiver(
-            startFreeformReceiver,
-            IntentFilter("io.relimus.zflow.start_freeform"),
-            RECEIVER_EXPORTED
-        )
+        // 统一走 StartFreeformReceiver.register：带 android.permission.DUMP，
+        // 只有 system_server / root 能投递（见该类注释）。
+        startFreeformReceiver = StartFreeformReceiver.register(this)
+            ?: StartFreeformReceiver()   // 注册失败时退化为本地实例，仅用于后续判空
 
         windowManager = getSystemService(WINDOW_SERVICE).cast()
 
@@ -116,7 +115,8 @@ class KeepAliveService : AccessibilityService(),
         removeAliveOverlayView()
 
         runCatching { sp.unregisterOnSharedPreferenceChangeListener(this) }
-        runCatching { unregisterReceiver(startFreeformReceiver) }
+        startFreeformReceiver?.let { runCatching { unregisterReceiver(it) } }
+        startFreeformReceiver = null
     }
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {

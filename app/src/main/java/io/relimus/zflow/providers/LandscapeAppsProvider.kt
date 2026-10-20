@@ -29,6 +29,13 @@ class LandscapeAppsProvider : ContentProvider() {
         const val METHOD_ADD = "add"
         const val METHOD_REMOVE = "remove"
         const val METHOD_CLEAR_ALL = "clear_all"
+
+        /**
+         * 批量整体替换：一次 IPC、一次 commit、只推进一次版本号。
+         * 全选 / 恢复备份这类操作必须走这里，逐条 ADD 会导致
+         * N 次跨进程调用 + N 次缓存失效，中途失败还会留下半份名单。
+         */
+        const val METHOD_REPLACE_ALL = "replace_all"
         /** 名单版本号：每次写入自增，供 system_server 侧缓存失效判断。 */
         const val METHOD_GET_VERSION = "get_version"
         const val EXTRA_VERSION = "version"
@@ -80,6 +87,29 @@ class LandscapeAppsProvider : ContentProvider() {
                 }
                 prefs.edit().remove(pkg).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
                 Bundle().apply { putBoolean(EXTRA_RESULT, true) }
+            }
+            METHOD_REPLACE_ALL -> {
+                if (!ProviderAccess.allowWrite(TAG, method)) {
+                    return ProviderAccess.denied("write not allowed")
+                }
+                val list = extras?.getStringArrayList(EXTRA_PACKAGE_LIST).orEmpty()
+                val editor = prefs.edit()
+                // 整体替换：先清空旧名单，再一次性写入新名单，只 commit 一次。
+                editor.clear()
+                var accepted = 0
+                for (pkg in list) {
+                    if (!isValidPackageName(pkg)) continue
+                    editor.putBoolean(pkg, true)
+                    accepted++
+                }
+                editor.putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1)
+                if (!editor.commit()) {
+                    return ProviderAccess.denied("commit failed")
+                }
+                Bundle().apply {
+                    putBoolean(EXTRA_RESULT, true)
+                    putInt("accepted", accepted)
+                }
             }
             METHOD_CLEAR_ALL -> {
                 if (!ProviderAccess.allowWrite(TAG, method)) {
