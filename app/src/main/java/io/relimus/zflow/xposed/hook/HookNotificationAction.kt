@@ -243,17 +243,17 @@ object HookNotificationAction {
 
             // 走广播：本 hook 运行在被 hook 的第三方进程里，
             // 不能直接 startService 本应用的内部组件（exported=false）。
-            val intent = Intent("io.relimus.zflow.start_freeform").apply {
-                setPackage("io.relimus.zflow")
-                putExtra("packageName", component.packageName)
-                putExtra("activityName", component.className)
+            // 统一用 StartFreeformReceiver.newIntent 构造，带上内部来源标记，
+            // 否则接收端会按伪造请求丢弃。
+            val intent = StartFreeformReceiver.newIntent(
+                packageName = component.packageName,
+                activityName = component.className,
                 // 必须带上通知所属用户：工作资料 / 多用户下否则会按 userId=0 处理，
                 // 既可能拉起错误用户的应用，也会用错黑名单键。
-                putExtra(StartFreeformReceiver.EXTRA_USER_ID, sbn.userId)
-                putExtra(
-                    StartFreeformReceiver.EXTRA_SOURCE,
-                    StartFreeformReceiver.SOURCE_NOTIFICATION
-                )
+                userId = sbn.userId,
+                miniMode = false,
+                source = StartFreeformReceiver.SOURCE_NOTIFICATION
+            ).apply {
                 putExtra(Intent.EXTRA_COMPONENT_NAME, component)
                 putExtra(Intent.EXTRA_INTENT, launchIntent)
                 if (contentIntent != null) {

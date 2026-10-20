@@ -2,7 +2,6 @@ package io.relimus.zflow.xposed.hook
 
 import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -28,7 +27,7 @@ import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.providers.BlacklistProvider
 import io.relimus.zflow.providers.LandscapeAppsProvider
 import io.relimus.zflow.utils.cast
-import io.relimus.zflow.xposed.services.FreeformService
+import io.relimus.zflow.xposed.hook.utils.XLog
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
@@ -41,9 +40,6 @@ object HookSwipeGesture {
 
     private const val HINT_ANIM_DURATION = 150L
     private const val MINI_LAUNCH_DELAY_MS = 120L
-
-    private const val TARGET_PACKAGE =
-        "io.relimus.zflow"
 
     private const val DEBUG_TAG =
         "ZFlowSwipe-Diag"
@@ -2201,6 +2197,24 @@ object HookSwipeGesture {
                 false
             )?.also { blacklistCache.putBounded(cacheKey, it) } ?: false
         } catch (_: Throwable) {
+            /*
+             * 第三轮审查把 isBlacklisted 改成“查询失败 → fail-closed”，
+             * 但 provider 查询失败时返回的是带 EXTRA_DENIED 的空 Bundle，
+             * getBoolean 取不到值会落到默认 false —— 于是“拒绝”被当成了“放行”。
+             *
+             * 手势这边必须 fail-open：
+             *  - Provider 不可用（Z-Flow 进程被杀、正在升级、LSPosed 作用域刚注入）
+             *    是常态，若按“黑名单”处理，用户会周期性遇到“手势完全没反应”，
+             *    而且没有任何提示，属于把安全策略的代价转嫁给了主功能。
+             *  - 真正的黑名单校验还有一道在 App 进程内
+             *    （FreeformRequestHandler / FreeformService 直接查 Room，失败才拒绝），
+             *    所以这里放宽不会让黑名单应用被打开。
+             *
+             * 结论：hook 侧只负责“尽量过滤”，最终裁决留给 App 进程。
+             */
+            XLog.d("[ZFlowSwipe] blacklist query failed, fallback=${
+                blacklistCache[cacheKey] ?: false
+            } pkg=$packageName")
             blacklistCache[cacheKey] ?: false
         }
     }
@@ -2297,67 +2311,24 @@ object HookSwipeGesture {
         pendingMiniLaunch =
             Runnable {
                 try {
-                    val intent =
-                        Intent(
-                            "io.relimus.zflow.start_freeform"
-                        ).apply {
-                            setPackage(TARGET_PACKAGE)
-
-                            putExtra(
-                                "packageName",
-                                topComponent.packageName
-                            )
-
-                            putExtra(
-                                "activityName",
-                                topComponent.className
-                            )
-
-                            putExtra(
-                                "userId",
-                                userId
-                            )
-
-                            putExtra(
-                                FreeformService.EXTRA_TASK_ID,
-                                taskId
-                            )
-
-                            putExtra(
-                                StartFreeformReceiver.EXTRA_MINI_MODE,
-                                true
-                            )
-
-                            putExtra(
-                                StartFreeformReceiver.EXTRA_SOURCE,
-                                StartFreeformReceiver
-                                    .SOURCE_RECENT_SWIPE
-                            )
-
-                            putExtra(
-                                StartFreeformReceiver
-                                    .EXTRA_SOURCE_ROTATION,
-                                lastRotation
-                            )
-
-                            putExtra(
-                                StartFreeformReceiver
-                                    .EXTRA_SOURCE_SCREEN_WIDTH,
-                                lastScreenWidth
-                            )
-
-                            putExtra(
-                                StartFreeformReceiver
-                                    .EXTRA_SOURCE_SCREEN_HEIGHT,
-                                lastScreenHeight
-                            )
-                        }
+                    // 统一出口构造广播：必须带 StartFreeformReceiver.EXTRA_SENDER，
+                    // 否则接收端会按“伪造请求”丢弃。
+                    val intent = StartFreeformReceiver.newIntent(
+                        packageName = topComponent.packageName,
+                        activityName = topComponent.className,
+                        userId = userId,
+                        miniMode = true,
+                        taskId = taskId,
+                        source = StartFreeformReceiver.SOURCE_RECENT_SWIPE,
+                        sourceRotation = lastRotation,
+                        sourceScreenWidth = lastScreenWidth,
+                        sourceScreenHeight = lastScreenHeight
+                    )
 
                     context.sendBroadcast(intent)
 
-                    debugLog(
-                        "BROADCAST_SENT " +
-                            "component=$topComponent"
+                    XLog.d(
+                        "[ZFlowSwipe] broadcast sent component=$topComponent userId=$userId taskId=$taskId"
                     )
                 } catch (
                     throwable: Throwable

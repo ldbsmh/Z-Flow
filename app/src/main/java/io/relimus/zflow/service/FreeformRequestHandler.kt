@@ -73,20 +73,25 @@ object FreeformRequestHandler {
         val resolvedComponent = target.component ?: resolveLauncherComponent(context, packageName)
         val pkg = resolvedComponent?.packageName ?: packageName
         if (pkg.isNullOrBlank()) {
-            XLog.w("$TAG broadcast: missing target package")
+            XLog.w("$TAG [source=$source] broadcast: missing target package")
             return false
         }
 
         val key = "$pkg|${resolvedComponent?.className}|$userId|$taskId"
         if (!inFlight.add(key)) {
-            XLog.d("$TAG broadcast: duplicate request ignored $key")
+            XLog.w("$TAG [source=$source] duplicate request ignored $key")
             return false
         }
+
+        XLog.i(
+            "$TAG [source=$source] enqueue component=$resolvedComponent user=$userId " +
+                "taskId=$taskId mini=$miniMode rotation=$sourceRotation"
+        )
 
         return try {
             executor.execute {
                 try {
-                    create(
+                    val ok = create(
                         context = context,
                         componentName = resolvedComponent,
                         pendingIntent = pendingIntent,
@@ -97,6 +102,9 @@ object FreeformRequestHandler {
                         sourceScreenWidth = sourceScreenWidth,
                         sourceScreenHeight = sourceScreenHeight
                     )
+                    if (!ok) {
+                        XLog.w("$TAG [source=$source] create rejected for $resolvedComponent user=$userId")
+                    }
                 } finally {
                     inFlight.remove(key)
                 }
@@ -104,11 +112,11 @@ object FreeformRequestHandler {
             true
         } catch (e: java.util.concurrent.RejectedExecutionException) {
             inFlight.remove(key)
-            XLog.w("$TAG broadcast: queue full (${executor.queue.size}), drop $key")
+            XLog.w("$TAG [source=$source] queue full (${executor.queue.size}), drop $key")
             false
         } catch (t: Throwable) {
             inFlight.remove(key)
-            XLog.e("$TAG broadcast: enqueue failed", t)
+            XLog.e("$TAG [source=$source] enqueue failed", t)
             false
         }
     }
@@ -229,9 +237,11 @@ object FreeformRequestHandler {
             return false
         }
 
-        // fail-closed：数据库查不到结论时不放行，避免误开黑名单应用的小窗
+        // 说明：hook 侧只做“尽量过滤”，最终裁决在这里。
+        // 这里必须真的 fail-closed，同时把原因写进 LSPosed 日志，
+        // 否则数据库异常时会表现为“点了没反应且查不到原因”。
         if (DatabaseRepository(context).isBlacklistedOrBlock(packageName, userId)) {
-            XLog.d("$TAG create: $packageName user=$userId blacklisted or unknown")
+            XLog.w("$TAG create: $packageName user=$userId blacklisted or db unavailable")
             return false
         }
 
@@ -245,7 +255,7 @@ object FreeformRequestHandler {
         val manualAdjustFreeformRotation = sp.getBoolean("manual_adjust_freeform_rotation", false)
         val dockStyle = sp.getInt("freeform_dock_style", 100)
 
-        XLog.d(
+        XLog.i(
             "$TAG create component=$componentName userId=$userId taskId=$taskId " +
                 "miniMode=$miniMode rotation=$sourceRotation " +
                 "screen=${sourceScreenWidth}x$sourceScreenHeight"

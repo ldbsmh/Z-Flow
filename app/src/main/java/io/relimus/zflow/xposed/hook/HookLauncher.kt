@@ -205,17 +205,7 @@ object HookLauncher {
     }
 
 
-    /**
-     * 小窗广播的接收器被 android.permission.DUMP 保护。
-     * 发送前先确认当前进程确实持有该权限（system_server / root 有，普通应用进程没有），
-     * 没有就直接跳过，省掉一次注定被系统丢弃的跨进程发送。
-     */
-    private fun canSignalZFlow(context: Context): Boolean = try {
-        context.checkSelfPermission(StartFreeformReceiver.PERMISSION_DUMP) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-    } catch (t: Throwable) {
-        false
-    }
+    /** 广播接收端不再用系统权限鉴权，详见 [StartFreeformReceiver] 的类注释。 */
 
     private fun hookProxyMethod(clazz: Class<*>, methodName: String) {
         HookRegistry.hookAll(clazz, methodName, object : XC_MethodHook() {
@@ -244,34 +234,24 @@ object HookLauncher {
                     val componentName = XposedHelpers.callMethod(
                         itemInfo,
                         "getTargetComponent"
-                    ).cast<ComponentName?>() ?: return
+                    ).cast<ComponentName?>() ?: return@runCatching
 
                     val userObj = runCatching {
                         XposedHelpers.getObjectField(itemInfo, "user")
                     }.getOrNull()
                     val userId = resolveUserId(userObj)
 
-                    val intent = Intent("io.relimus.zflow.start_freeform").apply {
-                        setPackage("io.relimus.zflow")
-                        putExtra("packageName", componentName.packageName)
-                        putExtra("activityName", componentName.className)
-                        putExtra("userId", userId)
-                        putExtra(
-                            StartFreeformReceiver.EXTRA_SOURCE,
-                            StartFreeformReceiver.SOURCE_POPUP
-                        )
-                    }
+                    val app = AndroidAppHelper.currentApplication() ?: return@runCatching
+                    val intent = StartFreeformReceiver.newIntent(
+                        packageName = componentName.packageName,
+                        activityName = componentName.className,
+                        userId = userId,
+                        miniMode = false,
+                        source = StartFreeformReceiver.SOURCE_POPUP
+                    )
 
-                    val app = AndroidAppHelper.currentApplication()
-                    if (!canSignalZFlow(app)) {
-                        // 接收器只接受 android.permission.DUMP 发送方；
-                        // 普通应用进程没有该权限，发出去会被系统直接丢弃。
-                        // 这种情况下退回到“直接拉起原应用”的既有行为之外不多做事，
-                        // 只在日志里明确记录原因，避免用户看到“点了没反应”。
-                        XLog.w("$TAG popup: sender lacks ${StartFreeformReceiver.PERMISSION_DUMP}, skip broadcast")
-                        return@runCatching
-                    }
                     app.sendBroadcast(intent)
+                    XLog.d("$TAG popup: broadcast sent pkg=${componentName.packageName} user=$userId")
 
                     runCatching {
                         XposedHelpers.callMethod(thiz, "dismissTaskMenuView")

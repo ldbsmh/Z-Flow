@@ -51,20 +51,29 @@
 
 ## 第三轮：安全边界、可用性与数据正确性
 
-### 6. 广播入口鉴权（P1）
+### 6. 广播入口鉴权（P1 → 已回退权限方案）
 之前动态注册用的是 `RECEIVER_EXPORTED` 且不带权限，任何应用都能伪造
 `packageName / userId / taskId` 触发小窗。
 
-现在两条注册路径都带 **`android.permission.DUMP`**（`protectionLevel="signature|privileged"`，
-只有 system_server、root、adb shell 能持有）：
+**第一版做法（已废弃）**：给动态和静态接收器都加 `android.permission.DUMP`。
+**这一版直接导致所有入口失效**，必须记录清楚原因，避免以后有人再改回去：
 
-- 动态：`StartFreeformReceiver.register()`，分 SDK 分支，注册失败返回 null 不抛异常。
-- 静态：新增 `broadcast/FreeformRequestReceiver`，Manifest 中
-  `android:exported="true" android:permission="android.permission.DUMP"`。
+广播的三个真实发送方都是**被 Hook 的宿主进程**——纯血 Launcher（长按 SystemShortcut）、
+SystemUI（最近任务上滑）、任意第三方应用进程（通知按钮）。它们都不持有 DUMP。
+关键点在于：权限不足时 `sendBroadcast()` 在 JVM 层**不会抛异常**，取消发生在
+`AMS.broadcastIntentLocked`，只留一条 Permission Denial 日志，App 侧完全收不到。
+用户看到的现象就是：
+- 手势上滑没有小窗；
+- 桌面长按“打开小窗”菜单什么都不做，直接掉回系统默认行为（本机表现为跳应用商店）。
 
-**为什么选 DUMP**：小窗请求的真实来源是 system_server 进程（Xposed hook 在系统进程里，
-hook 的是状态栏/任务卡，广播由系统进程发出）。DUMP 对它天然可用，普通三方应用拿不到。
-发送侧 `HookLauncher` 先 `checkCallingOrSelfPermission(DUMP)` 自检，未授权时记日志并放弃。
+**现在的做法**（`broadcast/StartFreeformReceiver.kt`）：
+- 接收器 `exported` + `RECEIVER_EXPORTED`，不加任何系统权限；
+- 所有发送方统一用 `StartFreeformReceiver.newIntent()` 构造广播，必须带内部标记
+  `EXTRA_SENDER = "io.relimus.zflow"`；
+- 接收端 `dispatch()` 校验该标记，缺失即丢弃；
+- 真正的窗口管理仍在 system_server 侧的 `IFreeformManager`，伪造的最坏结果只是“把某个应用
+  开成小窗”，不构成越权执行。
+- `HookLauncher` 的 DUMP 自检（会让长按入口直接 return）一并删除。
 
 ### 7. 两种保活模式都能收到请求（P1）
 - `KeepAliveService.onServiceConnected()` 注册（已有）。
@@ -83,8 +92,13 @@ hook 的是状态栏/任务卡，广播由系统进程发出）。DUMP 对它天
 - 同步查询失败返回 **null**，而不是 `emptyList()` —— 区分“没配置”和“读不出来”。
 - `getAllNotificationPackageNames()` / `getAllNotificationEntries()` 均按此约定，
   Provider 收到 null 返回 `denied`，SystemUI 不会把数据库故障当成“没有任何应用启用接管”。
-- `isBlacklisted()` 同样返回 `Boolean?`。**失败策略是 fail-closed**：
-  确认不了就当作在黑名单里，宁可不创建小窗。理由是被屏蔽的应用不该因为一次数据库抖动被放行。
+- `isBlacklisted()` 同样返回 `Boolean?`。**App 进程内的入口 fail-closed**：
+  确认不了就当作在黑名单里，宁可不创建小窗。
+- **但 hook 侧（Launcher / SystemUI 进程）必须 fail-open**：`BlacklistProvider` 拒绝时返回的是
+  带 `EXTRA_DENIED` 的空 Bundle，`getBoolean(RESULT, false)` 取到的是默认 false，
+  “拒绝”会被当成“放行”；而在 hook 侧把 Provider 不可用当黑名单处理，会让用户在
+  Z-Flow 进程被杀/升级期间周期性遇到“手势毫无反应”，且没有提示。
+  hook 只做尽量过滤，最终裁决在 App 进程（那里查 Room，失败才拒绝）。
 
 ### 10. 手势热路径的 Binder（P2）
 之前每次判断都要先 `contentResolver.call` 查版本号，缓存只省掉第二次调用。

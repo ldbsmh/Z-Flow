@@ -152,17 +152,20 @@
 
         <!--
             小窗请求的静态接收器。
-            android:permission="android.permission.DUMP"：只有 system_server / root
-            （以及 adb shell）能发送。普通第三方应用拿不到该权限，无法伪造
-            packageName / userId / taskId 触发小窗。
+
+            ⚠️ 不要加 android:permission。发送方是 Launcher / SystemUI /
+            被 Hook 的第三方应用进程，它们都不持有 DUMP 之类的系统权限；
+            加权限的后果不是“拒绝伪造”，而是**所有真实请求被 system_server
+            静默丢弃**（用户表现为手势没反应、长按菜单掉回默认行为）。
+            安全边界改由代码承担：见 StartFreeformReceiver.dispatch 的来源标记校验。
+
             使用静态声明是为了在 App 进程被杀、两种保活服务都没在跑时，
             请求仍能把进程拉起来处理。
         -->
         <receiver
             android:name="io.relimus.zflow.broadcast.FreeformRequestReceiver"
             android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.DUMP">
+            android:exported="true">
             <intent-filter>
                 <action android:name="io.relimus.zflow.start_freeform" />
             </intent-filter>
