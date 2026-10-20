@@ -56,6 +56,7 @@ import io.relimus.zflow.databinding.ViewFreeformFlymeBinding
 import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.services.FreeformManager
+import io.relimus.zflow.xposed.services.removeWindowIdentity
 
 import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.utils.Instances
@@ -143,28 +144,24 @@ class FreeformWindow(
         /** 最多同时存在的小窗数量，从设置读取 */
         @Synchronized
         fun registerWindow(window: FreeformWindow) {
-            val limit = FreeformManager.maxFreeformWindows
-            if (activeWindows.size >= limit) {
+            if (window.isDestroyed || activeWindows.any { it === window }) return
+            val limit = FreeformManager.maxFreeformWindows.coerceAtLeast(1)
+            // A settings change can lower the limit by more than one. Keep the
+            // existing deferred destruction, but evict every excess registration.
+            while (activeWindows.size >= limit) {
                 val oldest = activeWindows.removeAt(0)
-                if (oldest !== window) {
-                    Handler(Looper.getMainLooper()).post {
-                        if (!oldest.isDestroyed) {
-                            oldest.realDestroy()
-                        }
+                Handler(Looper.getMainLooper()).post {
+                    if (!oldest.isDestroyed) {
+                        oldest.realDestroy()
                     }
-                } else {
-                    activeWindows.add(0, oldest)
-                    return
                 }
             }
-            if (!activeWindows.contains(window)) {
-                activeWindows.add(window)
-            }
+            activeWindows.add(window)
         }
 
         @Synchronized
         fun unregisterWindow(window: FreeformWindow) {
-            activeWindows.remove(window)
+            activeWindows.removeWindowIdentity(window)
         }
 
         fun getNormalWindows(): List<FreeformWindow> {
@@ -496,6 +493,11 @@ class FreeformWindow(
 
     fun launchPendingIntent(pendingIntent: PendingIntent?): Boolean {
         if (pendingIntent == null || isDestroyed || displayId < 0) return false
+        val targetPackage = componentName?.packageName
+        if (targetPackage != null && pendingIntent.creatorPackage != targetPackage) {
+            XLog.w("$TAG: Reject PendingIntent creator mismatch for package-scoped window")
+            return false
+        }
 
         // 每次点击都重置发送状态。旧实现第一次发送后该标志永久为 true，
         // 后续通知无法重新排队，是微信“无反应”的直接原因之一。
@@ -2443,29 +2445,45 @@ class FreeformWindow(
         }
     }
 
-    fun closeToBack() {
-        if (isDestroyed || isClosedToBack) {
-            return
-        }
-
-        isClosedToBack = true
-        cancelSpringAnimations()
-
+    private fun cleanupStep(resource: String, action: () -> Unit) {
         try {
+            action()
+        } catch (e: Exception) {
+            XLog.e("$TAG: Failed to clean up $resource", e)
+        }
+    }
+
+    private fun detachWindowViews() {
+        cleanupStep("display listener") {
             Instances.displayManager.unregisterDisplayListener(displayListener)
+        }
+        cleanupStep("drag-close handler") { dragCloseHandler?.detach() }
+        dragCloseHandler = null
+        cleanupStep("hidden view") {
             if (::hiddenView.isInitialized && hiddenView.isAttachedToWindow) {
-                dragCloseHandler?.detach()
-                dragCloseHandler = null
                 Instances.windowManager.removeView(hiddenView)
             }
-            if (::binding.isInitialized) {
-                binding.textureView.removeCallbacks(initTimeoutRunnable)
-                if (binding.root.isAttachedToWindow) Instances.windowManager.removeView(binding.root)
-            }
-            if (::backgroundView.isInitialized && backgroundView.isAttachedToWindow) Instances.windowManager.removeView(backgroundView)
-        } catch (e: Exception) {
-            XLog.e("$TAG: Error moving window to back", e)
         }
+        cleanupStep("initial frame callback") {
+            if (::binding.isInitialized) binding.textureView.removeCallbacks(initTimeoutRunnable)
+        }
+        cleanupStep("window view") {
+            if (::binding.isInitialized && binding.root.isAttachedToWindow) {
+                Instances.windowManager.removeView(binding.root)
+            }
+        }
+        cleanupStep("background view") {
+            if (::backgroundView.isInitialized && backgroundView.isAttachedToWindow) {
+                Instances.windowManager.removeView(backgroundView)
+            }
+        }
+    }
+
+    fun closeToBack() {
+        if (isDestroyed || isClosedToBack) return
+        isClosedToBack = true
+        cleanupStep("spring animations") { cancelSpringAnimations() }
+        detachWindowViews()
     }
 
     fun restoreFromBack() {
@@ -2565,29 +2583,28 @@ class FreeformWindow(
     }
 
     fun realDestroy() {
-        if (isDestroyed) {
-            return
-        }
-        if (!isClosedToBack) closeToBack()
+        if (isDestroyed) return
+        // Mark terminal before detaching views, which can invoke surface callbacks.
         isDestroyed = true
+        isClosedToBack = true
         XLog.d(
             "$TAG: WINDOW_DESTROY trace=$traceId display=$displayId component=$componentName " +
                 "task=$currentTaskId closed=$isClosedToBack"
         )
-        try {
-            if (::binding.isInitialized) binding.textureView.removeCallbacks(initTimeoutRunnable)
-            mainHandler.removeCallbacks(initTimeoutRunnable)
-            dragCloseHandler?.detach()
-            dragCloseHandler = null
-            releaseVirtualSurface()
-            unregisterWindow(this)
-            if (hasAddedWindowToManager) {
-                FreeformManager.removeWindow(displayId)
-                hasAddedWindowToManager = false
-            }
+        notificationLaunchGeneration += 1L
+        notificationTransitionDeadline = 0L
+        queuedNotificationIntent = null
+        mainHandler.removeCallbacksAndMessages(null)
+        cleanupStep("spring animations") { cancelSpringAnimations() }
+        // Retry detachment even if closeToBack previously failed part way through.
+        detachWindowViews()
+        cleanupStep("virtual surface") { releaseVirtualSurface() }
+        cleanupStep("active registration") { unregisterWindow(this) }
+        // Safe even before registration/display creation; never select by displayId.
+        cleanupStep("manager registration") { FreeformManager.removeWindow(this) }
+        hasAddedWindowToManager = false
+        cleanupStep("virtual display") {
             if (::virtualDisplay.isInitialized) virtualDisplay.release()
-        } catch (e: Exception) {
-            XLog.e("$TAG: Error real destroying window", e)
         }
     }
 
@@ -2619,7 +2636,11 @@ class FreeformWindow(
             // 高刷新率暂不应用
             if (!::virtualDisplay.isInitialized) {
                 val createdDisplay = createVirtualDisplay("ZFlow@${System.currentTimeMillis()}", 0f)
-                    ?: run { XLog.e("$TAG: DisplayManager returned null VirtualDisplay"); return }
+                    ?: run {
+                        XLog.e("$TAG: DisplayManager returned null VirtualDisplay")
+                        realDestroy()
+                        return
+                    }
                 virtualDisplay = createdDisplay
                 displayId = virtualDisplay.display.displayId
                 markVirtualDisplaySpecApplied()
@@ -2733,6 +2754,7 @@ class FreeformWindow(
             }
         } catch (e: Exception) {
             XLog.e("$TAG: [$traceId] Failed to create or attach VirtualDisplay", e)
+            realDestroy()
         }
     }
 

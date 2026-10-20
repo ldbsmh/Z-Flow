@@ -41,6 +41,7 @@ object FreeformManager : IFreeformManager.Stub() {
 
     private val windowList = mutableListOf<FreeformWindow>()
     private val displayIdList = mutableListOf<Int>()
+    @Volatile
     private var isReady = false
 
     // displayId -> taskId list
@@ -205,17 +206,24 @@ object FreeformManager : IFreeformManager.Stub() {
     }
 
     fun addWindow(window: FreeformWindow) {
+        if (window.isDestroyed || window.displayId < 0 || windowList.any { it === window }) return
         windowList.add(0, window)
         displayIdList.add(0, window.displayId)
-        displayTaskMap[window.displayId] = mutableListOf()
+        displayTaskMap.getOrPut(window.displayId) { mutableListOf() }
     }
 
+    // Keep display-based callers selecting the current window on that display.
     fun removeWindow(displayId: Int) {
-        val window = windowList.find { it.displayId == displayId }
-        if (window != null) {
-            windowList.remove(window)
-            displayIdList.remove(displayId)
-            displayTaskMap.remove(displayId)
+        getWindow(displayId)?.let { removeWindow(it) }
+    }
+
+    fun removeWindow(window: FreeformWindow) {
+        // A failed constructor has displayId=-1 and may never have been registered.
+        // A stale instance must not unregister a different window on a reused ID.
+        if (!windowList.removeWindowIdentity(window)) return
+        displayIdList.remove(window.displayId)
+        if (windowList.none { it.displayId == window.displayId }) {
+            displayTaskMap.remove(window.displayId)
         }
     }
 
@@ -611,8 +619,67 @@ object FreeformManager : IFreeformManager.Stub() {
         sourceScreenHeight: Int,
         dockStyle: Int
     ) {
+        createWindowInternal(
+            componentName, pendingIntent, userId, taskId,
+            freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
+            dimAmount, manualAdjustFreeformRotation, sourceRotation, sourceScreenWidth,
+            sourceScreenHeight, dockStyle,
+            directToMini = false
+        )
+    }
+
+    override fun createMiniWindow(
+        componentName: ComponentName?,
+        pendingIntent: PendingIntent?,
+        userId: Int,
+        taskId: Int,
+        freeformDpi: Int,
+        freeformSize: Int,
+        freeformSizeLand: Int,
+        floatViewSize: Int,
+        dimAmount: Int,
+        manualAdjustFreeformRotation: Boolean,
+        sourceRotation: Int,
+        sourceScreenWidth: Int,
+        sourceScreenHeight: Int,
+        dockStyle: Int
+    ) {
+        createWindowInternal(
+            componentName, pendingIntent, userId, taskId,
+            freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
+            dimAmount, manualAdjustFreeformRotation, sourceRotation, sourceScreenWidth,
+            sourceScreenHeight, dockStyle,
+            directToMini = true
+        )
+    }
+
+    private fun createWindowInternal(
+        componentName: ComponentName?,
+        pendingIntent: PendingIntent?,
+        userId: Int,
+        taskId: Int,
+        freeformDpi: Int,
+        freeformSize: Int,
+        freeformSizeLand: Int,
+        floatViewSize: Int,
+        dimAmount: Int,
+        manualAdjustFreeformRotation: Boolean,
+        sourceRotation: Int,
+        sourceScreenWidth: Int,
+        sourceScreenHeight: Int,
+        dockStyle: Int,
+        directToMini: Boolean
+    ) {
         if (!isReady) {
             XLog.e("$TAG: Service not ready")
+            return
+        }
+        // These window requests bind notification/task recovery to one package.
+        // Do not apply this rule to sendPendingIntentOnDisplay: a creator package
+        // is not generally the destination of an arbitrary/delegated PendingIntent.
+        val targetPackage = componentName?.packageName
+        if (pendingIntent != null && targetPackage != null && pendingIntent.creatorPackage != targetPackage) {
+            XLog.w("$TAG: Reject PendingIntent creator mismatch for package-scoped window")
             return
         }
         runOnMainThread {
@@ -621,24 +688,26 @@ object FreeformManager : IFreeformManager.Stub() {
                 Instances.iStatusBarService.collapsePanels()
 
                 val existingWindow = findAnyWindow(componentName?.packageName)
-                // 【修复】忽略已销毁或 displayId 无效的窗口，让它们自然清理，
-                // 创建新窗口而不是尝试复用无效实例。
                 if (existingWindow != null && !existingWindow.isDestroyed && existingWindow.displayId >= 0) {
                     if (pendingIntent != null && existingWindow.launchPendingIntent(pendingIntent)) {
                         existingWindow.moveToTop()
                         return@runOnMainThread
                     }
-                    if (existingWindow.isClosedToBack) {
-                        existingWindow.restoreFromBack()
-                        bringMiniWindowsToFront()
-                        return@runOnMainThread
-                    } else if (existingWindow.isFloating || existingWindow.isHidden) {
-                        existingWindow.restoreToNormalView()
-                        return@runOnMainThread
+                    if (directToMini) {
+                        if (!existingWindow.isClosedToBack && (existingWindow.isFloating || existingWindow.isHidden)) {
+                            existingWindow.moveToTop()
+                            return@runOnMainThread
+                        }
+                        existingWindow.realDestroy()
                     } else {
-                        // 已有一个正常显示的窗口：同一应用只保留一个小窗，
-                        // 直接把它提到最上层，不再创建重复窗口。
-                        existingWindow.moveToTop()
+                        if (existingWindow.isClosedToBack) {
+                            existingWindow.restoreFromBack()
+                            bringMiniWindowsToFront()
+                        } else if (existingWindow.isFloating || existingWindow.isHidden) {
+                            existingWindow.restoreToNormalView()
+                        } else {
+                            existingWindow.moveToTop()
+                        }
                         return@runOnMainThread
                     }
                 }
@@ -660,8 +729,14 @@ object FreeformManager : IFreeformManager.Stub() {
                     dockStyle = dockStyle
                 )
 
+                val inheritedLocation = if (directToMini) {
+                    windowList.find {
+                        (it.isFloating || it.isHidden) && !it.isDestroyed && !it.isClosedToBack
+                    }?.getMiniLocation()
+                } else null
+
                 val traceId = XLog.newTraceId()
-                XLog.d("$TAG: [$traceId] createWindow component=$componentName userId=$userId inputTaskId=$taskId resolvedTaskId=$resolvedTaskId")
+                XLog.d("$TAG: [$traceId] createWindow directToMini=$directToMini component=$componentName userId=$userId inputTaskId=$taskId resolvedTaskId=$resolvedTaskId")
 
                 FreeformWindow(
                     Instances.systemUiContext,
@@ -669,93 +744,7 @@ object FreeformManager : IFreeformManager.Stub() {
                     userId,
                     resolvedTaskId,
                     config,
-                    pendingIntent = pendingIntent,
-                    allowTapOutsideToClose = false,
-                    sourceRotation = sourceRotation,
-                    sourceScreenWidth = sourceScreenWidth,
-                    sourceScreenHeight = sourceScreenHeight,
-                    traceId = traceId
-                )
-
-                bringMiniWindowsToFront()
-            } catch (e: Exception) {
-                XLog.e("$TAG: Failed to create window", e)
-            }
-        }
-    }
-
-    override fun createMiniWindow(
-        componentName: ComponentName?,
-        pendingIntent: PendingIntent?,
-        userId: Int,
-        taskId: Int,
-        freeformDpi: Int,
-        freeformSize: Int,
-        freeformSizeLand: Int,
-        floatViewSize: Int,
-        dimAmount: Int,
-        manualAdjustFreeformRotation: Boolean,
-        sourceRotation: Int,
-        sourceScreenWidth: Int,
-        sourceScreenHeight: Int,
-        dockStyle: Int
-    ) {
-        if (!isReady) {
-            XLog.e("$TAG: Service not ready")
-            return
-        }
-        runOnMainThread {
-            try {
-                refreshMaxFreeformWindows()
-                Instances.iStatusBarService.collapsePanels()
-
-                val existing = findAnyWindow(componentName?.packageName)
-                // 【修复】同 createWindow：忽略已销毁或 displayId 无效的窗口
-                if (existing != null && !existing.isDestroyed && existing.displayId >= 0) {
-                    if (pendingIntent != null && existing.launchPendingIntent(pendingIntent)) {
-                        existing.moveToTop()
-                        return@runOnMainThread
-                    }
-                    if (!existing.isClosedToBack && (existing.isFloating || existing.isHidden)) {
-                        existing.moveToTop()
-                        return@runOnMainThread
-                    }
-                    existing.realDestroy()
-                }
-
-                val packageName = componentName?.packageName
-                val landscapeApp = isLandscapeApp(packageName)
-
-                val resolvedTaskId = resolveBestTaskIdForPackage(
-                    packageName,
-                    taskId
-                )
-
-                val config = FreeformConfig(
-                    freeformDpi = freeformDpi,
-                    freeformSize = freeformSize / 100f,
-                    freeformSizeLand = freeformSizeLand / 100f,
-                    floatViewSize = floatViewSize / 100f,
-                    dimAmount = dimAmount / 100f,
-                    manualAdjustFreeformRotation = manualAdjustFreeformRotation,
-                    defaultLandscape = landscapeApp,
-                    dockStyle = dockStyle
-                )
-
-                val inheritedLocation = windowList.find {
-                    (it.isFloating || it.isHidden) && !it.isDestroyed && !it.isClosedToBack
-                }?.getMiniLocation()
-
-                val traceId = XLog.newTraceId()
-                XLog.d("$TAG: [$traceId] createMiniWindow component=$componentName userId=$userId inputTaskId=$taskId resolvedTaskId=$resolvedTaskId")
-
-                FreeformWindow(
-                    Instances.systemUiContext,
-                    componentName,
-                    userId,
-                    resolvedTaskId,
-                    config,
-                    directToMini = true,
+                    directToMini = directToMini,
                     inheritedMiniLocation = inheritedLocation,
                     pendingIntent = pendingIntent,
                     allowTapOutsideToClose = false,
@@ -764,8 +753,10 @@ object FreeformManager : IFreeformManager.Stub() {
                     sourceScreenHeight = sourceScreenHeight,
                     traceId = traceId
                 )
+
+                if (!directToMini) bringMiniWindowsToFront()
             } catch (e: Exception) {
-                XLog.e("$TAG: Failed to create mini window", e)
+                XLog.e("$TAG: Failed to create window", e)
             }
         }
     }
