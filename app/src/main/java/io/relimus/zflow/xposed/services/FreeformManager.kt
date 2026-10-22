@@ -53,6 +53,14 @@ object FreeformManager : IFreeformManager.Stub() {
     // taskId -> packageName
     private val taskPackageMap = mutableMapOf<Int, String>()
 
+    // taskId -> uptimeMillis 最近一次模块主动把任务迁回默认屏的时刻（用户主动展开）。
+    // 用于在 onTaskDisplayChanged 弹回默认屏时区分「主动展开」与「系统意外弹回」。
+    private val expectedMoveToDefaultAt = mutableMapOf<Int, Long>()
+    // taskId -> uptimeMillis 最近一次「弹回拦截」的时刻。防系统反复弹回造成拦截-移回死循环。
+    private val lastBounceDefendAt = mutableMapOf<Int, Long>()
+    private const val EXPECTED_MOVE_TO_DEFAULT_WINDOW_MS = 1500L
+    private const val BOUNCE_DEFEND_COOLDOWN_MS = 1200L
+
     lateinit var activityManagerService: Any
         internal set
 
@@ -111,6 +119,8 @@ object FreeformManager : IFreeformManager.Stub() {
                 }
 
                 val removedTaskId = taskInfo.taskId
+                expectedMoveToDefaultAt.remove(removedTaskId)
+                lastBounceDefendAt.remove(removedTaskId)
                 val removedPackage = taskPackageMap.remove(removedTaskId)
                 if (!removedPackage.isNullOrEmpty()) {
                     val latest = packageLatestTaskMap[removedPackage]
@@ -159,6 +169,27 @@ object FreeformManager : IFreeformManager.Stub() {
                         "toDisp=$newDisplayId managedDisplays=${displayIdList.joinToString(",")}",
                     tag = "ZFlowDiag"
                 )
+
+                // 意外弹回默认屏：系统未经模块请求把任务从托管虚拟屏拉回默认屏。
+                // 就地拦截，把任务移回原虚拟屏，避免全屏闪现窗口期与后续窗口重建竞态。
+                if (previousDisplayId != null && newDisplayId == 0 &&
+                    shouldDefendBounceToDefault(taskId, previousDisplayId)
+                ) {
+                    lastBounceDefendAt[taskId] = SystemClock.uptimeMillis()
+                    expectedMoveToDefaultAt.remove(taskId)
+                    val moved = moveTaskToDisplaySafely(taskId, previousDisplayId)
+                    // 拦截发生在移除之前，taskId 仍在该 display 的列表中，避免重复添加。
+                    val bucket = displayTaskMap.getOrPut(previousDisplayId) { mutableListOf() }
+                    if (!bucket.contains(taskId)) bucket.add(taskId)
+                    bindTaskToWindowIfMatch(taskId, previousDisplayId)
+                    XLog.ls(
+                        "diag:bounceDefended taskId=$taskId fromDisp=$previousDisplayId " +
+                            "movedBack=$moved",
+                        tag = "ZFlowDiag"
+                    )
+                    XLog.d("$TAG: Defended unexpected bounce taskId=$taskId movedBack=$moved")
+                    return@runOnMainThread
+                }
 
                 displayTaskMap.values.forEach { it.remove(taskId) }
 
@@ -254,6 +285,59 @@ object FreeformManager : IFreeformManager.Stub() {
         return "destroyed=${w.isDestroyed} closed=${w.isClosedToBack} " +
             "floating=${w.isFloating} hidden=${w.isHidden} display=${w.displayId} " +
             "task=${w.getCurrentTaskId()}"
+    }
+
+    /**
+     * 纯时间判定：给定「最近主动展开时刻」与「最近弹回拦截时刻」，判断当前是否可以拦截一次弹回。
+     * 与任何 Xposed/Android 状态解耦，便于单元测试。
+     */
+    internal fun shouldAllowBounceDefend(
+        now: Long,
+        lastExpectedMoveToDefault: Long?,
+        lastBounceDefend: Long?,
+        expectedWindowMs: Long = EXPECTED_MOVE_TO_DEFAULT_WINDOW_MS,
+        defendCooldownMs: Long = BOUNCE_DEFEND_COOLDOWN_MS
+    ): Boolean {
+        if (lastExpectedMoveToDefault != null &&
+            now - lastExpectedMoveToDefault < expectedWindowMs
+        ) {
+            return false
+        }
+        if (lastBounceDefend != null &&
+            now - lastBounceDefend < defendCooldownMs
+        ) {
+            return false
+        }
+        return true
+    }
+
+    /**
+     * 判断一次「任务从托管虚拟屏弹回默认屏」是否属于系统意外弹回、应当就地拦截移回，
+     * 而不是当作用户主动展开/关闭而销毁窗口。
+     *
+     * 必须全部成立才算「意外弹回」：
+     *  - 任务根任务仍存活（否则是正常任务被移除，无法也不需要拦截）；
+     *  - 原虚拟屏上仍有未销毁的窗口；
+     *  - 窗口处于 mini 显示态（isFloating 或 isHidden），而非已收起后台（isClosedToBack）；
+     *  - 不是「通知中转页过渡」状态（该情况下保留窗口由 onTaskRemovalStarted 处理）；
+     *  - 模块最近没有主动把该任务迁回默认屏（否则是用户主动展开/还原，应放行）；
+     *  - 距上一次弹回拦截超过了冷却时间（防系统反复弹回导致拦截-移回死循环）。
+     */
+    private fun shouldDefendBounceToDefault(taskId: Int, previousDisplayId: Int): Boolean {
+        if (taskId <= 0 || previousDisplayId <= 0) return false
+        if (!isRootTaskAlive(taskId)) return false
+
+        val window = getWindow(previousDisplayId) ?: return false
+        if (window.isDestroyed || window.isClosedToBack) return false
+        if (!window.isFloating && !window.isHidden) return false
+        if (window.isNotificationTransitionActive()) return false
+
+        val now = SystemClock.uptimeMillis()
+        return shouldAllowBounceDefend(
+            now,
+            expectedMoveToDefaultAt[taskId],
+            lastBounceDefendAt[taskId]
+        )
     }
 
     private fun bindTaskToWindowIfMatch(taskId: Int, displayId: Int) {
@@ -447,6 +531,11 @@ object FreeformManager : IFreeformManager.Stub() {
         val rootTaskId = resolveRootTaskId(taskIdToMove)
 
         val currentDisplayId = getTaskDisplayId(rootTaskId)
+
+        // 用户主动展开/还原到默认屏：记录期望迁移，供 onTaskDisplayChanged 区分。
+        // 同时以原始 taskId 与 rootTaskId 冗余记录，让监听回调任一带都能命中。
+        expectedMoveToDefaultAt[taskIdToMove] = SystemClock.uptimeMillis()
+        expectedMoveToDefaultAt[rootTaskId] = SystemClock.uptimeMillis()
 
         return try {
             if (currentDisplayId == Display.DEFAULT_DISPLAY) {
