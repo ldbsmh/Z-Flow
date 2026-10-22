@@ -58,8 +58,6 @@ object FreeformManager : IFreeformManager.Stub() {
     private val expectedMoveToDefaultAt = mutableMapOf<Int, Long>()
     // taskId -> uptimeMillis 最近一次「弹回拦截」的时刻。防系统反复弹回造成拦截-移回死循环。
     private val lastBounceDefendAt = mutableMapOf<Int, Long>()
-    private const val EXPECTED_MOVE_TO_DEFAULT_WINDOW_MS = 1500L
-    private const val BOUNCE_DEFEND_COOLDOWN_MS = 1200L
 
     lateinit var activityManagerService: Any
         internal set
@@ -288,30 +286,6 @@ object FreeformManager : IFreeformManager.Stub() {
     }
 
     /**
-     * 纯时间判定：给定「最近主动展开时刻」与「最近弹回拦截时刻」，判断当前是否可以拦截一次弹回。
-     * 与任何 Xposed/Android 状态解耦，便于单元测试。
-     */
-    internal fun shouldAllowBounceDefend(
-        now: Long,
-        lastExpectedMoveToDefault: Long?,
-        lastBounceDefend: Long?,
-        expectedWindowMs: Long = EXPECTED_MOVE_TO_DEFAULT_WINDOW_MS,
-        defendCooldownMs: Long = BOUNCE_DEFEND_COOLDOWN_MS
-    ): Boolean {
-        if (lastExpectedMoveToDefault != null &&
-            now - lastExpectedMoveToDefault < expectedWindowMs
-        ) {
-            return false
-        }
-        if (lastBounceDefend != null &&
-            now - lastBounceDefend < defendCooldownMs
-        ) {
-            return false
-        }
-        return true
-    }
-
-    /**
      * 判断一次「任务从托管虚拟屏弹回默认屏」是否属于系统意外弹回、应当就地拦截移回，
      * 而不是当作用户主动展开/关闭而销毁窗口。
      *
@@ -333,7 +307,7 @@ object FreeformManager : IFreeformManager.Stub() {
         if (window.isNotificationTransitionActive()) return false
 
         val now = SystemClock.uptimeMillis()
-        return shouldAllowBounceDefend(
+        return BounceDefendDecision.shouldAllowBounceDefend(
             now,
             expectedMoveToDefaultAt[taskId],
             lastBounceDefendAt[taskId]
