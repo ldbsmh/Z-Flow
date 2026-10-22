@@ -484,6 +484,11 @@ class FreeformWindow(
         if (currentTaskId == taskId) return
         currentTaskId = taskId
         XLog.d("$TAG: [$traceId] bindTask taskId=$taskId")
+        XLog.ls(
+            "diag:bindTask trace=$traceId disp=$displayId newTask=$taskId " +
+                "component=$componentName",
+            tag = "ZFlowDiag"
+        )
     }
 
     fun getCurrentTaskId(): Int = currentTaskId
@@ -2305,6 +2310,11 @@ class FreeformWindow(
 
     fun restoreToNormalView() {
         if (isDestroyed) return
+        XLog.ls(
+            "diag:restoreToNormalView trace=$traceId disp=$displayId " +
+                "hidden=$isHidden floating=$isFloating closed=$isClosedToBack",
+            tag = "ZFlowDiag"
+        )
         if (isHidden) hiddenViewToNormalView()
         else if (isFloating) floatViewToNormalViewInternal()
     }
@@ -2488,6 +2498,10 @@ class FreeformWindow(
 
     fun restoreFromBack() {
         if (!isClosedToBack || isDestroyed) return
+        XLog.ls(
+            "diag:restoreFromBack trace=$traceId disp=$displayId task=$currentTaskId",
+            tag = "ZFlowDiag"
+        )
         screenRotation = Instances.displayManager.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0
         if (!screenIsPortrait()) hangUpPosition[0] = true
         lastFloatViewLocation = intArrayOf(-1, -1)
@@ -2591,6 +2605,11 @@ class FreeformWindow(
             "$TAG: WINDOW_DESTROY trace=$traceId display=$displayId component=$componentName " +
                 "task=$currentTaskId closed=$isClosedToBack"
         )
+        XLog.ls(
+            "diag:realDestroy trace=$traceId disp=$displayId component=$componentName " +
+                "task=$currentTaskId",
+            tag = "ZFlowDiag"
+        )
         notificationLaunchGeneration += 1L
         notificationTransitionDeadline = 0L
         queuedNotificationIntent = null
@@ -2645,6 +2664,12 @@ class FreeformWindow(
                 displayId = virtualDisplay.display.displayId
                 markVirtualDisplaySpecApplied()
                 XLog.d("$TAG: [$traceId] VirtualDisplay created displayId=$displayId size=${freeformScreenWidth}x$freeformScreenHeight dpi=$freeformDpi")
+                XLog.ls(
+                    "diag:virtualDisplayCreated trace=$traceId disp=$displayId " +
+                        "component=$componentName directMini=$directToMini " +
+                        "initialTask=$currentTaskId",
+                    tag = "ZFlowDiag"
+                )
                 try {
                     val wmHidden = Refine.unsafeCast<WindowManagerHidden>(Instances.windowManager)
                     wmHidden.setDisplayImePolicy(displayId, WindowManagerHidden.DISPLAY_IME_POLICY_FALLBACK_DISPLAY)
@@ -2676,7 +2701,15 @@ class FreeformWindow(
                         false
                     }
 
+                    val initialTaskDisplay = if (hadTask)
+                        FreeformManager.getTaskDisplayId(currentTaskId) else -2
                     XLog.d("$TAG: [$traceId] Initial task move request: taskId=$currentTaskId displayId=$displayId hadTask=$hadTask moveRequested=$moveRequested")
+                    XLog.ls(
+                        "diag:initialTaskMove trace=$traceId disp=$displayId " +
+                            "taskId=$currentTaskId hadTask=$hadTask moveRequested=$moveRequested " +
+                            "taskCurrentDisplay=$initialTaskDisplay",
+                        tag = "ZFlowDiag"
+                    )
 
                     if (hadTask && pendingIntent != null) {
                         // 已有任务先迁入虚拟屏，再发送通知详情意图。
@@ -2699,6 +2732,13 @@ class FreeformWindow(
                     val hasTask = FreeformManager.hasTaskOnDisplay(displayId)
 
                     XLog.d("$TAG: [$traceId] Verify task result (1st) requestedTask=$currentTaskId moveRequested=$moveRequested displayId=$displayId hasTask=$hasTask topTask=$topTask")
+                    XLog.ls(
+                        "diag:verify1 trace=$traceId disp=$displayId " +
+                            "taskId=$currentTaskId moveRequested=$moveRequested " +
+                            "hasTask=$hasTask topTask=$topTask " +
+                            "topTaskDisplay=${if (topTask > 0) FreeformManager.getTaskDisplayId(topTask) else -2}",
+                        tag = "ZFlowDiag"
+                    )
 
                     if (hasTask && topTask > 0) {
                         bindTask(topTask)
@@ -2728,6 +2768,12 @@ class FreeformWindow(
                         val topTask2 = FreeformManager.getTopTaskIdOnDisplay(displayId)
                         val hasTask2 = FreeformManager.hasTaskOnDisplay(displayId)
                         XLog.d("$TAG: [$traceId] Verify task result (2nd) displayId=$displayId hasTask=$hasTask2 topTask=$topTask2")
+                        XLog.ls(
+                            "diag:verify2 trace=$traceId disp=$displayId " +
+                                "taskId=$currentTaskId hasTask=$hasTask2 topTask=$topTask2 " +
+                                "topTaskDisplay=${if (topTask2 > 0) FreeformManager.getTaskDisplayId(topTask2) else -2}",
+                            tag = "ZFlowDiag"
+                        )
                         if (hasTask2 && topTask2 > 0 && topTask2 != currentTaskId) {
                             bindTask(topTask2)
                         } else if (!hasTask2) {

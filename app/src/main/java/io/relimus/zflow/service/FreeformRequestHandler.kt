@@ -99,6 +99,11 @@ object FreeformRequestHandler {
             "$TAG [source=$source] enqueue component=$resolvedComponent user=$userId " +
                 "taskId=$taskId mini=$miniMode rotation=$sourceRotation"
         )
+        XLog.ls(
+            "in:enqueue source=$source component=$resolvedComponent user=$userId " +
+                "taskId=$taskId mini=$miniMode rotation=$sourceRotation",
+            tag = "ZFlowDiag"
+        )
 
         return try {
             executor.execute {
@@ -274,6 +279,12 @@ object FreeformRequestHandler {
             "$TAG create component=$componentName userId=$userId taskId=$taskId " +
                 "miniMode=$miniMode rotation=$sourceRotation " +
                 "screen=${sourceScreenWidth}x$sourceScreenHeight"
+        )
+        XLog.ls(
+            "in:create component=$componentName user=$userId taskId=$taskId " +
+                "mini=$miniMode rotation=$sourceRotation " +
+                "screen=${sourceScreenWidth}x$sourceScreenHeight",
+            tag = "ZFlowDiag"
         )
 
         if (miniMode) {

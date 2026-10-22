@@ -119,6 +119,15 @@ object FreeformManager : IFreeformManager.Stub() {
                     }
                 }
 
+                val removedDisplayOwner = displayTaskMap.entries
+                    .find { it.value.contains(removedTaskId) }
+                    ?.let { "${it.key}->${it.value}" }
+                XLog.ls(
+                    "diag:onTaskRemovalStarted taskId=$removedTaskId pkg=$removedPackage " +
+                        "owner=[$removedDisplayOwner]",
+                    tag = "ZFlowDiag"
+                )
+
                 displayTaskMap.entries.find { it.value.contains(removedTaskId) }?.let { entry ->
                     val managedDisplayId = entry.key
                     entry.value.remove(removedTaskId)
@@ -144,6 +153,12 @@ object FreeformManager : IFreeformManager.Stub() {
                 val previousDisplayId = displayTaskMap.entries
                     .find { it.value.contains(taskId) }
                     ?.key
+
+                XLog.ls(
+                    "diag:onTaskDisplayChanged taskId=$taskId fromDisp=$previousDisplayId " +
+                        "toDisp=$newDisplayId managedDisplays=${displayIdList.joinToString(",")}",
+                    tag = "ZFlowDiag"
+                )
 
                 displayTaskMap.values.forEach { it.remove(taskId) }
 
@@ -234,6 +249,12 @@ object FreeformManager : IFreeformManager.Stub() {
     }
 
     fun getWindow(displayId: Int): FreeformWindow? = windowList.find { it.displayId == displayId }
+
+    private fun resolvedExistingState(w: FreeformWindow): String {
+        return "destroyed=${w.isDestroyed} closed=${w.isClosedToBack} " +
+            "floating=${w.isFloating} hidden=${w.isHidden} display=${w.displayId} " +
+            "task=${w.getCurrentTaskId()}"
+    }
 
     private fun bindTaskToWindowIfMatch(taskId: Int, displayId: Int) {
         if (taskId <= 0 || displayId < 0) return
@@ -375,6 +396,12 @@ object FreeformManager : IFreeformManager.Stub() {
             XLog.d("$TAG: Task already on target display taskId=$rootTaskId displayId=$displayId")
             return true
         }
+
+        XLog.ls(
+            "diag:MoveTaskReq taskId=$taskId rootTaskId=$rootTaskId " +
+                "fromDisp=$currentDisplayId toDisp=$displayId",
+            tag = "ZFlowDiag"
+        )
 
         return try {
             XLog.d(
@@ -687,29 +714,73 @@ object FreeformManager : IFreeformManager.Stub() {
                 refreshMaxFreeformWindows()
                 Instances.iStatusBarService.collapsePanels()
 
+                XLog.ls(
+                    "diag:createWindowInternal directToMini=$directToMini component=$targetPackage " +
+                        "user=$userId inputTaskId=$taskId pendingIntent=${pendingIntent != null} " +
+                        "windowCount=${windowList.size}",
+                    tag = "ZFlowDiag"
+                )
                 val existingWindow = findAnyWindow(componentName?.packageName)
                 if (existingWindow != null && !existingWindow.isDestroyed && existingWindow.displayId >= 0) {
                     if (pendingIntent != null && existingWindow.launchPendingIntent(pendingIntent)) {
                         existingWindow.moveToTop()
+                        XLog.ls(
+                            "diag:reuse window display=${existingWindow.displayId} " +
+                                "action=relaunch-pendingIntent after=$resolvedExistingState(existingWindow)",
+                            tag = "ZFlowDiag"
+                        )
                         return@runOnMainThread
                     }
                     if (directToMini) {
                         if (!existingWindow.isClosedToBack && (existingWindow.isFloating || existingWindow.isHidden)) {
                             existingWindow.moveToTop()
+                            XLog.ls(
+                                "diag:reuse window display=${existingWindow.displayId} " +
+                                    "action=mini-movetop after=$resolvedExistingState(existingWindow)",
+                                tag = "ZFlowDiag"
+                            )
                             return@runOnMainThread
                         }
+                        XLog.ls(
+                            "diag:reuse window display=${existingWindow.displayId} " +
+                                "action=mini-destroy replace existing=$resolvedExistingState(existingWindow)",
+                            tag = "ZFlowDiag"
+                        )
                         existingWindow.realDestroy()
                     } else {
-                        if (existingWindow.isClosedToBack) {
-                            existingWindow.restoreFromBack()
-                            bringMiniWindowsToFront()
-                        } else if (existingWindow.isFloating || existingWindow.isHidden) {
-                            existingWindow.restoreToNormalView()
-                        } else {
-                            existingWindow.moveToTop()
+                        when {
+                            existingWindow.isClosedToBack -> {
+                                existingWindow.restoreFromBack()
+                                bringMiniWindowsToFront()
+                                XLog.ls(
+                                    "diag:reuse window display=${existingWindow.displayId} action=restore-from-back",
+                                    tag = "ZFlowDiag"
+                                )
+                            }
+                            existingWindow.isFloating || existingWindow.isHidden -> {
+                                existingWindow.restoreToNormalView()
+                                XLog.ls(
+                                    "diag:reuse window display=${existingWindow.displayId} action=restore-normal(mini->full)",
+                                    tag = "ZFlowDiag"
+                                )
+                            }
+                            else -> {
+                                existingWindow.moveToTop()
+                                XLog.ls(
+                                    "diag:reuse window display=${existingWindow.displayId} action=movetop",
+                                    tag = "ZFlowDiag"
+                                )
+                            }
                         }
                         return@runOnMainThread
                     }
+                } else {
+                    XLog.ls(
+                        "diag:no-existing-window directToMini=$directToMini existing=$existingWindow " +
+                            "destroyed=${existingWindow?.isDestroyed} " +
+                            "display=${existingWindow?.displayId}",
+                        tag = "ZFlowDiag"
+                    )
                 }
 
                 val resolvedTaskId = resolveBestTaskIdForPackage(
