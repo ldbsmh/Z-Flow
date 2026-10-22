@@ -726,7 +726,7 @@ object FreeformManager : IFreeformManager.Stub() {
                         existingWindow.moveToTop()
                         XLog.ls(
                             "diag:reuse window display=${existingWindow.displayId} " +
-                                "action=relaunch-pendingIntent after=$resolvedExistingState(existingWindow)",
+                                "action=relaunch-pendingIntent after=${resolvedExistingState(existingWindow)}",
                             tag = "ZFlowDiag"
                         )
                         return@runOnMainThread
@@ -736,14 +736,14 @@ object FreeformManager : IFreeformManager.Stub() {
                             existingWindow.moveToTop()
                             XLog.ls(
                                 "diag:reuse window display=${existingWindow.displayId} " +
-                                    "action=mini-movetop after=$resolvedExistingState(existingWindow)",
+                                    "action=mini-movetop after=${resolvedExistingState(existingWindow)}",
                                 tag = "ZFlowDiag"
                             )
                             return@runOnMainThread
                         }
                         XLog.ls(
                             "diag:reuse window display=${existingWindow.displayId} " +
-                                "action=mini-destroy replace existing=$resolvedExistingState(existingWindow)",
+                                "action=mini-destroy replace existing=${resolvedExistingState(existingWindow)}",
                             tag = "ZFlowDiag"
                         )
                         existingWindow.realDestroy()
