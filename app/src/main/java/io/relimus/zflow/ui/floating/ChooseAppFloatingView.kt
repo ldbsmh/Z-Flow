@@ -324,7 +324,9 @@ class ChooseAppFloatingView(
 
                                 removeCallback.onChooseAppWindowRemove()
                             }
-                        }
+                        },
+                        // 传入构建期快照，点击时不再查库（主线程禁查 Room）。
+                        blacklistedUids
                     )
                     recyclerView.layoutManager = GridLayoutManager(context, 3)
                     recyclerView.adapter = adapter

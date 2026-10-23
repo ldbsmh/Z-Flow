@@ -232,6 +232,62 @@ object FreeformRequestHandler {
         )
     }
 
+    /**
+     * [launch] 的异步版本，供 UI（主线程）调用。
+     *
+     * [create] 内部要同步查一次 Room（黑名单裁决，fail-closed）。主线程查库在
+     * MyDatabase 移除 allowMainThreadQueries() 之后会直接抛异常，于是查询“失败即拒绝”，
+     * 表现为「点应用打不开小窗」。这里把整个 create 丢到 request executor 串行执行，
+     * 结果再回主线程回调，避免 UI 线程碰数据库。
+     */
+    fun launchAsync(
+        context: Context,
+        packageName: String,
+        activityName: String?,
+        userId: Int,
+        onResult: (Boolean) -> Unit
+    ) {
+        val appContext = context.applicationContext ?: context
+        val component = activityName?.let { ComponentName(packageName, it) }
+        if (component == null) {
+            XLog.w("$TAG launchAsync: empty activityName for $packageName")
+            postResult(onResult, false)
+            return
+        }
+
+        try {
+            executor.execute {
+                val ok = try {
+                    create(
+                        context = appContext,
+                        componentName = component,
+                        pendingIntent = null,
+                        userId = userId,
+                        taskId = -1,
+                        miniMode = false,
+                        sourceRotation = -1,
+                        sourceScreenWidth = 0,
+                        sourceScreenHeight = 0
+                    )
+                } catch (t: Throwable) {
+                    XLog.e("$TAG launchAsync: create failed for $component", t)
+                    false
+                }
+                postResult(onResult, ok)
+            }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            XLog.w("$TAG launchAsync: queue full (${executor.queue.size}), drop $component")
+            postResult(onResult, false)
+        } catch (t: Throwable) {
+            XLog.e("$TAG launchAsync: enqueue failed", t)
+            postResult(onResult, false)
+        }
+    }
+
+    private fun postResult(onResult: (Boolean) -> Unit, value: Boolean) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(value) }
+    }
+
     // ========== 核心 ==========
 
     fun create(

@@ -14,17 +14,18 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.github.promeg.pinyinhelper.Pinyin
 import io.relimus.zflow.R
-import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.systemapi.UserHandle
 import io.relimus.zflow.service.FreeformRequestHandler
 
 class AllAppsAdapter(
     private val context: Context,
     private val allAppsList: ArrayList<LauncherActivityInfo>,
-    private val callback: ChooseAppFloatingView.ClickListener
+    private val callback: ChooseAppFloatingView.ClickListener,
+    // 列表构建时一次性取回的黑名单快照（"pkg|userId"）。
+    // 点击回调在主线程，不能再去查 Room（MyDatabase 已移除 allowMainThreadQueries）。
+    private val blacklistedKeys: Set<String> = emptySet()
 ) : RecyclerView.Adapter<AllAppsAdapter.ViewHolder>() {
 
-    private val repository = DatabaseRepository(context)
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val icon: ImageView = itemView.findViewById(R.id.imageView_icon)
@@ -57,29 +58,33 @@ class AllAppsAdapter(
             holder.click.setOnClickListener {
                 val userId = UserHandle.getUserId(allAppsList[position].user, applicationInfo.uid)
 
-                // null = 查询失败，按黑名单处理（宁可不启动）
-                if (repository.isBlacklisted(packageName, userId) != false) {
+                // 黑名单判定走列表构建时取好的内存快照：
+                // 点击回调在主线程，直接查 Room 会抛 "Cannot access database on the main thread"，
+                // 旧实现在 catch 里返回 null 后被误判为「已拉黑」，导致侧边栏点任何应用都报黑名单。
+                if ("$packageName|$userId" in blacklistedKeys) {
                     Toast.makeText(context, context.getString(R.string.app_blacklisted), Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
                 // 直接转发给 system_server 的 FreeformManager：
                 // 不再依赖 startService(FreeformService)，避免组件启动被后台限制拦截。
-                val launched = FreeformRequestHandler.launch(
+                // 必须异步：create() 内部要查 Room，主线程查库会抛异常并被 fail-closed 拒绝。
+                FreeformRequestHandler.launchAsync(
                     context = context,
                     packageName = packageName,
                     activityName = activityName,
                     userId = userId
-                )
-                if (!launched) {
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.freeform_start_failed),
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@setOnClickListener
+                ) { launched ->
+                    if (launched) {
+                        callback.onClick()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.freeform_start_failed),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
-                callback.onClick()
             }
         } catch (_: PackageManager.NameNotFoundException) {}
     }

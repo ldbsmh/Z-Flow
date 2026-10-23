@@ -108,22 +108,24 @@ class ChooseAppFloatingAdapter(
                         .into(holder.icon)
                     holder.appName.text = getLabel(appInfo, apps[position - 1].userId)
                     holder.click.setOnClickListener {
-                        // 直接转发到 system_server，跳过 FreeformService 组件启动
-                        val launched = FreeformRequestHandler.launch(
+                        // 直接转发到 system_server，跳过 FreeformService 组件启动。
+                        // 走异步入口：create() 内部查 Room，主线程查库会失败并被拒绝。
+                        FreeformRequestHandler.launchAsync(
                             context = context,
                             packageName = packageName,
                             activityName = activityName,
                             userId = apps[position - 1].userId
-                        )
-                        if (!launched) {
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.freeform_start_failed),
-                                Toast.LENGTH_SHORT
-                            ).show()
-                            return@setOnClickListener
+                        ) { launched ->
+                            if (launched) {
+                                callback.onClick()
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.freeform_start_failed),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
-                        callback.onClick()
                     }
                     //长按进入排序界面
                     holder.click.setOnLongClickListener {

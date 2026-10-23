@@ -20,32 +20,72 @@ object UserService {
 
     private var appUid = -1
 
+    // 上一次投递的时间，用于去抖：onUidStateChanged 触发非常频繁，不能每次都走 Binder 投递。
+    @Volatile
+    private var lastDeliverAt = 0L
+    private const val MIN_DELIVER_INTERVAL_MS = 2_000L
+
+    /**
+     * 向 app 进程投递 FreeformManager binder。
+     *
+     * 关键是**幂等可重入**：app 被强行停止后进程 UID 不变、binder 已随旧进程失效，
+     * 但系统不会再为同一个 UID 触发一次 onUidActive（UID 一直被认为是活跃的）。
+     * 只在 onUidActive 投递会导致「强停后重开 → isConnected 永远为 false →
+     * 所有小窗入口报『Z-Flow 服务未就绪』」。
+     */
+    private fun deliverBinder() {
+        lastDeliverAt = android.os.SystemClock.elapsedRealtime()
+        try {
+            val provider = ActivityManagerApis.getContentProviderExternal(
+                PROVIDER_AUTHORITY,
+                0,
+                null,
+                null
+            )
+            if (provider == null) {
+                XLog.e("$TAG: Failed to get content provider")
+                return
+            }
+            val extras = Bundle()
+            extras.putBinder("binder", FreeformManager)
+            val attr = AttributionSource.Builder(1000).setPackageName("android").build()
+            val reply = provider.call(attr, PROVIDER_AUTHORITY, "", null, extras)
+            if (reply == null) {
+                XLog.e("$TAG: Failed to send binder to app")
+                return
+            }
+            XLog.d("$TAG: Send binder to app successfully")
+        } catch (e: Throwable) {
+            XLog.e("$TAG: Failed to send binder to app", e)
+        }
+    }
+
     private val uidObserver = object : UidObserverAdapter() {
         override fun onUidActive(uid: Int) {
             if (uid != appUid) return
-            try {
-                val provider = ActivityManagerApis.getContentProviderExternal(
-                    PROVIDER_AUTHORITY,
-                    0,
-                    null,
-                    null
-                )
-                if (provider == null) {
-                    XLog.e("$TAG: Failed to get content provider")
-                    return
-                }
-                val extras = Bundle()
-                extras.putBinder("binder", FreeformManager)
-                val attr = AttributionSource.Builder(1000).setPackageName("android").build()
-                val reply = provider.call(attr, PROVIDER_AUTHORITY, "", null, extras)
-                if (reply == null) {
-                    XLog.e("$TAG: Failed to send binder to app")
-                    return
-                }
-                XLog.d("$TAG: Send binder to app successfully")
-            } catch (e: Throwable) {
-                XLog.e("$TAG: Failed to send binder to app", e)
-            }
+            XLog.d("$TAG: onUidActive uid=$uid, delivering binder")
+            deliverBinder()
+        }
+
+        /**
+         * 进程状态每次变化都补投一次 binder，覆盖 onUidActive 漏掉的路径：
+         * app 强停后重启、进程被系统回收后重建等。app 侧 [FreeformManagerProxy.linkService]
+         * 是幂等的（重新建 proxy 并 linkToDeath），重复投递无副作用。
+         */
+        override fun onUidStateChanged(
+            uid: Int,
+            procState: Int,
+            procStateSeq: Long,
+            capability: Int
+        ) {
+            if (uid != appUid) return
+            // 只做时间间隔去抖，**不**按 procState 值去重：
+            // 强停后重启的进程状态可能与上次完全相同（例如都是 CACHED），
+            // 按值去重会把真正需要的那次补投也挡掉，兜底就失效了。
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastDeliverAt < MIN_DELIVER_INTERVAL_MS) return
+            XLog.d("$TAG: onUidStateChanged uid=$uid state=$procState, delivering binder")
+            deliverBinder()
         }
     }
 
@@ -57,7 +97,10 @@ object UserService {
         waitActivityService()
         ActivityManagerApis.registerUidObserver(
             uidObserver,
-            ActivityManagerHidden.UID_OBSERVER_ACTIVE,
+            // ACTIVE 覆盖首次变活跃；PROCSTATE 覆盖进程状态每次变化——
+            // app 强停后重启时 UID 一直“活跃”，只有状态变化能再次触发投递。
+            ActivityManagerHidden.UID_OBSERVER_ACTIVE or
+                ActivityManagerHidden.UID_OBSERVER_PROCSTATE,
             ActivityManagerHidden.PROCESS_STATE_UNKNOWN,
             null
         )
