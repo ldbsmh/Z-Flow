@@ -309,8 +309,17 @@ object FreeformRequestHandler {
 
         val proxy = FreeformManagerProxy
         if (!proxy.isConnected) {
-            XLog.w("$TAG create: FreeformManager not connected (LSPosed 未激活或系统服务未就绪)")
-            return false
+            // 主动补一次链再判一次，覆盖「binder 已经丢了但没人补投」的情况。
+            XLog.w("$TAG create: FreeformManager not connected, requesting relink")
+            proxy.requestRelink()
+            if (!proxy.isConnected) {
+                XLog.w("$TAG create: FreeformManager still not connected, drop $packageName")
+                XLog.ls(
+                    "diag:create BLOCKED not-connected pkg=$packageName user=$userId",
+                    tag = "ZFlowDiag"
+                )
+                return false
+            }
         }
 
         // 说明：hook 侧只做“尽量过滤”，最终裁决在这里。
@@ -318,6 +327,10 @@ object FreeformRequestHandler {
         // 否则数据库异常时会表现为“点了没反应且查不到原因”。
         if (DatabaseRepository(context).isBlacklistedOrBlock(packageName, userId)) {
             XLog.w("$TAG create: $packageName user=$userId blacklisted or db unavailable")
+            XLog.ls(
+                "diag:create BLOCKED blacklist-or-db pkg=$packageName user=$userId",
+                tag = "ZFlowDiag"
+            )
             return false
         }
 
@@ -340,6 +353,12 @@ object FreeformRequestHandler {
             "in:create component=$componentName user=$userId taskId=$taskId " +
                 "mini=$miniMode rotation=$sourceRotation " +
                 "screen=${sourceScreenWidth}x$sourceScreenHeight",
+            tag = "ZFlowDiag"
+        )
+
+        XLog.ls(
+            "diag:create dispatched pkg=$packageName user=$userId mini=$miniMode " +
+                "taskId=$taskId display=${if (miniMode) "mini" else "freeform"}",
             tag = "ZFlowDiag"
         )
 

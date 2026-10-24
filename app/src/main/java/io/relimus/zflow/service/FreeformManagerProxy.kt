@@ -2,11 +2,14 @@ package io.relimus.zflow.service
 
 import android.app.PendingIntent
 import android.content.ComponentName
+import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
+import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.bean.MotionEventBean
 import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.IFreeformManager
+import io.relimus.zflow.xposed.hook.utils.XLog
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -50,6 +53,48 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
 
     val isConnected: Boolean
         get() = service != null
+
+    /** 最近一次失败后主动补链的时刻，用于退避，避免连点时把 provider 刷爆。 */
+    @Volatile
+    private var lastRelinkAt = 0L
+    private const val RELINK_MIN_INTERVAL_MS = 2_000L
+
+    /**
+     * 没连上时主动向 system_server 要一次 binder。
+     *
+     * 为什么需要这一步：binder 由 system_server 侧的 UserService 经
+     * [io.relimus.zflow.providers.ServiceProvider] 投递进来，而它只在 app 进程
+     * **变成活跃**（UID observer）时投。下面的场景全都会漏：
+     *
+     *  - 进程被 LMKD 杀掉后没被杀干净、或 UserService 因为加密存储锁住而没起；
+     *  - 用户「强停」后重开，UID 一直算活跃，不再触发 onUidActive；
+     *  - 补投之间正好撞上 2s 去抖窗口。
+     *
+     * 漏掉的后果很隐蔽：轮盘能弹、点得动，但每个请求都只打一行
+     * 「FreeformManager not connected」然后静默丢弃 —— 表现成「点了没反应」。
+     *
+     * 这里直接用 system_server 的 identity 去 call 一个 provider 无副作用：
+     * provider 侧只做 linkService，重复投递幂等。
+     */
+    /** 诊断走 LSPosed 日志（app 主进程同样可用），与其它诊断行统一。 */
+    private fun diag(msg: String) {
+        XLog.ls(msg, tag = "ZFlowDiag")
+    }
+
+    fun requestRelink() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastRelinkAt < RELINK_MIN_INTERVAL_MS) return
+        lastRelinkAt = now
+        runCatching {
+            val uri = android.net.Uri.parse(
+                "content://${ZFlow.PACKAGE_NAME}.freeform.provider"
+            )
+            ZFlow.me.contentResolver.call(uri, "", null, Bundle())
+            diag("diag:relinkRequested connected=$isConnected")
+        }.onFailure {
+            diag("diag:relinkRequested FAILED ${it.javaClass.simpleName}: ${it.message}")
+        }
+    }
 
     fun linkService(binder: IBinder) {
         service = Proxy.newProxyInstance(

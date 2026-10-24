@@ -55,6 +55,7 @@ class ServiceProvider : ContentProvider() {
 
         FreeformManagerProxy.linkService(binder)
         Log.d(TAG, "FreeformManager binder linked successfully")
+        Log.i(TAG, "ZFlowDiag diag:binderLinked")
         return Bundle()
     }
 }

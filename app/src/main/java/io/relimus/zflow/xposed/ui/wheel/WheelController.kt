@@ -21,6 +21,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import io.relimus.zflow.room.DatabaseRepository
+import io.relimus.zflow.service.FreeformManagerProxy
 import io.relimus.zflow.service.FreeformRequestHandler
 import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.utils.Instances
@@ -48,10 +49,32 @@ object WheelController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    /** 轮盘视图的父容器；overlay 窗口本身常驻，不随轮盘收起销毁。 */
     private var host: FrameLayout? = null
     private var windowManager: WindowManager? = null
     private var loadingJob: Job? = null
     private var cachedEntries: List<WheelAppEntry> = emptyList()
+
+    /** 最近一次弹出的形态，用于重新弹出时立刻出图（缓存列表也走同一条路径）。 */
+    private var lastShape: WheelShape? = null
+
+    /** 常驻 overlay 容器。窗口建好后不再移除，只增删内部视图。 */
+    private var overlay: FrameLayout? = null
+
+    /**
+     * 手指从角落滑入时，屏幕那一角是空的：手指底下没有轮盘中心、也没有任何项。
+     *
+     * 轮盘中心按形态贴在被触发的那个角上（见 [WheelView.centerX]/[centerY]），
+     * 而手指是从这个角**向内**开始滑的 —— 于是弹出瞬间热点精确地落在手指的
+     * 出发点背后，手指前方什么都没有。用户只能瞎拖，多半停在任何项之外，
+     * 抬手时命中 -1 → onCancel → 收起来。这就是「轮盘弹了但选不中」的全部原因。
+     *
+     * 修法：不挪轮盘（挪了就不再是「角落唤起」），而是给手指一个**起点项**。
+     * 弹出时按滑动方向预选最靠近来向的第一个项（实际上就是「角上那个」），
+     * 用户直接抬手即可打开它，想换目标再往里拖。这也让浮层自己接管手指：
+     * 无论系统把它重定向到哪个窗口，未选中的抬手都按当前选中的项执行。
+     */
+    private var preSelectedIndex = -1
 
     /** 轮盘当前是否可见。 */
     val isShowing: Boolean
@@ -64,12 +87,30 @@ object WheelController {
      */
     fun show(context: Context, shape: WheelShape) {
         if (isShowing) return
+        lastShape = shape
+
+        val container = ensureOverlay(context) ?: return
+        showWheel(context, container, shape)
+    }
+
+    /**
+     * 取（必要时创建）常驻 overlay 容器。
+     *
+     * 窗口只加一次：TYPE_APPLICATION_OVERLAY 在部分 ROM 上 addView 要几百毫秒，
+     * 而且每次 add/remove 都会让 launcher 的输入分发重新计算一遍窗口，
+     * 连发几次就开始出现「滑动没反应」。常驻后每次弹出只是 addView 一个子 View。
+     */
+    private fun ensureOverlay(context: Context): FrameLayout? {
+        overlay?.let {
+            XLog.ls("diag:wheel reuse overlay", tag = "ZFlowDiag")
+            return it
+        }
 
         val wm = resolveWindowManager(context)
         if (wm == null) {
             XLog.ls("diag:wheel FAILED no usable WindowManager", tag = "ZFlowDiag")
             XLog.w("$TAG: no usable WindowManager, wheel aborted")
-            return
+            return null
         }
 
         val container = FrameLayout(context)
@@ -112,23 +153,31 @@ object WheelController {
             }
         }
 
-        host = container
+        overlay = container
         windowManager = wm
+        return container
+    }
+
+    /** 在常驻容器里挂上轮盘视图；列表已有缓存时同步出图。 */
+    private fun showWheel(context: Context, container: FrameLayout, shape: WheelShape) {
+        host = container
 
         if (cachedEntries.isNotEmpty()) {
             attachWheel(context, container, shape, cachedEntries)
-            return
-        }
-
-        loadingJob?.cancel()
-        loadingJob = scope.launch {
-            val entries = loadEntries(context)
-            cachedEntries = entries
-            val current = host
-            if (current === container) {
-                attachWheel(context, current, shape, entries)
+        } else {
+            loadingJob?.cancel()
+            loadingJob = scope.launch {
+                val entries = loadEntries(context)
+                cachedEntries = entries
+                if (host === container) {
+                    val current = lastShape ?: shape
+                    attachWheel(context, container, current, entries)
+                }
             }
         }
+
+        // 补链放在出图之后：轮盘已经可见，用户不会等待 binder 握手。
+        scope.launch(Dispatchers.IO) { FreeformManagerProxy.requestRelink() }
     }
 
     /**
@@ -188,7 +237,14 @@ object WheelController {
 
         container.post {
             view.layoutWheel(container.width, container.height)
+            preSelectedIndex = view.preselectNearestToHint()
+            view.setSelectedIndex(preSelectedIndex)
             view.invalidate()
+            XLog.ls(
+                "diag:wheel shown entries=${entries.size} pre=$preSelectedIndex " +
+                    "size=${container.width}x${container.height}",
+                tag = "ZFlowDiag"
+            )
         }
     }
 
@@ -259,16 +315,24 @@ object WheelController {
         loadingJob = null
         val container = host ?: return
         host = null
+        preSelectedIndex = -1
         lastContext = container.context
-        runCatching {
-            windowManager?.removeViewImmediate(container)
-        }
+        // 只摘轮盘视图，overlay 窗口留着，下次弹出不用重新 addView。
+        runCatching { container.removeAllViews() }
+    }
+
+    /** 窗口彻底销毁时用；进程活着就不再建窗口，所以只在这里 removeView。 */
+    fun destroyOverlay() {
+        hide()
+        val container = overlay ?: return
+        overlay = null
+        runCatching { windowManager?.removeViewImmediate(container) }
         windowManager = null
     }
 
     /** 宿主销毁时清空缓存。 */
     fun clearCache() {
         cachedEntries = emptyList()
-        hide()
+        destroyOverlay()
     }
 }

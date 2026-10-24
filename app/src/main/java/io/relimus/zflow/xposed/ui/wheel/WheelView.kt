@@ -18,6 +18,7 @@ import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.view.MotionEvent
 import android.view.View
+import io.relimus.zflow.xposed.hook.utils.XLog
 import kotlin.math.hypot
 
 /** 轮盘里的一项：图标 + 名称 + 点击负载。 */
@@ -69,6 +70,17 @@ class WheelView(
     private var slots: List<WheelSlot> = emptyList()
     private var itemSizePx = 0f
     private var selectedIndex = -1
+
+    /** 弹出时的预选项。手指没有划过任何项时沿用这一项。 */
+    private var preselectedIndex = -1
+
+    /** 本次触摸是否发生过明显位移。没有位移的抬手按「点按」处理，不会被 -1 取消掉。 */
+    private var movedBeyondTap = false
+    private val touchSlop by lazy {
+        android.view.ViewConfiguration.get(context).scaledTouchSlop
+    }
+    private var downX = 0f
+    private var downY = 0f
 
     /** 轮盘整体半径，供外部摆放本 View。 */
     var wheelRadius: Float = 0f
@@ -195,6 +207,44 @@ class WheelView(
         }
     }
 
+    /**
+     * 计算「弹出时应该预选哪一项」。
+     *
+     * 手指从角落向内滑，起点在被触发的那一角 = 轮盘中心所在处。所以在环上
+     * 取与「来向」夹角最接近的项：右侧角来向朝左（180°），左侧角朝右（0°）；
+     * 上/下角分别再乘上纵向权重，选真正贴在角上的那一个（通常是内环第一项）。
+     *
+     * @return 选中项下标；没有项时返回 -1
+     */
+    fun preselectNearestToHint(): Int {
+        if (slots.isEmpty()) return -1
+        val cx = centerX()
+        val cy = centerY()
+
+        // 来向单位向量：从角落指向屏幕内部。
+        val dirX = if (isLeftSide()) 1f else -1f
+        val dirY = if (shape.isSemicircle) 0f else if (shape.isUpper) 1f else -1f
+
+        var best = -1
+        var bestScore = -Float.MAX_VALUE
+        for (slot in slots) {
+            // 圆心指向该项的向量，归一化后与来向做点积；越接近 1 越「迎着手指」。
+            val vx = slot.centerX
+            val vy = slot.centerY
+            val len = hypot(vx.toDouble(), vy.toDouble()).toFloat()
+            if (len < 1f) continue
+            val dot = (vx / len) * dirX + (vy / len) * dirY
+            // 同样多的「迎向」时优先内环（离手指更近，抬手即可命中）。
+            val score = dot * 2f - len / (wheelRadius.coerceAtLeast(1f))
+            if (score > bestScore) {
+                bestScore = score
+                best = slot.index
+            }
+        }
+        // 兜底：极端形态下点积全为负，也至少给一个可执行项，别让用户点了白点。
+        return if (best >= 0) best else 0
+    }
+
     /** 命中测试：返回触点所在的项下标，未命中返回 -1。 */
     private fun hitTest(px: Float, py: Float): Int {
         val cx = centerX()
@@ -221,6 +271,14 @@ class WheelView(
         }
     }
 
+    fun setSelectedIndex(index: Int) {
+        preselectedIndex = index
+        if (selectedIndex != index) {
+            selectedIndex = index
+            invalidate()
+        }
+    }
+
     fun commitSelection() {
         val entry = entries.getOrNull(selectedIndex)
         if (entry != null) onPick(entry) else onCancel()
@@ -229,14 +287,60 @@ class WheelView(
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                movedBeyondTap = false
+                return true
+            }
+
             MotionEvent.ACTION_MOVE -> {
+                if (!movedBeyondTap) {
+                    movedBeyondTap = hypot(
+                        (event.x - downX).toDouble(),
+                        (event.y - downY).toDouble()
+                    ) > touchSlop
+                }
                 selectAt(event.x, event.y)
                 return true
             }
 
             MotionEvent.ACTION_UP -> {
-                selectAt(event.x, event.y)
-                commitSelection()
+                if (preselectedIndex >= 0 && !movedBeyondTap) {
+                    /*
+                     * 纯点按：手指还停在触发角落，那里没有项。按预选项执行，
+                     * 而不是按 -1 取消 —— 否则「点一下」会把轮盘直接关掉。
+                     */
+                    XLog.ls(
+                        "diag:wheel tap commit pre=$preselectedIndex",
+                        tag = "ZFlowDiag"
+                    )
+                    commitSelection()
+                    return true
+                }
+
+                val idx = hitTest(event.x, event.y)
+                if (idx >= 0) {
+                    selectedIndex = idx
+                    XLog.ls("diag:wheel pick index=$idx", tag = "ZFlowDiag")
+                    commitSelection()
+                } else {
+                    /*
+                     * 拖到了轮盘之外：保留「预选项」语义会误开应用，所以这里只
+                     * 在手指确实拖离轮盘外圈时取消，落在外圈缓冲带内仍算点按。
+                     */
+                    val dist = hypot(
+                        (event.x - centerX()).toDouble(),
+                        (event.y - centerY()).toDouble()
+                    ).toFloat()
+                    val insideBand = dist <= wheelRadius + itemSizePx
+                    if (!insideBand) {
+                        XLog.ls("diag:wheel dismiss out-of-band dist=$dist", tag = "ZFlowDiag")
+                        onCancel()
+                    } else {
+                        commitSelection()
+                    }
+                }
                 return true
             }
 
