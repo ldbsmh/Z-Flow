@@ -3,12 +3,9 @@ package io.relimus.zflow.app
 import android.app.Application
 import android.content.Context
 import android.os.Handler
-import android.os.UserManager
-import android.util.Log
 import androidx.lifecycle.MutableLiveData
 import com.google.android.material.color.DynamicColors
 import io.relimus.zflow.service.FreeformManagerProxy
-import io.relimus.zflow.xposed.hook.utils.XLog
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 /**
@@ -16,8 +13,6 @@ import org.lsposed.hiddenapibypass.HiddenApiBypass
  * Now uses Xposed-based FreeformManager instead of Shizuku.
  */
 class ZFlow : Application() {
-    private val TAG = "ZFlowApp"
-
     val isRunning = MutableLiveData(false)
 
     /**
@@ -47,27 +42,16 @@ class ZFlow : Application() {
         super.onCreate()
         me = this
 
-        /*
-         * 锁屏 / 开机阶段返回：此时用户存储还没解密，任何 getSharedPreferences 都会抛
-         * IllegalStateException。实机日志里 PrismSpace 在解锁前被拉起就因此 FATAL；
-         * 我们自己的进程同样会被 UID observer / provider 投递拽起来，不能在这个阶段
-         * 碰用户存储。MainActivity 挂在 credential encrypted（默认）storage 上，
-         * 锁屏时系统本来就不会拉起任何界面，所以这里只需要「什么都不做」。
-         */
-        if (!isUserUnlockedNow()) {
-            XLog.d("$TAG: storage locked at onCreate, defer app init")
-            return
-        }
-
         DynamicColors.applyToActivitiesIfAvailable(this)
 
         // Check if FreeformManager is connected
         checkServiceConnection()
     }
 
-    private fun isUserUnlockedNow(): Boolean = runCatching {
-        getSystemService(UserManager::class.java)?.isUserUnlocked == true
-    }.getOrDefault(false)
+    override fun attachBaseContext(base: Context?) {
+        super.attachBaseContext(base)
+        HiddenApiBypass.addHiddenApiExemptions("")
+    }
 
     /**
      * Check if FreeformManager service is connected via Xposed.

@@ -118,20 +118,9 @@
         </service>
 
         <!-- ServiceProvider for receiving binder from system_server via Xposed -->
-        <!--
-            directBootAware + 不要求解锁：
-            UserService 在 system_server 里用 getContentProviderExternal 投递 binder，
-            而 UID observer 每次进程状态变化都会补投一次。如果这个 provider 放在
-            credential encrypted storage（默认），锁屏状态下 system_server 一调用就是
-            `SharedPreferences in credential encrypted storage are not available until
-            after user (id 0) is unlocked` —— 直接砸在 system_server 主线程上，
-            整个系统进程 FATAL。ServiceProvider.onCreate 返回 false、本身不读任何
-            用户数据，放在设备加密存储里没有安全代价。
-        -->
         <provider
             android:name="io.relimus.zflow.providers.ServiceProvider"
             android:authorities="${applicationId}.freeform.provider"
-            android:directBootAware="true"
             android:enabled="true"
             android:exported="true"
             android:multiprocess="false"
