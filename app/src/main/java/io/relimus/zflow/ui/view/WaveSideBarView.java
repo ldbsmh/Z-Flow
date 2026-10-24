@@ -313,6 +313,8 @@ public class WaveSideBarView extends View {
         }
         mRatioAnimator.cancel();
         mRatioAnimator.setFloatValues(value);
+        // startAnimator 每次触摸都会进来；不先清掉旧监听，动画每帧要跑 N 个监听器
+        mRatioAnimator.removeAllUpdateListeners();
         mRatioAnimator.addUpdateListener(value1 -> {
 
             mRatio = (float) value1.getAnimatedValue();

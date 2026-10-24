@@ -31,7 +31,6 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
     Preference.OnPreferenceChangeListener {
 
     private lateinit var sp: SharedPreferences
-    private lateinit var accessibilityRFAR: ActivityResultLauncher<Intent>
 
     companion object {
         private const val KEY_BASE = "pref_base_settings"
@@ -84,10 +83,6 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             }
 
             else -> {
-                accessibilityRFAR = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                    updateAllSummaries()
-                }
-
                 updateAllSummaries()
 
                 listOf(KEY_BASE, KEY_SIDEBAR, KEY_FREEFORM, KEY_NOTIFICATION, KEY_OTHER).forEach { key ->
@@ -200,12 +195,7 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             setTitle(getString(R.string.freeform_dpi_dialog_title))
             setView(editView)
             setPositiveButton(getString(R.string.done)) { _, _ ->
-                if (!editText.text.isNullOrBlank()) {
-                    val newValue = editText.text!!.toString().toInt()
-                    if (newValue in 50..500) {
-                        pref.value = newValue
-                    }
-                }
+                editText.text?.toString()?.toIntOrNull()?.takeIf { it in 50..500 }?.let { pref.value = it }
             }
             setNegativeButton(getString(R.string.cancel)) { _, _ -> }
             setNeutralButton(getString(R.string.to_default)) { _, _ ->

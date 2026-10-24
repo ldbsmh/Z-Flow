@@ -91,6 +91,7 @@ object UserService {
 
     fun register(pms: IPackageManager) {
         XLog.d("$TAG: Initializing UserService")
+        // shortcut: 仅支持主用户(user 0)，工作资料内安装时无法投递；跨用户方案待实际需求再加
         appUid = pms.getPackageUid(BuildConfig.APPLICATION_ID, 0L, 0)
         XLog.d("$TAG: App UID = $appUid")
 
@@ -108,7 +109,13 @@ object UserService {
     }
 
     private fun waitActivityService() {
+        // 异常 ROM 上无限等待会卡死投递线程；等不到就放弃，后续 UID 观察不会注册
+        val deadline = android.os.SystemClock.elapsedRealtime() + 120_000L
         while (ServiceManager.getService("activity") == null) {
+            if (android.os.SystemClock.elapsedRealtime() > deadline) {
+                XLog.e("$TAG: activity service not published after 120s, give up waiting")
+                return
+            }
             Thread.sleep(1000)
         }
     }

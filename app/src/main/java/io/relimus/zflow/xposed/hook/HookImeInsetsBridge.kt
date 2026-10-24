@@ -76,8 +76,9 @@ object HookImeInsetsBridge {
     private data class ImeSourceState(val visible: Boolean, val frame: Rect)
     private data class AppliedImeState(val visible: Boolean, val height: Int)
 
-    private val lastAppliedStateByDisplay = mutableMapOf<Int, AppliedImeState>()
-    private val lastObservedSourceStateByDisplay = mutableMapOf<Int, AppliedImeState>()
+    // 多个 WM 线程并发读写；普通 HashMap 丢 entry 会漏打 IME 补丁，出现键盘高度闪跳
+    private val lastAppliedStateByDisplay = java.util.concurrent.ConcurrentHashMap<Int, AppliedImeState>()
+    private val lastObservedSourceStateByDisplay = java.util.concurrent.ConcurrentHashMap<Int, AppliedImeState>()
 
     fun init() {
         if (inited && hookGeneration == HookRegistry.generation) return

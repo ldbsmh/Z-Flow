@@ -48,10 +48,19 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
     @Volatile
     private var service: IFreeformManager? = null
 
+    // 死亡回调不携带 binder 身份；记录当前链接，重链时对旧 binder 解绑，
+    // 回调里再核对当前链接是否真的已死，避免旧 binder 迟到的通知清掉新链接。
+    @Volatile
+    private var linkedBinder: IBinder? = null
+
     val isConnected: Boolean
         get() = service != null
 
     fun linkService(binder: IBinder) {
+        linkedBinder?.let { old ->
+            if (old !== binder) runCatching { old.unlinkToDeath(this, 0) }
+        }
+        linkedBinder = binder
         service = Proxy.newProxyInstance(
             javaClass.classLoader,
             arrayOf(IFreeformManager::class.java),
@@ -62,8 +71,12 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
     }
 
     override fun binderDied() {
-        service = null
-        Log.e(TAG, "Service binder died")
+        val current = linkedBinder ?: return
+        if (!current.isBinderAlive) {
+            service = null
+            linkedBinder = null
+            Log.e(TAG, "Service binder died")
+        }
     }
 
     // ---- IFreeformManager：全部转发给 service，未连接时返回 AIDL 默认值 ----

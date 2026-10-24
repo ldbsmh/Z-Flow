@@ -64,8 +64,8 @@ class ChooseAppsActivity : AppCompatActivity() {
             }
         }
 
-        // 已有缓存时直接复用，只有首次进入或 forceRefresh 才真正查询
-        viewModel.loadApps(userManager, forceRefresh = false)
+        // 已有缓存时直接复用，只有首次进入才真正查询
+        viewModel.loadApps(userManager)
         observeSelectedList(type)
     }
 
@@ -99,7 +99,7 @@ class ChooseAppsActivity : AppCompatActivity() {
 
         renderedApps = ArrayList(state.allApps)
         binding.recyclerApps.layoutManager = LinearLayoutManager(this)
-        adapter = AppsRecyclerAdapter(renderedApps, viewModel, state.selected, type, this)
+        adapter = AppsRecyclerAdapter(renderedApps, viewModel, state.selected, type)
         binding.recyclerApps.adapter = adapter
     }
 

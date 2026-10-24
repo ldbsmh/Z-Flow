@@ -56,8 +56,12 @@ object HookImeAdjustResize {
         if (windowAttrs.type !in WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW..
             WindowManager.LayoutParams.LAST_APPLICATION_WINDOW) return
 
-        windowAttrs.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+        // 只替换 adjust 位，保留 SOFT_INPUT_STATE_* 等状态位；整值覆盖会在窗口
+        // 回到全屏后留下永久损坏的 softInputMode
+        val panKeepState = (windowAttrs.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST.inv()) or
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+        windowAttrs.softInputMode = panKeepState
         (args.firstOrNull { it is WindowManager.LayoutParams }.cast<WindowManager.LayoutParams?>())
-            ?.let { it.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN }
+            ?.let { it.softInputMode = panKeepState }
     }
 }

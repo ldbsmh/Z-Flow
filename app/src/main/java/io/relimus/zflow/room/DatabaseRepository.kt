@@ -78,7 +78,9 @@ class DatabaseRepository(context: Context) {
         runWrite("replaceFreeFormList") {
             database.withTransaction {
                 freeFormAppsDao.deleteAll()
-                freeFormAppsDao.insertLists(list)
+                // 用 insertEntities 整体落库：insertLists 只写 (packageName, userId)，
+                // 会把 sortNum 重置，全选一次就丢掉用户的拖拽顺序
+                freeFormAppsDao.insertEntities(list)
             }
         }
 
@@ -92,18 +94,10 @@ class DatabaseRepository(context: Context) {
             }
         }
 
-    fun getAllFreeFormName(): LiveData<List<String>?> = freeFormAppsDao.getAllName()
-
     fun getAllFreeForm(): LiveData<List<FreeFormAppsEntity>?> = freeFormAppsDao.getAll()
 
     fun getAllFreeFormAppsByFlow(): Flow<List<FreeFormAppsEntity>?> =
         freeFormAppsDao.getAllByFlow()
-
-    /** 同步查询，必须在后台线程调用。 */
-    fun getCount(): Int = freeFormAppsDao.getCount()
-
-    /** 同步查询，必须在后台线程调用。 */
-    fun getAllFreeFormWithoutLiveData(): List<String>? = freeFormAppsDao.getAllWithoutLiveData()
 
     /** 同步读取已选项（`packageName|userId`），必须在后台线程调用。 */
     fun getAllFreeFormKeys(): List<String> =

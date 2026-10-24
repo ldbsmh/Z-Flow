@@ -34,15 +34,11 @@ class FloatingActivity : AppCompatActivity() {
                 }
             }
             ForegroundService.SERVICE_TYPE -> {
-                if (ForegroundService.isRunning) {
-                    sp.edit {putBoolean("to_show_floating", !sp.getBoolean("to_show_floating", false))}
-                } else {
+                // 先写开关再启动服务：startForegroundService 是异步的，立刻读
+                // isRunning 必为 false；服务起来后按 to_show_floating 自行显示
+                sp.edit {putBoolean("to_show_floating", !sp.getBoolean("to_show_floating", false))}
+                if (!ForegroundService.isRunning) {
                     startForegroundService(Intent(this, ForegroundService::class.java))
-                    if (ForegroundService.isRunning) {
-                        sp.edit { putBoolean("to_show_floating", !sp.getBoolean("to_show_floating", false))}
-                    } else {
-                        Toast.makeText(this, getString(R.string.require_foreground), Toast.LENGTH_SHORT).show()
-                    }
                 }
             }
         }

@@ -34,13 +34,15 @@ import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.ui.window.FreeformWindow
 import io.relimus.zflow.xposed.utils.Instances
+import java.util.concurrent.CopyOnWriteArrayList
 
 @SuppressLint("StaticFieldLeak")
 object FreeformManager : IFreeformManager.Stub() {
     private const val TAG = "FreeformManager"
 
-    private val windowList = mutableListOf<FreeformWindow>()
-    private val displayIdList = mutableListOf<Int>()
+    // 主线程写、WM/binder 线程并发读，必须用 COW 防 ConcurrentModificationException
+    private val windowList = CopyOnWriteArrayList<FreeformWindow>()
+    private val displayIdList = CopyOnWriteArrayList<Int>()
     @Volatile
     private var isReady = false
 
@@ -106,16 +108,6 @@ object FreeformManager : IFreeformManager.Stub() {
 
         override fun onTaskRemovalStarted(taskInfo: ActivityManager.RunningTaskInfo) {
             runOnMainThread {
-                val displayId = try {
-                    XposedHelpers.getIntField(taskInfo, "displayId")
-                } catch (_: Exception) {
-                    try {
-                        XposedHelpers.callMethod(taskInfo, "getDisplayId") as Int
-                    } catch (_: Exception) {
-                        -1
-                    }
-                }
-
                 val removedTaskId = taskInfo.taskId
                 expectedMoveToDefaultAt.remove(removedTaskId)
                 lastBounceDefendAt.remove(removedTaskId)

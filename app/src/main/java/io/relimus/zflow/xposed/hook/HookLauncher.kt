@@ -163,23 +163,16 @@ object HookLauncher {
                     return@newProxyInstance null
                 }
 
-                // 查找合适的构造函数：优先 3 参数（View, ItemInfo, ...），
-                // 其次 2 参数（可能与 BubbleShortcut 的简化构造匹配）。
-                val constructor = shortcutClazz.declaredConstructors
-                    .firstOrNull { it.parameterTypes.size == 3 }
-                    ?: shortcutClazz.declaredConstructors
-                        .firstOrNull { it.parameterTypes.size == 2 }
-                    ?: return@runCatching null
-
-                constructor.isAccessible = true
-
-                // 按构造函数实际参数个数从 args 中取值
-                val ctorArgs = Array(constructor.parameterTypes.size) { i ->
-                    args.getOrNull(i)
+                // 按参数个数升序逐个尝试构造函数：只挑固定个数的构造器在类型
+                // 不符时会失败且不再回退，长按菜单会同时丢掉两个入口
+                var created: Any? = null
+                for (ctor in shortcutClazz.declaredConstructors.sortedBy { it.parameterTypes.size }) {
+                    ctor.isAccessible = true
+                    val ctorArgs = Array(ctor.parameterTypes.size) { i -> args.getOrNull(i) }
+                    created = runCatching { ctor.newInstance(*ctorArgs) }.getOrNull()
+                    if (created != null) break
                 }
-                constructor.newInstance(*ctorArgs).also {
-                    popupProxyInstances.add(it)
-                }
+                created?.also { popupProxyInstances.add(it) }
             }.onFailure {
                 XLog.e("$TAG popup proxy instance create failed", it)
             }.getOrNull()
@@ -356,12 +349,5 @@ object HookLauncher {
         }.onFailure {
             XLog.e("$TAG isBlacklisted provider failed: pkg=$packageName userId=$userId", it)
         }.getOrDefault(false)
-    }
-
-    @Suppress("unused")
-    private fun Context.getActivity(): Activity? {
-        if (this is Activity) return this
-        if (this is ContextWrapper) return this.baseContext.getActivity()
-        return null
     }
 }

@@ -15,6 +15,17 @@ MIGRATIONS = (BASE / 'room/MyDatabase.kt').read_text()
 def query(method):
     return re.search(r'@Query\("([^"\n]+)"\)\s+fun ' + method + r'\(', DAO).group(1)
 
+def migration_blocks():
+    """All MIGRATION_N_M blocks from MyDatabase.kt, name -> concatenated SQL statements."""
+    blocks = {}
+    for chunk in re.split(r'(?=\n\s*private val MIGRATION_)', MIGRATIONS):
+        m = re.search(r'private val (MIGRATION_\d+_\d+)', chunk)
+        if not m:
+            continue
+        pat = re.compile(r'db\.execSQL\((.*?)\)\s*(?=\n\s*db\.execSQL|\n\s*})', re.S)
+        blocks[m.group(1)] = [''.join(re.findall(r'"([^"\n]*)"', s)) for s in pat.findall(chunk)]
+    return blocks
+
 def ddl():
     """Current entity DDL as Room would generate it (migration 7->8 target)."""
     return ('CREATE TABLE FreeFormAppsEntity('
@@ -35,7 +46,7 @@ class StorageAuditRegressionTest(unittest.TestCase):
         self.insert('com.example.app')
         self.insert('com.example.app')
         self.insert('com.example.app', 10)
-        self.assertEqual(self.db.execute(query('getCount')).fetchone()[0], 2)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM FreeFormAppsEntity').fetchone()[0], 2)
         # 新主键独立于排序：重复插入不会产生重复 id
         ids = self.db.execute('SELECT id FROM FreeFormAppsEntity').fetchall()
         self.assertEqual(len(ids), len(set(ids)))
@@ -50,11 +61,11 @@ class StorageAuditRegressionTest(unittest.TestCase):
                          [(2, 0, 'com.example.b', 0), (1, 1, 'com.example.a', 0)])
 
     def test_list_reads_have_explicit_order(self):
-        for method in ['getAll', 'getAllByFlow', 'getAllWithUser', 'getAllName', 'getAllWithoutLiveData', 'getAllSortNums']:
+        for method in ['getAll', 'getAllByFlow', 'getAllWithUser']:
             self.assertIn('ORDER BY sortNum ASC', query(method))
         self.insert('com.example.a')
         self.db.execute(query('deleteAll'))
-        self.assertEqual(self.db.execute(query('getCount')).fetchone()[0], 0)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM FreeFormAppsEntity').fetchone()[0], 0)
 
     def test_insert_and_replace_both_preserve_columns(self):
         # DAO insert 只写 packageName/userId：id 自增、sortNum 默认 0
@@ -84,6 +95,35 @@ class StorageAuditRegressionTest(unittest.TestCase):
         self.assertEqual(self.db.execute('SELECT id, sortNum, packageName, userId FROM FreeFormAppsEntity ORDER BY id').fetchall(),
                          [(0, 0, 'com.a', 0), (1, 1, 'com.b', 10)])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM FreeFormAppsEntity').fetchone()[0], 2)
+
+    def test_full_chain_1_to_8_preserves_user_data(self):
+        # 从 v1 结构出发，按生产顺序跑完全部 7 个迁移，用户数据必须一行不丢
+        blocks = migration_blocks()
+        chain = ['MIGRATION_%d_%d' % (v, v + 1) for v in range(1, 8)]
+        for name in chain:
+            self.assertIn(name, blocks, '缺少迁移 %s' % name)
+            self.assertTrue(blocks[name], '迁移 %s 没有可执行的 SQL' % name)
+        self.db.execute('DROP TABLE FreeFormAppsEntity')
+        self.db.execute('CREATE TABLE FreeFormAppsEntity(packageName TEXT NOT NULL, PRIMARY KEY(packageName))')
+        self.db.execute('CREATE TABLE NotificationAppsEntity(packageName TEXT NOT NULL, PRIMARY KEY(packageName))')
+        self.db.executemany('INSERT INTO FreeFormAppsEntity(packageName) VALUES(?)',
+                            [('com.a',), ('com.b',)])
+        self.db.execute('INSERT INTO NotificationAppsEntity(packageName) VALUES(?)', ('com.n',))
+        for name in chain:
+            for statement in blocks[name]:
+                self.db.execute(statement)
+        self.assertEqual(
+            self.db.execute('SELECT packageName FROM FreeFormAppsEntity ORDER BY packageName').fetchall(),
+            [('com.a',), ('com.b',)])
+        self.assertEqual(
+            self.db.execute('SELECT packageName FROM NotificationAppsEntity').fetchall(),
+            [('com.n',)])
+        # 终态列集合与实体定义一致（迁移重建表时漏列/错名在这里暴露）
+        for table, cols in [('FreeFormAppsEntity', {'id', 'sortNum', 'packageName', 'userId'}),
+                            ('NotificationAppsEntity', {'packageName', 'userId'}),
+                            ('FreeformBlacklistEntity', {'packageName', 'userId'})]:
+            got = {row[1] for row in self.db.execute('PRAGMA table_info(%s)' % table)}
+            self.assertEqual(got, cols, '%s 迁移后列集合不符' % table)
 
     def test_stale_snapshot_guard_precedes_key_parking(self):
         body = REPO.split('suspend fun updateFreeFormSort', 1)[1].split('/** 整体替换', 1)[0]

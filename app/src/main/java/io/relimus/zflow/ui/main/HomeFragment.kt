@@ -51,6 +51,11 @@ class HomeFragment : Fragment(), View.OnClickListener {
         super.onViewCreated(view, savedInstanceState)
 
         sp = requireContext().getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+        // recheckConnection 的真实结果要 500ms 后才写入 LiveData；持续观察，
+        // 状态卡在连接建立后自动变绿，而不是每次点击都读到旧值
+        ZFlow.me.isRunning.observe(viewLifecycleOwner) {
+            checkFreeformManagerStatus()
+        }
         checkFreeformManagerStatus()
         checkXposedPermission()
         checkAccessibilityPermission()
@@ -157,13 +162,8 @@ class HomeFragment : Fragment(), View.OnClickListener {
                 }
             }
             R.id.materialCardView_shizuku_info -> {
+                // 结果延迟到达，由 onViewCreated 里的 isRunning 观察者刷新状态卡
                 ZFlow.me.recheckConnection()
-                if (checkFreeformManagerStatus()) {
-                    Snackbar.make(binding.root, getString(R.string.xposed_service_connected), Snackbar.LENGTH_SHORT).show()
-                } else {
-                    Snackbar.make(binding.root, getString(R.string.try_to_init_xposed_service), Snackbar.LENGTH_SHORT).show()
-                }
-
             }
 
             R.id.materialCardView_accessibility_info -> {

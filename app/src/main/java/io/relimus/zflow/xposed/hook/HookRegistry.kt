@@ -5,7 +5,6 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import io.relimus.zflow.xposed.hook.utils.XLog
 import java.util.Collections
-import java.util.WeakHashMap
 
 /**
  * 全局 Hook 注册表，支持热重载。
@@ -26,9 +25,9 @@ object HookRegistry {
 
     private const val TAG = "HookRegistry"
 
-    private val allUnhooks = Collections.synchronizedSet(
-        Collections.newSetFromMap(WeakHashMap<XC_MethodHook.Unhook, Boolean>())
-    )
+    // 必须强引用持有：不少调用点丢弃 hook 的返回值，弱引用集合会在 reset 前
+    // 被 GC，被回收的钩子从此摘不掉，热重载后新旧两代回调同时跑
+    private val allUnhooks = Collections.synchronizedSet(HashSet<XC_MethodHook.Unhook>())
 
     /**
      * 当前代数。每次 reset 递增。

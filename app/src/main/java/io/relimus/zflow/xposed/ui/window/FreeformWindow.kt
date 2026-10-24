@@ -10,13 +10,10 @@ import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.ActivityInfo
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Matrix
-import android.graphics.Rect
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
-import android.graphics.drawable.BitmapDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.hardware.display.VirtualDisplayConfig
@@ -43,7 +40,6 @@ import android.widget.ImageView
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
-import android.view.animation.PathInterpolator
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.animation.addListener
 import androidx.core.content.ContextCompat
@@ -65,7 +61,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import androidx.core.graphics.drawable.toDrawable
 
 import android.view.WindowManager.LayoutParams as WMLayoutParams
 
@@ -101,11 +96,6 @@ class FreeformWindow(
         val bottomDecorRaw: Float
     )
 
-    private data class HighRefreshHint(
-        val refreshRate: Float,
-        val modeId: Int
-    )
-
     companion object {
         const val DOCK_STYLE_MIN = 28
         const val DOCK_STYLE_MAX = 100
@@ -117,15 +107,11 @@ class FreeformWindow(
         private const val VIRTUAL_DISPLAY_ROTATION_LANDSCAPE = 0
 
         private const val VELOCITY_THRESHOLD = 3000f
-        private const val SUNOS_EXPAND_DURATION = 320L
-        private const val SUNOS_LEASH_RETRY_MAX = 8
-        private const val SUNOS_LEASH_RETRY_DELAY = 16L
         private const val SUNOS_FINISH_HOLD_DELAY = 64L
         private const val MINI_TASK_MOVE_DELAY_MS = 120L
         private const val TASK_MOVE_DELAY_MS = 300L
         private const val TASK_VERIFY_DELAY_MS = 1200L   // 增加到1.2秒
         private const val TASK_SECOND_VERIFY_DELAY_MS = 2200L  // 二次验证
-        private const val HIGH_REFRESH_THRESHOLD = 60.5f
 
         private const val VIRTUAL_DISPLAY_FLAG_TRUSTED_HIDDEN = 1 shl 10
 
@@ -133,7 +119,6 @@ class FreeformWindow(
             DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION or
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE or
                 VIRTUAL_DISPLAY_FLAG_TRUSTED_HIDDEN
-        private val SUNOS_EXPAND_INTERPOLATOR = PathInterpolator(0.2f, 0f, 0f, 1f)
 
         private const val INIT_FRAME_TIMEOUT_MS = 3000L
         private const val INIT_MIN_FRAME_COUNT = 1
@@ -164,10 +149,6 @@ class FreeformWindow(
             activeWindows.removeWindowIdentity(window)
         }
 
-        fun getNormalWindows(): List<FreeformWindow> {
-            return activeWindows.filter { !it.isFloating && !it.isHidden && !it.isDestroyed }
-        }
-
         /**
          * 按包名查找“存活”窗口。activeWindows 在构造时同步登记，
          * 因此能覆盖 VirtualDisplay 尚未就绪、还没加入 FreeformManager.windowList
@@ -179,41 +160,6 @@ class FreeformWindow(
             return activeWindows.find {
                 !it.isDestroyed && it.componentName?.packageName == packageName
             }
-        }
-
-        /**
-         * 返回同侧所有存活小窗（mini / 贴边）的占用 Y 与高度。
-         * 用于统一避让：无论被调用方是什么状态，都考虑其他所有状态。
-         * Y 坐标与窗口高度在所有状态间可比（均为屏幕坐标）。
-         */
-        @Synchronized
-        fun getOccupiedSlotsOnSameSide(self: FreeformWindow, desiredX: Int): List<Pair<Int, Int>> {
-            // desiredX > 0 表示贴右，≤ 0 表示贴左
-            val desiredRight = desiredX > 0
-            val result = mutableListOf<Pair<Int, Int>>()
-            for (w in activeWindows) {
-                if (w === self || w.isDestroyed || w.isClosedToBack) continue
-                // 判断是否同侧
-                val sameSide = if (w.isHidden) {
-                    // 贴边窗口：用 dock 侧边判断
-                    val dockRight = w.isHiddenDockOnRight()
-                    dockRight == desiredRight
-                } else {
-                    // mini 窗口：用 x 坐标判断
-                    val x = w.windowLayoutParams.x
-                    (x <= 0 && !desiredRight) || (x > 0 && desiredRight)
-                }
-                if (!sameSide) continue
-                // 取 Y 和高度
-                val y = if (w.isHidden) {
-                    w.getHiddenDockScreenY() ?: w.windowLayoutParams.y
-                } else {
-                    w.windowLayoutParams.y
-                }
-                val h = if (w.isHidden) w.floatingButtonHeight else w.hangUpViewHeight
-                result.add(y to h)
-            }
-            return result
         }
     }
 
@@ -391,8 +337,6 @@ class FreeformWindow(
     }
     private var isAnimating = false
     private var isSurfaceExpandFinishing = false
-    private var expandFreezeBitmap: Bitmap? = null
-    private var expandFreezeDrawable: BitmapDrawable? = null
 
     private var springAnim: SpringAnimator? = null
     private var dragCloseHandler: HiddenViewDragCloseHandler? = null
@@ -716,14 +660,7 @@ class FreeformWindow(
     // 不再使用用户自定义 DPI，使用物理屏幕 DPI
     private fun getScreenDpi(): Int = FreeformManager.getDefaultDisplayDpi()
 
-    // 高刷新率暂时禁用，避免视频场景稳定性问题
-    private fun resolveHighRefreshHint(): HighRefreshHint? = null
-
     private fun applyWindowRefreshHint(layoutParams: WindowManager.LayoutParams) {
-        // 高刷新率提示暂时禁用
-    }
-
-    private fun applySurfaceRefreshHint(surface: Surface, refreshRate: Float) {
         // 高刷新率提示暂时禁用
     }
 
@@ -1616,20 +1553,16 @@ class FreeformWindow(
         finishAfterSurfaceExpand()
     }
 
-    private fun resolveExpandStartRect(): Rect = Rect(0, 0, realScreenWidth, realScreenHeight)
-
     private fun finishAfterSurfaceExpand() {
         if (isSurfaceExpandFinishing) return
         isSurfaceExpandFinishing = true
 
         mainHandler.postDelayed({
             if (isDestroyed || isClosedToBack) {
-                clearExpandFreezeLayer()
                 isAnimating = false
                 return@postDelayed
             }
 
-            clearExpandFreezeLayer()
             binding.freeformRoot.setLayerType(View.LAYER_TYPE_NONE, null)
             isAnimating = false
 
@@ -1649,59 +1582,27 @@ class FreeformWindow(
         }, SUNOS_FINISH_HOLD_DELAY)
     }
 
-    private fun prepareExpandFreezeLayer() {
-        clearExpandFreezeLayer()
-        if (!binding.textureView.isAvailable) return
-        val bitmap = try { binding.textureView.bitmap } catch (e: Throwable) { null } ?: return
-        if (bitmap.width <= 0 || bitmap.height <= 0 || binding.cardRoot.width <= 0 || binding.cardRoot.height <= 0) {
-            if (!bitmap.isRecycled) bitmap.recycle()
-            return
-        }
-        val drawable = bitmap.toDrawable(context.resources).apply { setBounds(0, 0, binding.cardRoot.width, binding.cardRoot.height) }
-        binding.cardRoot.overlay.add(drawable)
-        binding.textureView.alpha = 0f
-        expandFreezeBitmap = bitmap
-        expandFreezeDrawable = drawable
-    }
-
-    private fun clearExpandFreezeLayer() {
-        expandFreezeDrawable?.let { runCatching { binding.cardRoot.overlay.remove(it) } }
-        expandFreezeDrawable = null
-        expandFreezeBitmap?.let { if (!it.isRecycled) it.recycle() }
-        expandFreezeBitmap = null
-        if (::binding.isInitialized && binding.textureView.isAttachedToWindow) binding.textureView.alpha = 1f
-    }
-
     private fun centerToScreenTopLeftX(centerX: Int, viewWidth: Int): Int = realScreenWidth / 2 + centerX - viewWidth / 2
     private fun centerToScreenTopLeftY(centerY: Int, viewHeight: Int): Int = realScreenHeight / 2 + centerY - viewHeight / 2
     private fun screenTopLeftToCenterX(screenX: Int, viewWidth: Int): Int = screenX + viewWidth / 2 - realScreenWidth / 2
     private fun screenTopLeftToCenterY(screenY: Int, viewHeight: Int): Int = screenY + viewHeight / 2 - realScreenHeight / 2
 
-    private fun getHiddenDockScreenY(): Int? {
-        if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) return null
-        return (hiddenView.layoutParams.cast<WindowManager.LayoutParams?>())?.y
-    }
     private fun getHiddenDockScreenX(): Int? {
         if (!::hiddenView.isInitialized || !hiddenView.isAttachedToWindow) return null
         return (hiddenView.layoutParams.cast<WindowManager.LayoutParams?>())?.x
     }
-    private fun isHiddenDockOnRight(): Boolean {
-        val x = getHiddenDockScreenX() ?: return false
-        return x >= realScreenWidth / 2
-    }
     private fun clampHiddenDockY(screenY: Int): Int = screenY.coerceIn(0, realScreenHeight - floatingButtonHeight)
 
-    private fun resolveNonOverlappingHiddenDockY(hiddenOnRight: Boolean, desiredScreenY: Int): Int {
-        // 不重叠即可：紧贴占用区域的上下边界找位置，避免大步长导致的间隔过大
-        val gap = (floatingButtonHeight * 0.26f).toInt().coerceAtLeast(16)
-        // 同侧所有小窗（含 mini 与贴边 dock）的占用区域
-        val occupied = synchronized(activeWindows) {
+    /**
+     * 同侧所有存活小窗（mini / 贴边 dock）的占用 (Y, 高度)。
+     * 贴边窗口用 dock 侧边判断同侧，mini 窗口用 x 坐标判断。
+     */
+    private fun occupiedSlotsOnSide(desiredRight: Boolean): List<Pair<Int, Int>> {
+        return synchronized(activeWindows) {
             activeWindows.filter { it !== this && !it.isDestroyed && !it.isClosedToBack &&
                 ((it.isFloating && !it.isHidden) || it.isHidden) }
                 .mapNotNull { window ->
                     val slot = window.occupiedSlot()
-                    val y = slot.first
-                    val h = slot.second
                     val windowRight = if (window.isHidden) {
                         val dockX = runCatching {
                             window.hiddenView.layoutParams.cast<WindowManager.LayoutParams?>()?.x
@@ -1710,9 +1611,15 @@ class FreeformWindow(
                     } else {
                         window.windowLayoutParams.x > 0
                     }
-                    if (windowRight == hiddenOnRight) (y to h) else null
+                    if (windowRight == desiredRight) slot.first to slot.second else null
                 }
         }
+    }
+
+    private fun resolveNonOverlappingHiddenDockY(hiddenOnRight: Boolean, desiredScreenY: Int): Int {
+        // 不重叠即可：紧贴占用区域的上下边界找位置，避免大步长导致的间隔过大
+        val gap = (floatingButtonHeight * 0.26f).toInt().coerceAtLeast(16)
+        val occupied = occupiedSlotsOnSide(hiddenOnRight)
         if (occupied.isEmpty()) return clampHiddenDockY(desiredScreenY)
         fun overlaps(candidateY: Int) = occupied.any { (oy, oh) ->
             candidateY < oy + oh && oy < candidateY + floatingButtonHeight
@@ -1779,27 +1686,7 @@ class FreeformWindow(
         val desiredY = normalizedDesired[1]
         // desiredX > 0 表示贴右，≤ 0 表示贴左
         val desiredRight = desiredX > 0
-        // 同侧所有小窗（含贴边 dock 与 mini）的占用区域
-        val occupied = synchronized(activeWindows) {
-            activeWindows.filter { window ->
-                window !== this && !window.isDestroyed && !window.isClosedToBack &&
-                    ((window.isFloating && !window.isHidden) || window.isHidden)
-            }.mapNotNull { window ->
-                val slot = window.occupiedSlot()
-                val y = slot.first
-                val h = slot.second
-                // 判断同侧：贴边用 dock 侧边，mini 用 x>0
-                val windowRight = if (window.isHidden) {
-                    val dockX = runCatching {
-                        window.hiddenView.layoutParams.cast<WindowManager.LayoutParams?>()?.x
-                    }.getOrNull() ?: window.windowLayoutParams.x
-                    dockX > 0
-                } else {
-                    window.windowLayoutParams.x > 0
-                }
-                if (windowRight == desiredRight) (y to h) else null
-            }
-        }
+        val occupied = occupiedSlotsOnSide(desiredRight)
         if (occupied.isEmpty()) return normalizedDesired
         fun overlaps(candidateY: Int) = occupied.any { (oy, oh) ->
             candidateY < oy + oh && oy < candidateY + hangUpViewHeight

@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
 import android.os.UserHandle
 import android.os.UserManager
 import android.view.LayoutInflater
@@ -37,7 +36,6 @@ class ChooseAppFloatingAdapter(
     private val allAppsCallback: ChooseAppFloatingView.ClickListener
 ) : RecyclerView.Adapter<ChooseAppFloatingAdapter.ViewHolder>() {
 
-    private var resolveInfoList: MutableList<ResolveInfo>
     private lateinit var launcherApps: LauncherApps
     private val userHandleMap = HashMap<Int, UserHandle>()
 
@@ -95,13 +93,9 @@ class ChooseAppFloatingAdapter(
                     //val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
                     val userHandle = if (userHandleMap.containsKey(apps[position - 1].userId)) userHandleMap[apps[position - 1].userId]!! else userHandleMap[0]!!
                     val appInfo = launcherApps.getApplicationInfo(apps[position - 1].packageName, 0, userHandle)
-                    var activityName = ""
-                    resolveInfoList.forEach {
-                        it.activityInfo
-                        if (it.activityInfo.applicationInfo.packageName == packageName) {
-                            activityName = it.activityInfo.name
-                        }
-                    }
+                    // queryIntentActivities 只能解析主用户，工作资料应用必须按用户走 LauncherApps
+                    val activityName = launcherApps.getActivityList(packageName, userHandle)
+                        .firstOrNull()?.componentName?.className ?: ""
                     Glide.with(context)
                         .load(appInfo.loadIcon(context.packageManager))
                         .transition(DrawableTransitionOptions.withCrossFade())
@@ -135,7 +129,13 @@ class ChooseAppFloatingAdapter(
                         callback.onClick()
                         true
                     }
-                } catch (_: PackageManager.NameNotFoundException) {}
+                } catch (_: PackageManager.NameNotFoundException) {
+                    // 复用的 holder 还带着上一个应用的绑定，必须清掉，避免点击误启动旧应用
+                    holder.icon.setImageDrawable(null)
+                    holder.appName.text = packageName
+                    holder.click.setOnClickListener(null)
+                    holder.click.isClickable = false
+                }
             }
         }
 
@@ -147,11 +147,5 @@ class ChooseAppFloatingAdapter(
         } else {
             "${context.packageManager.getApplicationLabel(applicationInfo)}-${context.getString(R.string.fenshen)}${userId}"
         }
-    }
-
-    init {
-        val intent = Intent(Intent.ACTION_MAIN, null)
-        intent.addCategory(Intent.CATEGORY_LAUNCHER)
-        resolveInfoList = context.packageManager.queryIntentActivities(intent, 0)
     }
 }

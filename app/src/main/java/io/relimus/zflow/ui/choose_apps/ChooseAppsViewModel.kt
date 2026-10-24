@@ -73,11 +73,11 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
 
     // ========== 应用列表加载 ==========
 
-    fun loadApps(userManager: UserManager, forceRefresh: Boolean) {
+    fun loadApps(userManager: UserManager) {
         if (loadJob?.isActive == true) return      // 去重：同一时刻只跑一个加载任务
 
         val cached = allAppsCache
-        if (!forceRefresh && cached != null && _state.value is LoadState.Success) return
+        if (cached != null && _state.value is LoadState.Success) return
 
         _state.value = LoadState.Loading
         loadJob = viewModelScope.launch {

@@ -1,7 +1,6 @@
 package io.relimus.zflow.ui.choose_apps
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.pm.LauncherActivityInfo
 import android.view.LayoutInflater
 import android.view.View
@@ -25,8 +24,7 @@ class AppsRecyclerAdapter(
     private var allAppsList: ArrayList<LauncherActivityInfo>,
     private val viewModel: ChooseAppsViewModel,
     selectedKeys: List<String>,
-    private val type: Int,
-    private val context: Context
+    private val type: Int
 ) : RecyclerView.Adapter<AppsRecyclerAdapter.ViewHolder>() {
 
     /** 已选置顶 + 过滤后的展示列表。 */

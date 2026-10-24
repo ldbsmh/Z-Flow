@@ -5,7 +5,6 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Display
 import de.robv.android.xposed.XposedHelpers
-import io.github.kyuubiran.ezxhelper.core.finder.ConstructorFinder
 import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.xposed.dsl.HookFactory.`-Static`.createHook
@@ -44,7 +43,6 @@ object HookReload {
         trackedTaskIds.clear()
 
         hookRelaunchMethod()
-        hookResizable()
 
         inited = true
     }
@@ -76,6 +74,9 @@ object HookReload {
                     //
                     // 抑制后 Activity 走 onConfigurationChanged 承接变化，不再重建。
                     if (isOnManagedDisplay(activityRecord)) {
+                        // 仅受管小窗上的 Activity 才放开 resize，默认屏 Activity 共享的 ActivityInfo 不能被改写
+                        val info = XposedHelpers.getObjectField(activityRecord, "info").cast<ActivityInfo>()
+                        XposedHelpers.setIntField(info, "resizeMode", 2)
                         it.result = false
                         return@after
                     }
@@ -105,18 +106,5 @@ object HookReload {
         }
         return displayId > Display.DEFAULT_DISPLAY &&
             FreeformManager.isManagedDisplay(displayId)
-    }
-
-    private fun hookResizable() {
-        ConstructorFinder.fromClass(activityRecordClass)
-            .first()
-            .createHook {
-                after {
-                    val activityRecord = it.thisObject
-                    val info = XposedHelpers.getObjectField(activityRecord, "info").cast<ActivityInfo>()
-
-                    XposedHelpers.setIntField(info, "resizeMode", 2)
-                }
-            }
     }
 }

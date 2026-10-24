@@ -211,10 +211,11 @@ object HookSwipeGesture {
 
     /**
      * resolveContext 解析出的可用 Context 缓存，避免每次手势结束后
-     * 还要再反射一遍。
+     * 还要再反射一遍。用弱引用持有：解析兜底可能拿到 Activity，
+     * 强引用会把 Launcher 的旧 Activity 连同视图树钉到进程生命周期。
      */
     @Volatile
-    private var cachedSwipeContext: Context? = null
+    private var cachedSwipeContext: java.lang.ref.WeakReference<Context>? = null
 
     private fun debugLog(message: String) {
         if (!ENABLE_DIAGNOSTIC_LOGS) {
@@ -706,9 +707,10 @@ object HookSwipeGesture {
         val homeTarget =
             gestureEndTargetClass
                 .enumConstants
-                ?.firstOrNull()
+                // 按名字取 HOME：AOSP 恰好把它声明在第一位，OEM 分支不保证
+                ?.firstOrNull { it.toString() == "HOME" }
                 ?: throw IllegalStateException(
-                    "GestureEndTarget has no constants"
+                    "GestureEndTarget has no HOME constant"
                 )
 
         val gestureState =
@@ -1791,11 +1793,11 @@ object HookSwipeGesture {
         // thisObject 不再保证是 TouchInteractionService 本身
         // （可能是 TISBinder / InputConsumer 等内部对象），
         // 因此从多个来源解析可用的 Context。
-        val ctx = cachedSwipeContext
+        val ctx = cachedSwipeContext?.get()
             ?: resolveContext(param.thisObject)
 
         if (ctx != null) {
-            cachedSwipeContext = ctx
+            cachedSwipeContext = java.lang.ref.WeakReference(ctx)
             updateSourceDisplayState(ctx)
         }
 

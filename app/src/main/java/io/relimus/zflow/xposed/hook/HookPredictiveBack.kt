@@ -35,7 +35,8 @@ object HookPredictiveBack {
             .createHook {
                 after {
                     val focusedDisplayId = resolveTopFocusedDisplayId(it.thisObject)
-                    if (!isVirtualDisplay(focusedDisplayId)) return@after
+                    // 只在 Z-Flow 受管小窗上禁用；否则折叠屏副屏/HDMI 屏的返回动画也会被杀
+                    if (!isManagedFreeformDisplay(focusedDisplayId)) return@after
 
                     disablePredictiveBackAnimation(it.result)
                 }
@@ -51,8 +52,8 @@ object HookPredictiveBack {
         }
     }
 
-    private fun isVirtualDisplay(displayId: Int): Boolean {
-        return displayId >= 0 && displayId != Display.DEFAULT_DISPLAY
+    private fun isManagedFreeformDisplay(displayId: Int): Boolean {
+        return io.relimus.zflow.xposed.services.FreeformManager.isManagedDisplay(displayId)
     }
 
     private fun resolveTopFocusedDisplayId(controller: Any): Int {

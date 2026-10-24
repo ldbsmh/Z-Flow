@@ -6,7 +6,6 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -32,26 +31,11 @@ interface FreeFormAppsDao {
     @Query("SELECT id, sortNum, packageName, userId FROM FreeFormAppsEntity ORDER BY sortNum ASC")
     fun getAllWithUser(): List<FreeFormAppsEntity>
 
-    @Query("SELECT packageName FROM FreeFormAppsEntity ORDER BY sortNum ASC")
-    fun getAllName() : LiveData<List<String>?>
-
-    @Query("SELECT packageName FROM FreeFormAppsEntity ORDER BY sortNum ASC")
-    fun getAllWithoutLiveData() : List<String>?
-
-    @Query("SELECT COUNT(*) FROM FreeFormAppsEntity")
-    fun getCount(): Int
-
     @Query("DELETE FROM FreeFormAppsEntity")
     fun deleteAll()
 
     @Delete
     fun deleteList(freeFormAppsEntityList: List<FreeFormAppsEntity>)
-
-    @Update
-    fun update(entity: FreeFormAppsEntity)
-
-    @Update
-    fun updateList(list: List<FreeFormAppsEntity>)
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     fun insertEntities(list: List<FreeFormAppsEntity>)
@@ -63,12 +47,4 @@ interface FreeFormAppsDao {
     /** 排序第二阶段：把某一行的主键写成目标序号。 */
     @Query("UPDATE FreeFormAppsEntity SET sortNum = :sortNum WHERE packageName = :packageName AND userId = :userId")
     fun assignSortNum(packageName: String, userId: Int, sortNum: Int)
-
-    @Query("SELECT sortNum FROM FreeFormAppsEntity ORDER BY sortNum ASC")
-    fun getAllSortNums(): List<Int>
-
-    /** 批量写入用（需在事务中调用）。 */
-    fun insertLists(list: List<FreeFormAppsEntity>) {
-        list.forEach { insert(it.packageName, it.userId) }
-    }
 }

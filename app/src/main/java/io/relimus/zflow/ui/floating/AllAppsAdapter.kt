@@ -91,7 +91,9 @@ class AllAppsAdapter(
 
     fun getIndex(str: String?): Int {
         allAppsList.forEach {
-            if (Pinyin.toPinyin(it.label[0]).substring(0..0) == str) {
+            // 空标签的坏数据归入"#"桶，与 ChooseAppFloatingView 的拼音映射保持一致
+            val letter = it.label.firstOrNull()?.let { c -> Pinyin.toPinyin(c).substring(0..0) } ?: "#"
+            if (letter == str) {
                 return allAppsList.indexOf(it)
             }
         }

@@ -50,6 +50,9 @@ class LandscapeAppsProvider : ContentProvider() {
         context!!.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    // call 走多个 Binder 线程；版本号读改写必须串行，否则并发写会丢自增
+    private val writeLock = Any()
+
     private fun notifyListChanged() {
         runCatching {
             context?.contentResolver?.notifyChange(Uri.parse("content://$AUTHORITY"), null)
@@ -88,7 +91,9 @@ class LandscapeAppsProvider : ContentProvider() {
                 if (!isValidPackageName(pkg)) {
                     return ProviderAccess.denied("invalid package name")
                 }
-                prefs.edit().putBoolean(pkg, true).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
+                synchronized(writeLock) {
+                    prefs.edit().putBoolean(pkg, true).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
+                }
                 notifyListChanged()
                 Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }
@@ -100,7 +105,9 @@ class LandscapeAppsProvider : ContentProvider() {
                 if (!isValidPackageName(pkg)) {
                     return ProviderAccess.denied("invalid package name")
                 }
-                prefs.edit().remove(pkg).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
+                synchronized(writeLock) {
+                    prefs.edit().remove(pkg).putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1).apply()
+                }
                 notifyListChanged()
                 Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }
@@ -118,10 +125,13 @@ class LandscapeAppsProvider : ContentProvider() {
                     editor.putBoolean(pkg, true)
                     accepted++
                 }
-                editor.putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1)
-                if (!editor.commit()) {
-                    return ProviderAccess.denied("commit failed")
+                synchronized(writeLock) {
+                    editor.putLong(KEY_VERSION, prefs.getLong(KEY_VERSION, 0L) + 1)
+                    if (!editor.commit()) {
+                        return ProviderAccess.denied("commit failed")
+                    }
                 }
+                notifyListChanged()
                 Bundle().apply {
                     putBoolean(EXTRA_RESULT, true)
                     putInt("accepted", accepted)
@@ -131,8 +141,10 @@ class LandscapeAppsProvider : ContentProvider() {
                 if (!ProviderAccess.allowWrite(TAG, method)) {
                     return ProviderAccess.denied("write not allowed")
                 }
-                val version = prefs.getLong(KEY_VERSION, 0L) + 1
-                prefs.edit().clear().putLong(KEY_VERSION, version).apply()
+                synchronized(writeLock) {
+                    val version = prefs.getLong(KEY_VERSION, 0L) + 1
+                    prefs.edit().clear().putLong(KEY_VERSION, version).apply()
+                }
                 notifyListChanged()
                 Bundle().apply { putBoolean(EXTRA_RESULT, true) }
             }

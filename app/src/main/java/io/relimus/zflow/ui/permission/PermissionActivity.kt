@@ -46,6 +46,11 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
             checkNotificationPermission()
         }
 
+        // 只注册一次：放在点击里会随点击次数累加观察者
+        ZFlow.me.isRunning.observe(this) {
+            checkShizukuPermission()
+        }
+
         binding.content.materialCardViewOverlayInfo.setOnClickListener(this)
         binding.content.materialCardViewXposedInfo.setOnClickListener(this)
         binding.content.materialCardViewAccessibilityInfo.setOnClickListener(this)
@@ -179,9 +184,6 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
             }
             R.id.materialCardView_shizuku_info -> {
                 ZFlow.me.recheckConnection()
-                ZFlow.me.isRunning.observe(this) {
-                    checkShizukuPermission()
-                }
             }
             R.id.materialCardView_accessibility_info -> {
                 accessibilityRFAR.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))

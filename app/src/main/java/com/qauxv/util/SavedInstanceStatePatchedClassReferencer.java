@@ -14,12 +14,10 @@ public class SavedInstanceStatePatchedClassReferencer extends ClassLoader {
 
     private static final ClassLoader mBootstrap = Context.class.getClassLoader();
     private final ClassLoader mBaseReferencer;
-    private final ClassLoader mHostReferencer;
 
     public SavedInstanceStatePatchedClassReferencer(ClassLoader referencer) {
         super(mBootstrap);
         mBaseReferencer = Objects.requireNonNull(referencer);
-        mHostReferencer = Initiator.getHostClassLoader();
     }
 
     @Override
@@ -27,13 +25,6 @@ public class SavedInstanceStatePatchedClassReferencer extends ClassLoader {
         try {
             return mBootstrap.loadClass(name);
         } catch (ClassNotFoundException ignored) {}
-        if (mHostReferencer != null) {
-            try {
-                if ("androidx.lifecycle.ReportFragment".equals(name)) {
-                    return mHostReferencer.loadClass(name);
-                }
-            } catch (ClassNotFoundException ignored) {}
-        }
         return mBaseReferencer.loadClass(name);
     }
 }

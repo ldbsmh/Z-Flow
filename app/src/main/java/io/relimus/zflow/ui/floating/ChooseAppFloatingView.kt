@@ -139,7 +139,6 @@ class ChooseAppFloatingView(
                 try {
                     windowManager.addView(floatingView, floatingViewLayoutParams)
                 } catch (_: Exception) {
-                    windowManager.removeViewImmediate(floatingView)
                     if (Settings.canDrawOverlays(context)) {
                         windowManager.addView(
                             floatingView,
@@ -177,10 +176,12 @@ class ChooseAppFloatingView(
         screenRotation = newRotation
         try {
             windowManager.removeViewImmediate(floatingView)
+            floatingView = null
         } catch (_: Exception) {
         }
         try {
             windowManager.removeViewImmediate(allAppsView)
+            allAppsView = null
         } catch (_: Exception) {
         }
         removeCallback.onChooseAppWindowRemove()
@@ -231,6 +232,7 @@ class ChooseAppFloatingView(
                 override fun onClick() {
                     try {
                         windowManager.removeViewImmediate(floatingView)
+                        this@ChooseAppFloatingView.floatingView = null
                     } catch (_: Exception) {
                     }
                     showAllAppsView()
@@ -304,7 +306,9 @@ class ChooseAppFloatingView(
                 }
 
                 allAppsList.forEach {
-                    appsPinyinMap[it.label.toString()] = Pinyin.toPinyin(it.label[0])
+                    // 空标签的坏数据归入"#"桶，避免取首字符越界
+                    appsPinyinMap[it.label.toString()] =
+                        it.label.firstOrNull()?.let { c -> Pinyin.toPinyin(c) } ?: "#"
                 }
                 Collections.sort(allAppsList, PinyinComparable())
 
@@ -319,6 +323,7 @@ class ChooseAppFloatingView(
                             override fun onClick() {
                                 try {
                                     windowManager.removeViewImmediate(allAppsView)
+                                    allAppsView = null
                                 } catch (_: Exception) {
                                 }
 
@@ -344,6 +349,7 @@ class ChooseAppFloatingView(
                     allAppsView!!.setOnClickListener {
                         try {
                             windowManager.removeViewImmediate(allAppsView)
+                            allAppsView = null
                         } catch (_: Exception) {
                         }
                         removeCallback.onChooseAppWindowRemove()

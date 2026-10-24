@@ -33,21 +33,24 @@ object HookSystem {
     private var hookGeneration = -1L
 
     private fun hookServiceManager() {
-        var unhook: XC_MethodHook.Unhook? = null
-        unhook = MethodFinder.fromClass(loadClass("android.os.ServiceManager"))
+        // addService 有多个重载，不同 ROM 可能经任一重载注册 "package"，必须全部 Hook
+        val unhooks = mutableListOf<XC_MethodHook.Unhook>()
+        MethodFinder.fromClass(loadClass("android.os.ServiceManager"))
             .filterByName("addService")
-            .first()
-            .createHook {
-                before { param ->
-                    val serviceName = param.args[0].cast<String?>()
-                    if (serviceName == "package") {
-                        unhook?.unhook()
-                        val pms = param.args[1].cast<IPackageManager>()
-                        thread {
-                            runCatching {
-                                UserService.register(pms)
-                            }.onFailure { e ->
-                                XLog.e("$TAG: Failed to register UserService", e)
+            .toList()
+            .forEach { method ->
+                method.createHook {
+                    before { param ->
+                        val serviceName = param.args[0].cast<String?>()
+                        if (serviceName == "package") {
+                            unhooks.forEach { it.unhook() }
+                            val pms = param.args[1].cast<IPackageManager>()
+                            thread {
+                                runCatching {
+                                    UserService.register(pms)
+                                }.onFailure { e ->
+                                    XLog.e("$TAG: Failed to register UserService", e)
+                                }
                             }
                         }
                     }
