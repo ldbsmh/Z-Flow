@@ -4,7 +4,6 @@
         <item>android</item>
         <item>com.android.systemui</item>
         <!-- 小窗内容应用：需要在 LSPosed 管理器里勾选后重启对应应用 -->
-        <item>fork.risin42.nagramx</item>
         <item>com.motorola.launcher3</item>
         <item>com.android.launcher3</item>
         <item>com.google.android.apps.nexuslauncher</item>
