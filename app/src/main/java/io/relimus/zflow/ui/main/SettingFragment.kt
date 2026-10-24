@@ -24,6 +24,7 @@ import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
 import io.relimus.zflow.ui.choose_apps.ChooseAppsViewModel
 import io.relimus.zflow.ui.permission.PermissionActivity
+import io.relimus.zflow.security.TrustedCallers
 import io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
 import io.relimus.zflow.utils.PermissionUtils
 
@@ -80,6 +81,7 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
 
             KEY_OTHER -> {
                 findPreference<Preference>("reset_overlay_setting")?.onPreferenceClickListener = this
+                findPreference<Preference>("trusted_callers")?.onPreferenceClickListener = this
             }
 
             else -> {
@@ -129,7 +131,9 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
     }
 
     private fun updateOtherSummary() {
-        findPreference<Preference>(KEY_OTHER)?.summary = "重置悬浮窗位置等"
+        val trustedCount = TrustedCallers.read(requireContext()).size
+        findPreference<Preference>(KEY_OTHER)?.summary =
+            "重置悬浮窗位置等 | 外部调用白名单：${trustedCount} 个应用"
     }
 
     override fun onPreferenceClick(preference: Preference): Boolean {
@@ -169,6 +173,13 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                 startActivity(
                     Intent(requireContext(), ChooseAppsActivity::class.java)
                         .putExtra("type", ChooseAppsViewModel.TYPE_LANDSCAPE)
+                )
+            }
+
+            key == "trusted_callers" -> {
+                startActivity(
+                    Intent(requireContext(), ChooseAppsActivity::class.java)
+                        .putExtra("type", ChooseAppsViewModel.TYPE_TRUSTED)
                 )
             }
 

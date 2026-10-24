@@ -77,7 +77,7 @@ object BroadcastAuth {
     }
 
     fun issue(context: Context, callingUid: Int): Bundle {
-        if (!isTrusted(context, callingUid)) throw SecurityException("Caller is not a trusted hook host")
+        if (!isAuthorized(context, callingUid)) throw SecurityException("Caller is not a trusted hook host")
         return Bundle().apply {
             putInt(UID, callingUid)
             putString(TOKEN, CapabilityPolicy.token(secret(context), callingUid))
@@ -86,9 +86,17 @@ object BroadcastAuth {
 
     fun verify(context: Context, intent: Intent): Boolean {
         val uid = intent.getIntExtra(UID, -1)
-        if (!isTrusted(context, uid)) return false
+        if (!isAuthorized(context, uid)) return false
         return CapabilityPolicy.matches(CapabilityPolicy.token(secret(context), uid), intent.getStringExtra(TOKEN))
     }
+
+    /**
+     * 受信任宿主（root / system / 自身 / SystemUI / 默认桌面，见 [isTrusted]），
+     * 或用户在设置页加入白名单的外部应用（见 [TrustedCallers]）。
+     * token 仍然与 Binder UID 绑定，白名单只扩大"谁可以领"，不改变 token 语义。
+     */
+    private fun isAuthorized(context: Context, uid: Int): Boolean =
+        isTrusted(context, uid) || TrustedCallers.isWhitelisted(context, uid)
 
     @Synchronized
     private fun secret(context: Context): ByteArray {

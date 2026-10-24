@@ -193,4 +193,7 @@
     <string name="preference_landscape_apps">横屏小窗应用</string>
     <string name="preference_landscape_apps_summary">勾选的应用默认以横屏小窗方式打开</string>
     <string name="category_landscape">横屏设置</string>
+    <string name="label_trusted_callers">受信任外部调用者</string>
+    <string name="preference_trusted_callers">受信任外部调用者</string>
+    <string name="preference_trusted_callers_summary">勾选的应用可通过 Z-Flow 的能力接口领取小窗启动令牌（如配合 GestureEVO 等手势工具）</string>
 </resources>

@@ -207,6 +207,11 @@
                 android:summary="@string/preference_reset_overlay_setting_summary"
                 app:iconSpaceReserved="false"/>
             <Preference
+                android:key="trusted_callers"
+                app:title="@string/preference_trusted_callers"
+                android:summary="@string/preference_trusted_callers_summary"
+                app:iconSpaceReserved="false"/>
+            <Preference
                 android:title="@string/preference_start_by_recent_view_title"
                 android:summary="@string/preference_start_by_recent_view_summary"
                 app:iconSpaceReserved="false"/>

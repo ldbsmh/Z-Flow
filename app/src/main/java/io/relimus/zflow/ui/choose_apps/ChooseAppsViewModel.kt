@@ -18,6 +18,7 @@ import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.room.FreeFormAppsEntity
 import io.relimus.zflow.room.FreeformBlacklistEntity
 import io.relimus.zflow.room.NotificationAppsEntity
+import io.relimus.zflow.security.TrustedCallers
 import io.relimus.zflow.systemapi.UserHandle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -120,6 +121,7 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         TYPE_LANDSCAPE -> getAllLandscapeApps().map { "$it|$LANDSCAPE_USER" }
         TYPE_NOTIFICATION -> repository.getAllNotificationKeys()
         TYPE_BLACKLIST -> repository.getAllBlacklistKeys().orEmpty()
+        TYPE_TRUSTED -> TrustedCallers.read(getApplication()).map { "$it|$TRUSTED_USER" }
         else -> repository.getAllFreeFormKeys()
     }
 
@@ -146,6 +148,9 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 }
                 TYPE_BLACKLIST -> repository.insertBlacklist(packageName, userId)
                 TYPE_LANDSCAPE -> addLandscapeApp(packageName)
+                TYPE_TRUSTED -> withContext(Dispatchers.IO) {
+                    TrustedCallers.add(getApplication(), packageName)
+                }
                 else -> repository.insertFreeForm(packageName, userId)
             }
         }
@@ -161,6 +166,9 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 }
                 TYPE_BLACKLIST -> repository.deleteBlacklist(packageName, userId)
                 TYPE_LANDSCAPE -> removeLandscapeApp(packageName)
+                TYPE_TRUSTED -> withContext(Dispatchers.IO) {
+                    TrustedCallers.remove(getApplication(), packageName)
+                }
                 else -> repository.deleteFreeForm(packageName, userId)
             }
         }
@@ -176,6 +184,7 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 }
                 TYPE_BLACKLIST -> repository.deleteAllBlacklist()
                 TYPE_LANDSCAPE -> landscapeCall(LandscapeAppsProvider.METHOD_CLEAR_ALL, null)
+                TYPE_TRUSTED -> withContext(Dispatchers.IO) { TrustedCallers.clear(getApplication()) }
                 TYPE_FLOATING -> repository.deleteAllFreeForm()
             }
         }
@@ -212,6 +221,12 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                         }
                     )?.let { !ProviderAccess.isDenied(it) } ?: false
                     if (!ok) Log.w(TAG, "replace landscape list failed")
+                }
+                TYPE_TRUSTED -> withContext(Dispatchers.IO) {
+                    TrustedCallers.replace(
+                        getApplication(),
+                        allApps.map { it.applicationInfo.packageName }
+                    )
                 }
                 else -> {
                     repository.replaceFreeFormList(
@@ -260,9 +275,13 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         /** 横屏名单不分用户，统一用 -1 作为键的一部分。 */
         const val LANDSCAPE_USER = -1
 
+        /** 外部调用者白名单同样不分用户（包名本身就是全局的）。 */
+        const val TRUSTED_USER = -1
+
         const val TYPE_FLOATING = 1
         const val TYPE_NOTIFICATION = 2
         const val TYPE_BLACKLIST = 3
         const val TYPE_LANDSCAPE = 4
+        const val TYPE_TRUSTED = 5
     }
 }

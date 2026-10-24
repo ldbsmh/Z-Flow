@@ -52,6 +52,7 @@ class ChooseAppsActivity : AppCompatActivity() {
                 ChooseAppsViewModel.TYPE_BLACKLIST -> R.string.label_blacklist_apps
                 ChooseAppsViewModel.TYPE_LANDSCAPE -> R.string.label_landscape_apps
                 ChooseAppsViewModel.TYPE_NOTIFICATION -> R.string.label_notification_apps
+                ChooseAppsViewModel.TYPE_TRUSTED -> R.string.label_trusted_callers
                 else -> R.string.label_floating_apps
             }
         )
