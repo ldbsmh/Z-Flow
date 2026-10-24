@@ -28,6 +28,8 @@ import io.relimus.zflow.providers.BlacklistProvider
 import io.relimus.zflow.providers.LandscapeAppsProvider
 import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.hook.utils.XLog
+import io.relimus.zflow.xposed.ui.wheel.CornerTrigger
+import io.relimus.zflow.xposed.ui.wheel.WheelController
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
@@ -97,6 +99,12 @@ object HookSwipeGesture {
 
     @Volatile
     private var gestureArmed = true
+
+    /**
+     * 角落轮盘开关。读取自模块设置（与侧边栏共用一份开关），默认开启。
+     * 轮盘从屏幕四角向内滑动唤起，选中项直接以自由窗口方式启动。
+     */
+    private var wheelEnabled = true
 
     @Volatile
     private var releaseInDropTarget = false
@@ -1765,10 +1773,29 @@ object HookSwipeGesture {
         )
     }
 
+    /**
+     * 角落滑入后弹出轮盘。
+     *
+     * 轮盘本身承载在独立 overlay 窗口里，这里只负责把宿主上下文与形态交过去。
+     * 弹窗期间不清理 hintView：轮盘会接管触摸，避免手势状态机与浮层互相打架。
+     */
+    private fun showCornerWheel(context: Context, hit: CornerTrigger.Hit) {
+        try {
+            val shape = CornerTrigger.shapeFor(hit)
+            XLog.ls(
+                "diag:cornerWheel show quadrant=${shape.quadrant} " +
+                    "semicircle=${shape.isSemicircle} upper=${shape.isUpper}",
+                tag = "ZFlowDiag"
+            )
+            WheelController.show(context, shape)
+        } catch (t: Throwable) {
+            XLog.e("$TAG: showCornerWheel failed", t)
+        }
+    }
+
     private fun handleInputEvent(
         param: XC_MethodHook.MethodHookParam
-    ) {
-        // Android 17 起入口方法参数可能声明为 InputEvent，
+    ) {        // Android 17 起入口方法参数可能声明为 InputEvent，
         // 也可能出现在非首位参数上，这里逐个参数寻找 MotionEvent。
         val event =
             param.args
@@ -1828,9 +1855,32 @@ object HookSwipeGesture {
                     LandscapeSwipeGestureHandler.reset()
                     gestureDisplayMode = GestureDisplayMode.NONE
                 }
-            }
 
+                // 角落滑入唤起轮盘：落点在角落时预置候选，后续 MOVE 判定方向。
+                if (wheelEnabled) {
+                    CornerTrigger.onDown(
+                        event.rawX,
+                        event.rawY,
+                        lastScreenWidth,
+                        lastScreenHeight
+                    )
+                }
+            }
             MotionEvent.ACTION_MOVE -> {
+                // 角落滑入判定：仅在原有手势尚未成型（hintView 未创建）时介入，
+                // 避免和既有的上滑/侧滑触发区互相抢手势。
+                if (wheelEnabled && hintView == null && !WheelController.isShowing) {
+                    val moved = CornerTrigger.onMove(event.rawX, event.rawY)
+                    if (moved != null) {
+                        val ctx = cachedSwipeContext
+                        if (ctx != null) {
+                            showCornerWheel(ctx, moved)
+                        }
+                        CornerTrigger.reset()
+                        return
+                    }
+                }
+
                 val target =
                     hintView ?: return
 
@@ -1903,6 +1953,7 @@ object HookSwipeGesture {
 
             MotionEvent.ACTION_CANCEL -> {
                 releaseInDropTarget = false
+                CornerTrigger.reset()
             }
         }
     }
