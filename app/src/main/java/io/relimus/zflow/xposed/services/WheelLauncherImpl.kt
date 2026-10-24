@@ -19,7 +19,7 @@ class WheelLauncherImpl(
 
     override fun getApiVersion(): Int = 1
 
-    override fun isReady(): Boolean = FreeformManager.isReady
+    override fun isReady(): Boolean = FreeformManager.isServiceReady()
 
     override fun launchFreeform(
         packageName: String?,
@@ -30,7 +30,7 @@ class WheelLauncherImpl(
             XLog.ls("diag:wheelLaunch reject empty package", tag = "ZFlowDiag")
             return false
         }
-        if (!FreeformManager.isReady) {
+        if (!FreeformManager.isServiceReady()) {
             XLog.ls("diag:wheelLaunch reject not-ready", tag = "ZFlowDiag")
             return false
         }
