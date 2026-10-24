@@ -139,7 +139,7 @@ object WheelController {
         } catch (t: Throwable) {
             XLog.ls("diag:wheel addView FAILED ${t.javaClass.name}: ${t.message}", tag = "ZFlowDiag", e = t)
             XLog.e("$TAG: addView failed", t)
-            return
+            return null
         }
 
         // 全屏容器只用来承载轮盘；点在轮盘之外应当收起，而不是把触摸吞掉。
