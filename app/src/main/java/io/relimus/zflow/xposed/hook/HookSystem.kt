@@ -2,8 +2,10 @@ package io.relimus.zflow.xposed.hook
 
 import android.content.pm.IPackageManager
 import io.relimus.zflow.xposed.hook.utils.XLog
+import io.relimus.zflow.xposed.utils.Instances
 import io.relimus.zflow.xposed.services.FreeformManager
 import io.relimus.zflow.xposed.services.UserService
+import io.relimus.zflow.xposed.services.WheelBridge
 import de.robv.android.xposed.XC_MethodHook
 import io.github.kyuubiran.ezxhelper.core.finder.MethodFinder
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
@@ -66,6 +68,8 @@ object HookSystem {
                     runCatching {
                         FreeformManager.activityManagerService = param.thisObject
                         FreeformManager.systemReady()
+                        // 轮盘项目靠系统服务拉取开窗能力，必须在 Instances 就绪之后发布。
+                        WheelBridge.publish { Instances.systemContext }
                         XLog.d("$TAG: FreeformManager initialized")
                     }.onFailure { e ->
                         XLog.e("$TAG: Failed to initialize FreeformManager", e)

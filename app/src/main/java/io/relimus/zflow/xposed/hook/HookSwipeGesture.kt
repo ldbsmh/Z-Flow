@@ -1804,6 +1804,13 @@ object HookSwipeGesture {
                 inputDownCount += 1L
                 releaseInDropTarget = false
 
+                // 角滑 → 轮盘。窗口由轮盘项目的无障碍服务挂，这里只转发。
+                if (ctx != null) {
+                    WheelTrigger.onDown(ctx, event)
+                } else {
+                    XLog.ls("diag:corner down but no ctx", tag = "ZFlowDiag")
+                }
+
                 /*
                  * ACTION_DOWN 表示开始了一条新的输入序列。
                  *
@@ -1831,6 +1838,8 @@ object HookSwipeGesture {
             }
 
             MotionEvent.ACTION_MOVE -> {
+                if (ctx != null && WheelTrigger.onMove(ctx, event)) return
+
                 val target =
                     hintView ?: return
 
@@ -1857,6 +1866,7 @@ object HookSwipeGesture {
             }
 
             MotionEvent.ACTION_UP -> {
+                WheelTrigger.onUp()
                 val target = hintView
 
                 val inside =
