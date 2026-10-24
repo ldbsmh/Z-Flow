@@ -72,9 +72,8 @@ object WheelController {
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
-            // system_server 内无法持有 APPLICATION_OVERLAY 权限；
-            // 用系统级面板类型，与其余注入层保持同一层级。
-            WindowManager.LayoutParams.TYPE_NAVIGATION_BAR_PANEL,
+            // 与 FreeformWindow 等现有浮层保持同一窗口类型。
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // 需要接收触摸（滑动选择），但不抢焦点。
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or

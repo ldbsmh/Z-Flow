@@ -1789,7 +1789,7 @@ object HookSwipeGesture {
             )
             WheelController.show(context, shape)
         } catch (t: Throwable) {
-            XLog.e("$TAG: showCornerWheel failed", t)
+            XLog.e("[$DEBUG_TAG] showCornerWheel failed", t)
         }
     }
 
