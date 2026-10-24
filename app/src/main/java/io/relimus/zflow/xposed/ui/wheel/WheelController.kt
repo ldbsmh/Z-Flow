@@ -16,6 +16,7 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
 import android.os.UserManager
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -64,9 +65,12 @@ object WheelController {
     fun show(context: Context, shape: WheelShape) {
         if (isShowing) return
 
-        // 运行在 system_server 进程内，直接用模块缓存的系统 WindowManager；
-        // 用 context.getSystemService 拿到的可能不是可用的系统实例。
-        val wm = Instances.windowManager
+        val wm = resolveWindowManager(context)
+        if (wm == null) {
+            XLog.ls("diag:wheel FAILED no usable WindowManager", tag = "ZFlowDiag")
+            XLog.w("$TAG: no usable WindowManager, wheel aborted")
+            return
+        }
 
         val container = FrameLayout(context)
         val params = WindowManager.LayoutParams(
@@ -74,8 +78,10 @@ object WheelController {
             WindowManager.LayoutParams.MATCH_PARENT,
             // 与 FreeformWindow 等现有浮层保持同一窗口类型。
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // 需要接收触摸（滑动选择），但不抢焦点。
+            // 需要接收触摸（滑动选择），但不抢焦点；
+            // 必须能接返回键，否则轮盘弹出后除了选一个应用没有别的退出方式。
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
@@ -95,6 +101,17 @@ object WheelController {
             return
         }
 
+        // 全屏容器只用来承载轮盘；点在轮盘之外应当收起，而不是把触摸吞掉。
+        container.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                XLog.ls("diag:wheel dismiss outside", tag = "ZFlowDiag")
+                hide()
+                true
+            } else {
+                false
+            }
+        }
+
         host = container
         windowManager = wm
 
@@ -112,6 +129,27 @@ object WheelController {
                 attachWheel(context, current, shape, entries)
             }
         }
+    }
+
+    /**
+     * 取一个可用的 WindowManager。
+     *
+     * 轮盘是从 launcher 进程里的输入钩子唤起的，**不在 system_server**。
+     * 之前直接读 [Instances.windowManager]，那是 system_server 侧的
+     * lateinit，只在 ActivityManagerService.systemReady 之后才被赋值，
+     * 在 launcher 进程里永远没有被初始化 —— 于是每次弹轮盘都抛
+     * `lateinit property windowManager has not been initialized`。
+     *
+     * 现在先按 context 自己取，取不到再退回模块全局实例。
+     * 窗口类型同样按进程走：非 system_server 进程不能用 SYSTEM_ALERT_WINDOW
+     * 之外的类型，这里统一用 TYPE_APPLICATION_OVERLAY（与 FreeformWindow 一致）。
+     */
+    private fun resolveWindowManager(context: Context): WindowManager? {
+        runCatching {
+            context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        }.getOrNull()?.let { return it }
+
+        return runCatching { Instances.windowManager }.getOrNull()
     }
 
     private fun attachWheel(
