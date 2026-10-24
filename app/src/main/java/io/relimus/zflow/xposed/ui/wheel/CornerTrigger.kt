@@ -35,11 +35,31 @@ object CornerTrigger {
         /** 是否在上方角落 */
         val isUpper: Boolean,
         /** 触发点的垂直百分比（0=顶，100=底），用于决定轮盘形态 */
-        val verticalPercent: Int
+        val verticalPercent: Int,
+        /** 落点与当前点的横向位移（调试用，判定不受影响） */
+        val dx: Float = 0f,
+        /** 落点与当前点的纵向位移（调试用） */
+        val dy: Float = 0f
     )
 
-    const val DEFAULT_EDGE_TOLERANCE_PX = 24f
-    const val DEFAULT_CORNER_TOLERANCE_PX = 160f
+    /**
+     * 距屏幕侧边的容差（px）。
+     *
+     * 负值表示允许落点落在屏幕之外。真机上手指从边缘外按下、系统把坐标钳到
+     * 0 / width 附近很常见，但更常见的是手指压在边距上、x 落在 20~80px；
+     * 原来的 24px 在 2K 屏上只有约 7dp，正常拇指根本压不进去，等于永远不触发。
+     * 取值按「容易命中」优先，命中后再由滑动方向把关。
+     */
+    const val DEFAULT_EDGE_TOLERANCE_PX = 90f
+
+    /**
+     * 距屏幕上下边的角落容差（px）。
+     *
+     * 同样比最初的 160px 放宽：状态栏、刘海和手势条都会吃掉一部分边距，
+     * 160px 在高分屏上落不到真正的拇指位置。
+     */
+    const val DEFAULT_CORNER_TOLERANCE_PX = 260f
+
     const val DEFAULT_MIN_SWIPE_PX = 30f
 
     private const val INWARD_DOMINANCE = 0.6f
@@ -109,7 +129,7 @@ object CornerTrigger {
         // 横向必须占主导，否则是纵向滚动
         if (absDx < absDy * INWARD_DOMINANCE) return null
 
-        return hit
+        return hit.copy(dx = dx, dy = dy)
     }
 
     /** 仅做位置判定，不涉及手势轨迹。 */

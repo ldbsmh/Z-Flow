@@ -85,7 +85,12 @@ object WheelController {
 
         try {
             wm.addView(container, params)
+            XLog.ls(
+                "diag:wheel addView ok type=${params.type} cached=${cachedEntries.size}",
+                tag = "ZFlowDiag"
+            )
         } catch (t: Throwable) {
+            XLog.ls("diag:wheel addView FAILED ${t.javaClass.name}: ${t.message}", tag = "ZFlowDiag", e = t)
             XLog.e("$TAG: addView failed", t)
             return
         }
@@ -116,6 +121,7 @@ object WheelController {
         entries: List<WheelAppEntry>
     ) {
         if (entries.isEmpty()) {
+            XLog.ls("diag:wheel entries empty, aborted", tag = "ZFlowDiag")
             XLog.w("$TAG: no launchable apps, wheel aborted")
             hide()
             return

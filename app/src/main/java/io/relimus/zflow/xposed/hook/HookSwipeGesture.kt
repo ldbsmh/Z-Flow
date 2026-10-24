@@ -398,12 +398,17 @@ object HookSwipeGesture {
             hookSwipeGesture()
             inited = true
             lifecycleLog("init() SUCCESS")
+            XLog.ls("diag:swipe init OK", tag = "ZFlowDiag")
         } catch (throwable: Throwable) {
             inited = false
 
             lifecycleLog(
                 "init() FAILED: ${throwable.javaClass.name}: " +
                     throwable.message.orEmpty()
+            )
+            XLog.ls(
+                "diag:swipe init FAILED ${throwable.javaClass.name}: ${throwable.message}",
+                tag = "ZFlowDiag"
             )
 
             reportUnavailable(
@@ -1653,14 +1658,23 @@ object HookSwipeGesture {
      *   3. 只要有一个安装成功就算成功，彻底失败才抛异常。
      */
     private fun hookTouchInteractionService() {
+        // Android 14+ 起 quickstep 的输入分发不再由 TouchInteractionService 直接实现，
+        // 而是走 InputConsumer；真正的入口是 OtherActivityInputConsumer.initInputChannel 里
+        // 建的 InputChannelCompat.InputEventReceiver 匿名子类（onInputEvent(InputEvent)）。
+        // 只按旧类名探测会全部落空 —— 这正是「角落轮盘一条日志都没有」的表层原因之一。
         val candidateClassNames =
             listOf(
+                // —— 真正的输入入口（匿名内部类，命名随版本变化）——
+                "com.android.quickstep.inputconsumers.OtherActivityInputConsumer\$1",
+                "com.android.quickstep.inputconsumers.OtherActivityInputConsumer\$2",
+                "com.android.quickstep.inputconsumers.OtherActivityInputConsumer",
+                // —— 旧版/部分 ROM 的入口 ——
                 "com.android.quickstep.TouchInteractionService",
                 "com.android.quickstep.TouchInteractionService\$TISBinder",
                 "com.android.quickstep.inputconsumers.TouchInteractionInputConsumer",
-                "com.android.quickstep.TouchInteractionInputConsumer",
                 "com.android.quickstep.InputConsumerController",
-                "com.android.quickstep.util.MotionPauseDetector"
+                // —— Android 17 重构后的候选 ——
+                "com.android.quickstep.TouchInteractionInputConsumer"
             )
 
         val candidateMethodNames =
@@ -1759,6 +1773,7 @@ object HookSwipeGesture {
                 dump.append("[$className => $names] ")
             }
             lifecycleLog("INPUT_HOOK_DUMP $dump")
+            XLog.ls("diag:input hook DUMP $dump", tag = "ZFlowDiag")
 
             throw IllegalStateException(
                 "No touch input entry point was hooked " +
@@ -1770,6 +1785,11 @@ object HookSwipeGesture {
         lifecycleLog(
             "INPUT_HOOKS_INSTALLED count=$installed " +
                 hookedDescriptions.joinToString(",")
+        )
+        XLog.ls(
+            "diag:input hooks installed=$installed " +
+                hookedDescriptions.joinToString(","),
+            tag = "ZFlowDiag"
         )
     }
 
@@ -1789,6 +1809,7 @@ object HookSwipeGesture {
             )
             WheelController.show(context, shape)
         } catch (t: Throwable) {
+            XLog.ls("diag:cornerWheel FAILED ${t.javaClass.name}: ${t.message}", tag = "ZFlowDiag", e = t)
             XLog.e("[$DEBUG_TAG] showCornerWheel failed", t)
         }
     }
@@ -1857,21 +1878,35 @@ object HookSwipeGesture {
                 }
 
                 // 角落滑入唤起轮盘：落点在角落时预置候选，后续 MOVE 判定方向。
-                if (wheelEnabled) {
+                val cornerHit = if (wheelEnabled) {
                     CornerTrigger.onDown(
                         event.rawX,
                         event.rawY,
                         lastScreenWidth,
                         lastScreenHeight
                     )
+                } else {
+                    null
                 }
+                XLog.ls(
+                    "diag:corner down x=${event.rawX} y=${event.rawY} " +
+                        "sw=$lastScreenWidth sh=$lastScreenHeight " +
+                        "enabled=$wheelEnabled armed=${cornerHit != null} " +
+                        "ctx=${cachedSwipeContext != null}",
+                    tag = "ZFlowDiag"
+                )
             }
             MotionEvent.ACTION_MOVE -> {
                 // 角落滑入判定：仅在原有手势尚未成型（hintView 未创建）时介入，
                 // 避免和既有的上滑/侧滑触发区互相抢手势。
                 if (wheelEnabled && hintView == null && !WheelController.isShowing) {
-                    val moved = CornerTrigger.onMove(event.rawX, event.rawY)
-                    if (moved != null) {
+                    CornerTrigger.onMove(event.rawX, event.rawY)?.let { moved ->
+                        XLog.ls(
+                            "diag:corner move hit dx=${event.rawX - CornerTrigger.downX} " +
+                                "dy=${event.rawY - CornerTrigger.downY} " +
+                                "left=${moved.isLeft} pct=${moved.verticalPercent}",
+                            tag = "ZFlowDiag"
+                        )
                         val ctx = cachedSwipeContext
                         if (ctx != null) {
                             showCornerWheel(ctx, moved)
