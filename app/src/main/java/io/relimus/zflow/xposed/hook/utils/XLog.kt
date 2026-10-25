@@ -8,7 +8,9 @@ import de.robv.android.xposed.XposedBridge
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * 增强日志工具，支持进程、线程、traceId，Debug级别不写XposedBridge。
+ * 增强日志工具，支持进程、线程、traceId。
+ * 只有 Error 级别写入 XposedBridge（LSPosed）日志；其余一律只进 logcat，
+ * 保证 LSP 日志里只出现 hook 报错。
  */
 object XLog {
 
@@ -43,12 +45,15 @@ object XLog {
         tag: String = DEFAULT_TAG
     ) = log(Log.ERROR, "E", msg, e, tag)
 
-    /** 强制写入 LSPosed 日志，用于跨进程诊断链路。 */
+    /**
+     * 跨进程诊断链路日志。只写 logcat（`adb logcat -s ZFlowDiag`），
+     * 不再写 XposedBridge——LSPosed 日志只保留 hook 报错。
+     */
     fun ls(msg: Any?, tag: String = "ZFlowDiag", e: Throwable? = null) {
         runCatching {
             val text = msg?.toString().orEmpty()
-            XposedBridge.log("[$tag] $text")
-            e?.let { XposedBridge.log(it) }
+            Log.v(tag, text)
+            e?.let { Log.w(tag, it) }
         }
     }
 
