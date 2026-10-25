@@ -179,7 +179,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="16dp"
                     android:layout_marginTop="16dp"
-                    android:text="@string/guide_help"
+                    android:text="@string/quick_actions"
                     android:textAppearance="@style/TextAppearance.AppCompat.Medium"
                     android:textStyle="bold"
                     app:layout_constraintStart_toStartOf="parent"
@@ -194,34 +194,81 @@
                     app:layout_constraintTop_toBottomOf="@+id/textView_guide">
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_question"
+                        android:id="@+id/button_permission"
                         style="@style/FreeForm.ButtonStyle"
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/button_height"
                         android:padding="@dimen/card_view_child_padding"
-                        android:text="@string/question"
+                        android:text="@string/quick_action_permission"
                         android:textColor="@color/color_text"
                         android:visibility="visible"
-                        app:icon="@drawable/ic_question"
-                        app:iconPadding="@dimen/icon_padding"
-                        app:iconSize="@dimen/icon_size"
-                        app:iconTint="@color/color_text" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/button_open_api"
-                        style="@style/FreeForm.ButtonStyle"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/button_height"
-                        android:padding="@dimen/card_view_child_padding"
-                        android:text="@string/open_api"
-                        android:textColor="@color/color_text"
-                        android:visibility="visible"
-                        app:icon="@drawable/ic_api"
+                        app:icon="@drawable/ic_settings"
                         app:iconPadding="@dimen/icon_padding"
                         app:iconSize="@dimen/icon_size"
                         app:iconTint="@color/color_text" />
                 </LinearLayout>
             </androidx.constraintlayout.widget.ConstraintLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/materialCardView_device_info"
+            style="@style/FreeForm.CardViewStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="8dp"
+            android:layout_marginVertical="@dimen/card_view_margin"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/materialCardView_guide">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/category_device_info"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Medium"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/device_row_manufacturer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Small" />
+
+                <TextView
+                    android:id="@+id/device_row_model"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Small" />
+
+                <TextView
+                    android:id="@+id/device_row_android"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Small" />
+
+                <TextView
+                    android:id="@+id/device_row_codename"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Small" />
+
+                <TextView
+                    android:id="@+id/device_row_api"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textAppearance="@style/TextAppearance.AppCompat.Small" />
+            </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
         <androidx.constraintlayout.widget.Guideline

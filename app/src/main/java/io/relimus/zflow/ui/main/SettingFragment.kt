@@ -6,10 +6,9 @@ import android.content.SharedPreferences
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.core.content.edit
+import androidx.core.net.toUri
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SeekBarPreference
@@ -17,6 +16,7 @@ import androidx.preference.SwitchPreference
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputLayout
+import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.service.ForegroundService
@@ -24,21 +24,30 @@ import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
 import io.relimus.zflow.ui.choose_apps.ChooseAppsViewModel
 import io.relimus.zflow.ui.permission.PermissionActivity
-import io.relimus.zflow.security.TrustedCallers
 import io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
 import io.relimus.zflow.utils.PermissionUtils
 
+/**
+ * 设置页。顶层四分类：打开方式 / 小窗外观与行为 / 运行与高级 / 关于，
+ * 子页由 [FreeformSettingsActivity] 按 root_key 承载。
+ */
 class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClickListener,
     Preference.OnPreferenceChangeListener {
 
     private lateinit var sp: SharedPreferences
 
     companion object {
-        private const val KEY_BASE = "pref_base_settings"
-        private const val KEY_SIDEBAR = "pref_sidebar_settings"
-        private const val KEY_FREEFORM = "pref_freeform_sub"
-        private const val KEY_NOTIFICATION = "pref_notification_settings"
-        private const val KEY_OTHER = "pref_other_settings"
+        private const val KEY_TRIGGER = "pref_trigger_settings"
+        private const val KEY_APPEARANCE = "pref_appearance_settings"
+        private const val KEY_RULES = "pref_rules_settings"
+        private const val KEY_KEEPALIVE = "pref_keepalive_settings"
+        private const val KEY_ADVANCED = "pref_advanced_settings"
+
+        private val TOP_LEVEL_KEYS =
+            listOf(KEY_TRIGGER, KEY_APPEARANCE, KEY_RULES, KEY_KEEPALIVE, KEY_ADVANCED)
+
+        private const val URL_OPEN_API = "https://github.com/ldbsmh/Z-Flow/blob/import/open_api_zh-Hans.md"
+        private const val URL_SOURCE = "https://github.com/ldbsmh/Z-Flow"
 
         fun newInstance(rootKey: String): SettingFragment {
             return SettingFragment().apply {
@@ -57,37 +66,40 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
         sp = requireActivity().getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
 
         when (rootKey) {
-            KEY_BASE -> {
-                findPreference<IntegerSimpleMenuPreference>("service_type")!!.onPreferenceChangeListener = this
-            }
-
-            KEY_SIDEBAR -> {
+            KEY_TRIGGER -> {
                 findPreference<SwitchPreference>("show_floating")!!.onPreferenceChangeListener = this
                 findPreference<Preference>("quick_floating_app")!!.onPreferenceClickListener = this
+                findPreference<Preference>("trusted_callers")?.onPreferenceClickListener = this
             }
 
-            KEY_FREEFORM -> {
+            KEY_APPEARANCE -> {
                 findPreference<SeekBarPreference>("freeform_scale")?.apply {
                     onPreferenceClickListener = this@SettingFragment
                 }
+                findPreference<Preference>("reset_overlay_setting")?.onPreferenceClickListener = this
+            }
+
+            KEY_RULES -> {
                 findPreference<Preference>("freeform_blacklist_apps")?.onPreferenceClickListener = this
                 findPreference<Preference>("landscape_apps")?.onPreferenceClickListener = this
             }
 
-            KEY_NOTIFICATION -> {
+            KEY_KEEPALIVE -> {
+                findPreference<IntegerSimpleMenuPreference>("service_type")!!.onPreferenceChangeListener = this
                 findPreference<SwitchPreference>("notify_freeform")!!.onPreferenceChangeListener = this
                 findPreference<Preference>("notification_freeform_apps")!!.onPreferenceClickListener = this
             }
 
-            KEY_OTHER -> {
-                findPreference<Preference>("reset_overlay_setting")?.onPreferenceClickListener = this
-                findPreference<Preference>("trusted_callers")?.onPreferenceClickListener = this
+            KEY_ADVANCED -> {
+                findPreference<Preference>("about_open_api")?.onPreferenceClickListener = this
+                findPreference<Preference>("about_source")?.onPreferenceClickListener = this
+                findPreference<Preference>("about_version")?.summary =
+                    "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
             }
 
             else -> {
                 updateAllSummaries()
-
-                listOf(KEY_BASE, KEY_SIDEBAR, KEY_FREEFORM, KEY_NOTIFICATION, KEY_OTHER).forEach { key ->
+                TOP_LEVEL_KEYS.forEach { key ->
                     findPreference<Preference>(key)?.onPreferenceClickListener = this
                 }
             }
@@ -95,52 +107,51 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
     }
 
     private fun updateAllSummaries() {
-        updateBaseSummary()
-        updateSidebarSummary()
-        updateFreeformSummary()
-        updateNotificationSummary()
-        updateOtherSummary()
+        updateTriggerSummary()
+        updateAppearanceSummary()
+        updateRulesSummary()
+        updateKeepAliveSummary()
+        updateAdvancedSummary()
     }
 
-    private fun updateBaseSummary() {
-        val hideRecent = sp.getBoolean("hide_from_recent", false)
+    private fun updateTriggerSummary() {
+        val sidebar = sp.getBoolean("show_floating", false)
+        val pos = if (sp.getInt("floating_position_x", 1) == 0) "左" else "右"
+        val desktop = sp.getBoolean("popup_freeform_enable", true)
+        findPreference<Preference>(KEY_TRIGGER)?.summary =
+            "侧边栏：${if (sidebar) "开" else "关"}·$pos | 桌面长按：${if (desktop) "开" else "关"}"
+    }
+
+    private fun updateAppearanceSummary() {
+        val size = sp.getInt("freeform_size", 75)
+        val scale = sp.getInt("freeform_scale", 50)
+        findPreference<Preference>(KEY_APPEARANCE)?.summary =
+            "大小：$size% | 缩放：$scale"
+    }
+
+    private fun updateRulesSummary() {
+        val maxWin = sp.getInt("max_freeform_windows", 2)
+        findPreference<Preference>(KEY_RULES)?.summary =
+            "小窗上限：$maxWin 个 | 黑名单与横屏名单见内页"
+    }
+
+    private fun updateKeepAliveSummary() {
         val serviceType = sp.getInt("service_type", KeepAliveService.SERVICE_TYPE)
         val typeStr = if (serviceType == KeepAliveService.SERVICE_TYPE) "无障碍" else "前台服务"
-        findPreference<Preference>(KEY_BASE)?.summary = "隐藏：${if (hideRecent) "是" else "否"} | 保活：$typeStr"
-    }
-
-    private fun updateSidebarSummary() {
-        val show = sp.getBoolean("show_floating", false)
-        val pos = sp.getInt("floating_position_x", 1)
-        val posStr = if (pos == 0) "左侧" else "右侧"
-        findPreference<Preference>(KEY_SIDEBAR)?.summary = "开关：${if (show) "开启" else "关闭"} | 位置：$posStr"
-    }
-
-    private fun updateFreeformSummary() {
-        val dpi = sp.getInt("freeform_scale", 50)
-        val size = sp.getInt("freeform_size", 75)
-        val maxWin = sp.getInt("max_freeform_windows", 2)
-        findPreference<Preference>(KEY_FREEFORM)?.summary =
-            "长按小窗：${if (sp.getBoolean("popup_freeform_enable", true)) "开" else "关"} | " +
-            "最多 $maxWin 个 | DPI: $dpi | 大小: ${size}%"
-    }
-
-    private fun updateNotificationSummary() {
         val notify = sp.getBoolean("notify_freeform", true)
-        findPreference<Preference>(KEY_NOTIFICATION)?.summary = "接管通知：${if (notify) "开启" else "关闭"}"
+        findPreference<Preference>(KEY_KEEPALIVE)?.summary =
+            "保活：$typeStr | 通知按钮：${if (notify) "开" else "关"}"
     }
 
-    private fun updateOtherSummary() {
-        val trustedCount = TrustedCallers.read(requireContext()).size
-        findPreference<Preference>(KEY_OTHER)?.summary =
-            "重置悬浮窗位置等 | 外部调用白名单：${trustedCount} 个应用"
+    private fun updateAdvancedSummary() {
+        findPreference<Preference>(KEY_ADVANCED)?.summary =
+            "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
     }
 
     override fun onPreferenceClick(preference: Preference): Boolean {
         val key = preference.key
         when {
-            key == KEY_BASE || key == KEY_SIDEBAR || key == KEY_FREEFORM ||
-                key == KEY_NOTIFICATION || key == KEY_OTHER -> {
+            key in TOP_LEVEL_KEYS -> {
                 startActivity(
                     Intent(requireContext(), FreeformSettingsActivity::class.java)
                         .putExtra("root_key", key)
@@ -193,6 +204,14 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
 
             key == "freeform_scale" -> {
                 showDpiDialog(preference as SeekBarPreference)
+            }
+
+            key == "about_open_api" -> {
+                startActivity(Intent(Intent.ACTION_VIEW, URL_OPEN_API.toUri()))
+            }
+
+            key == "about_source" -> {
+                startActivity(Intent(Intent.ACTION_VIEW, URL_SOURCE.toUri()))
             }
         }
         return true
@@ -275,12 +294,8 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             }
 
             "notify_freeform" -> {
+                // 通知接管由 SystemUI 侧 hook 实现，无需通知使用权
                 PermissionUtils.checkPostNotificationPermission(requireActivity())
-                if (newValue as Boolean && !PermissionUtils.checkNotificationListenerPermission(requireContext())) {
-                    Toast.makeText(requireContext(), "需要通知权限", Toast.LENGTH_SHORT).show()
-                    startActivity(Intent(requireContext(), PermissionActivity::class.java))
-                    return false
-                }
             }
         }
         return true

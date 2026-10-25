@@ -17,16 +17,6 @@ import io.relimus.zflow.service.KeepAliveService
  */
 object PermissionUtils {
 
-    fun checkNotificationListenerPermission(context: Context): Boolean {
-        var enable = false
-        val flat =
-            Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
-        if (flat != null) {
-            enable = flat.contains(context.packageName)
-        }
-        return enable
-    }
-
     fun checkOverlayPermission(context: Context): Boolean {
         return Settings.canDrawOverlays(context)
     }

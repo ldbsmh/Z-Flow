@@ -2,37 +2,16 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <!-- 基本设置 -->
-    <PreferenceScreen
-        android:key="pref_base_settings"
-        android:title="@string/category_base"
-        android:summary="@string/summary_base_placeholder"
-        android:icon="@drawable/ic_setting_base"
-        android:layout="@layout/preference_main_entry"
-        app:iconSpaceReserved="false">
-        <PreferenceCategory
-            android:layout="@layout/preference_category_title"
-            android:title="@string/category_base">
-            <SwitchPreference
-                android:key="hide_from_recent"
-                android:title="@string/switch_hide_recent"
-                android:summary="@string/switch_hide_recent_summary"
-                app:iconSpaceReserved="false"/>
-            <io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
-                app:entries="@array/service_type"
-                app:entryValues="@array/service_type_value"
-                android:key="service_type"
-                android:title="@string/service_type_title"
-                android:summary="@string/service_type_summary"
-                app:iconSpaceReserved="false"/>
-        </PreferenceCategory>
-    </PreferenceScreen>
+    <!--
+      五大模块（方案 v2）：
+      启动与触发 / 小窗外观与尺寸 / 运行规则与交互 / 通知与保活 / 高级与开发者。
+      每个顶层条目由 SettingFragment 写入实时状态摘要。
+    -->
 
-    <!-- 侧边栏 -->
+    <!-- 模块一：启动与触发 -->
     <PreferenceScreen
-        android:key="pref_sidebar_settings"
-        android:title="@string/category_sidebar"
-        android:summary="@string/summary_sidebar_placeholder"
+        android:key="pref_trigger_settings"
+        android:title="@string/category_trigger"
         android:icon="@drawable/ic_setting_sidebar"
         android:layout="@layout/preference_main_entry"
         app:iconSpaceReserved="false">
@@ -50,11 +29,6 @@
                 android:key="floating_position_x"
                 android:title="@string/menu_floating_position"
                 app:iconSpaceReserved="false"/>
-            <Preference
-                android:key="quick_floating_app"
-                app:title="@string/preference_quick_floating_app"
-                android:summary="@string/preference_quick_floating_app_summary"
-                app:iconSpaceReserved="false"/>
             <SeekBarPreference
                 android:key="floating_alpha"
                 android:title="@string/floating_alpha_title"
@@ -63,28 +37,39 @@
                 app:min="0"
                 android:max="10"
                 app:showSeekBarValue="true"/>
+            <Preference
+                android:key="quick_floating_app"
+                app:title="@string/quick_action_sidebar_apps"
+                android:summary="@string/preference_quick_floating_app_summary"
+                app:iconSpaceReserved="false"/>
+        </PreferenceCategory>
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            android:title="@string/category_desktop_gesture">
+            <SwitchPreference
+                android:key="popup_freeform_enable"
+                android:title="@string/popup_freeform_enable_title"
+                android:summary="@string/popup_freeform_enable_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
+            <Preference
+                android:key="trusted_callers"
+                app:title="@string/preference_trusted_callers"
+                android:summary="@string/preference_trusted_callers_summary"
+                app:iconSpaceReserved="false"/>
         </PreferenceCategory>
     </PreferenceScreen>
 
-    <!-- 小窗设置 -->
+    <!-- 模块二：小窗外观与尺寸 -->
     <PreferenceScreen
-        android:key="pref_freeform_sub"
-        android:title="@string/freeform_settings_title"
-        android:summary="@string/summary_freeform_placeholder"
+        android:key="pref_appearance_settings"
+        android:title="@string/category_appearance"
         android:icon="@drawable/ic_setting_freeform"
         android:layout="@layout/preference_main_entry"
         app:iconSpaceReserved="false">
         <PreferenceCategory
             android:layout="@layout/preference_category_title"
-            android:title="@string/category_freeform">
-            <SeekBarPreference
-                android:key="freeform_scale"
-                android:title="@string/setting_freeform_dpi_title"
-                app:iconSpaceReserved="false"
-                app:defaultValue="50"
-                app:min="50"
-                android:max="500"
-                app:showSeekBarValue="true"/>
+            android:title="@string/category_basic_size">
             <SeekBarPreference
                 android:key="freeform_size"
                 android:title="@string/freeform_size_title"
@@ -94,12 +79,13 @@
                 android:max="100"
                 app:showSeekBarValue="true"/>
             <SeekBarPreference
-                android:key="freeform_size_land"
-                android:title="@string/freeform_size_land_title"
+                android:key="freeform_scale"
+                android:title="@string/setting_freeform_dpi_title"
+                android:summary="@string/summary_freeform_dpi"
                 app:iconSpaceReserved="false"
-                app:defaultValue="90"
-                app:min="10"
-                android:max="100"
+                app:defaultValue="50"
+                app:min="50"
+                android:max="500"
                 app:showSeekBarValue="true"/>
             <SeekBarPreference
                 android:key="freeform_float_view_size"
@@ -110,14 +96,17 @@
                 android:max="50"
                 app:showSeekBarValue="true"/>
             <SeekBarPreference
-                android:key="freeform_dock_style"
-                android:title="@string/freeform_dock_style_title"
-                android:summary="@string/freeform_dock_style_summary"
+                android:key="freeform_size_land"
+                android:title="@string/freeform_size_land_title"
                 app:iconSpaceReserved="false"
-                app:defaultValue="100"
-                app:min="28"
+                app:defaultValue="90"
+                app:min="10"
                 android:max="100"
                 app:showSeekBarValue="true"/>
+        </PreferenceCategory>
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            android:title="@string/category_visual_edge">
             <SeekBarPreference
                 android:key="freeform_dimming_amount"
                 android:title="@string/freeform_dimming_amount_title"
@@ -126,6 +115,33 @@
                 app:min="0"
                 android:max="100"
                 app:showSeekBarValue="true"/>
+            <SeekBarPreference
+                android:key="freeform_dock_style"
+                android:title="@string/freeform_dock_style_title"
+                android:summary="@string/freeform_dock_style_summary"
+                app:iconSpaceReserved="false"
+                app:defaultValue="100"
+                app:min="28"
+                android:max="100"
+                app:showSeekBarValue="true"/>
+            <Preference
+                android:key="reset_overlay_setting"
+                app:title="@string/preference_reset_overlay_setting"
+                android:summary="@string/preference_reset_overlay_setting_summary"
+                app:iconSpaceReserved="false"/>
+        </PreferenceCategory>
+    </PreferenceScreen>
+
+    <!-- 模块三：运行规则与交互 -->
+    <PreferenceScreen
+        android:key="pref_rules_settings"
+        android:title="@string/category_rules"
+        android:icon="@drawable/ic_setting_base"
+        android:layout="@layout/preference_main_entry"
+        app:iconSpaceReserved="false">
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            android:title="@string/category_lifecycle">
             <SeekBarPreference
                 android:key="max_freeform_windows"
                 android:title="@string/max_freeform_windows_title"
@@ -140,18 +156,10 @@
                 android:title="@string/manual_adjust_freeform_rotation_title"
                 android:summary="@string/manual_adjust_freeform_rotation_summary"
                 app:iconSpaceReserved="false"/>
-            <SwitchPreference
-                android:key="popup_freeform_enable"
-                android:title="@string/popup_freeform_enable_title"
-                android:summary="@string/popup_freeform_enable_summary"
-                android:defaultValue="true"
-                app:iconSpaceReserved="false"/>
-            <SwitchPreference
-                android:key="popup_bubble_block"
-                android:title="@string/popup_bubble_block_title"
-                android:summary="@string/popup_bubble_block_summary"
-                android:defaultValue="true"
-                app:iconSpaceReserved="false"/>
+        </PreferenceCategory>
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            android:title="@string/category_lists">
             <Preference
                 android:key="freeform_blacklist_apps"
                 android:title="@string/preference_freeform_blacklist_apps"
@@ -163,19 +171,44 @@
                 android:summary="@string/preference_landscape_apps_summary"
                 app:iconSpaceReserved="false"/>
         </PreferenceCategory>
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            android:title="@string/category_block">
+            <SwitchPreference
+                android:key="popup_bubble_block"
+                android:title="@string/popup_bubble_block_title"
+                android:summary="@string/popup_bubble_block_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
+        </PreferenceCategory>
     </PreferenceScreen>
 
-    <!-- 通知 -->
+    <!-- 模块四：通知与保活 -->
     <PreferenceScreen
-        android:key="pref_notification_settings"
-        android:title="@string/category_notify"
-        android:summary="@string/summary_notify_placeholder"
+        android:key="pref_keepalive_settings"
+        android:title="@string/category_keepalive"
         android:icon="@drawable/ic_setting_notification"
         android:layout="@layout/preference_main_entry"
         app:iconSpaceReserved="false">
         <PreferenceCategory
             android:layout="@layout/preference_category_title"
-            android:title="@string/category_notify">
+            android:title="@string/category_keepalive_run">
+            <io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
+                app:entries="@array/service_type"
+                app:entryValues="@array/service_type_value"
+                android:key="service_type"
+                android:title="@string/service_type_title"
+                android:summary="@string/service_type_summary"
+                app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="hide_from_recent"
+                android:title="@string/switch_hide_recent"
+                android:summary="@string/switch_hide_recent_summary"
+                app:iconSpaceReserved="false"/>
+        </PreferenceCategory>
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            android:title="@string/category_notify_linkage">
             <SwitchPreference
                 android:key="notify_freeform"
                 android:title="@string/switch_notify_freeform"
@@ -190,30 +223,29 @@
         </PreferenceCategory>
     </PreferenceScreen>
 
-    <!-- 其他设置 -->
+    <!-- 模块五：高级与开发者 -->
     <PreferenceScreen
-        android:key="pref_other_settings"
-        android:title="@string/other_settings_title"
-        android:summary="@string/summary_other_placeholder"
+        android:key="pref_advanced_settings"
+        android:title="@string/category_advanced"
         android:icon="@drawable/ic_setting_other"
         android:layout="@layout/preference_main_entry"
         app:iconSpaceReserved="false">
         <PreferenceCategory
             android:layout="@layout/preference_category_title"
-            android:title="@string/other_settings_title">
+            android:title="@string/category_diagnostics">
             <Preference
-                android:key="reset_overlay_setting"
-                app:title="@string/preference_reset_overlay_setting"
-                android:summary="@string/preference_reset_overlay_setting_summary"
+                android:key="about_version"
+                android:title="@string/about_version_title"
                 app:iconSpaceReserved="false"/>
             <Preference
-                android:key="trusted_callers"
-                app:title="@string/preference_trusted_callers"
-                android:summary="@string/preference_trusted_callers_summary"
+                android:key="about_open_api"
+                android:title="@string/open_api"
+                android:summary="@string/open_api_summary"
                 app:iconSpaceReserved="false"/>
             <Preference
-                android:title="@string/preference_start_by_recent_view_title"
-                android:summary="@string/preference_start_by_recent_view_summary"
+                android:key="about_source"
+                android:title="@string/about_source_title"
+                android:summary="@string/about_source_summary"
                 app:iconSpaceReserved="false"/>
         </PreferenceCategory>
     </PreferenceScreen>

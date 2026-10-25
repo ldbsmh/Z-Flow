@@ -211,51 +211,5 @@
 
             </androidx.constraintlayout.widget.ConstraintLayout>
         </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/materialCardView_notification_info"
-            style="@style/FreeForm.CardViewStyle"
-            android:layout_width="0dp"
-            android:layout_height="@dimen/info_card_height"
-            android:layout_marginStart="@dimen/card_view_margin"
-            android:layout_marginTop="16dp"
-            android:layout_marginEnd="@dimen/card_view_margin"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/materialCardView_overlay_info">
-
-            <androidx.constraintlayout.widget.ConstraintLayout
-                android:id="@+id/info_notification_bg"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@color/warn_color">
-
-                <ImageView
-                    android:id="@+id/imageView_notification_service"
-                    android:layout_width="@dimen/info_image_size"
-                    android:layout_height="@dimen/info_image_size"
-                    android:layout_marginStart="@dimen/info_image_margin"
-                    app:layout_constraintBottom_toBottomOf="parent"
-                    app:layout_constraintStart_toStartOf="parent"
-                    app:layout_constraintTop_toTopOf="parent"
-                    app:srcCompat="@drawable/ic_error_white" />
-
-                <io.relimus.zflow.ui.view.MTextView
-                    android:id="@+id/textView_notification_service_info"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/info_text_margin_left_right"
-                    android:layout_marginEnd="16dp"
-                    android:text="@string/notification_no_start"
-                    android:textColor="@color/white"
-                    android:textSize="@dimen/info_text_size"
-                    android:textStyle="bold"
-                    app:layout_constraintBottom_toBottomOf="parent"
-                    app:layout_constraintEnd_toEndOf="parent"
-                    app:layout_constraintStart_toEndOf="@+id/imageView_notification_service"
-                    app:layout_constraintTop_toTopOf="parent" />
-
-            </androidx.constraintlayout.widget.ConstraintLayout>
-        </com.google.android.material.card.MaterialCardView>
     </androidx.constraintlayout.widget.ConstraintLayout>
 </androidx.core.widget.NestedScrollView>

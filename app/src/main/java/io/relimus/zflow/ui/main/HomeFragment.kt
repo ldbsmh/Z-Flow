@@ -3,6 +3,7 @@ package io.relimus.zflow.ui.main
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.LayoutInflater
@@ -12,13 +13,13 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import androidx.fragment.app.Fragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.databinding.FragmentHomeBinding
+import io.relimus.zflow.ui.permission.PermissionActivity
 import io.relimus.zflow.xposed.hook.utils.HookTest
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.utils.PermissionUtils
@@ -32,11 +33,6 @@ class HomeFragment : Fragment(), View.OnClickListener {
 
     private lateinit var accessibilityRFAR: ActivityResultLauncher<Intent>
     private lateinit var sp: SharedPreferences
-
-    companion object {
-        private const val COMMON_QUESTION_ZH = "https://github.com/relimus/Z-Flow/blob/master/qa_zh-Hans.md"
-        private const val OPEN_API_ZH = "https://github.com/relimus/Z-Flow/blob/master/open_api_zh-Hans.md"
-    }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -59,6 +55,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
         checkFreeformManagerStatus()
         checkXposedPermission()
         checkAccessibilityPermission()
+        renderDeviceInfo()
         accessibilityRFAR = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             checkAccessibilityPermission()
         }
@@ -66,8 +63,7 @@ class HomeFragment : Fragment(), View.OnClickListener {
         binding.materialCardViewXposedInfo.setOnClickListener(this)
         binding.materialCardViewShizukuInfo.setOnClickListener(this)
         binding.materialCardViewAccessibilityInfo.setOnClickListener(this)
-        binding.buttonQuestion.setOnClickListener(this)
-        binding.buttonOpenApi.setOnClickListener(this)
+        binding.buttonPermission.setOnClickListener(this)
     }
 
     override fun onResume() {
@@ -180,17 +176,31 @@ class HomeFragment : Fragment(), View.OnClickListener {
                 }
             }
 
-            R.id.button_question -> {
-                val uri = COMMON_QUESTION_ZH.toUri()
-                val intent = Intent(Intent.ACTION_VIEW, uri)
-                startActivity(intent)
-            }
-
-            R.id.button_open_api -> {
-                val uri = OPEN_API_ZH.toUri()
-                val intent = Intent(Intent.ACTION_VIEW, uri)
-                startActivity(intent)
+            R.id.button_permission -> {
+                startActivity(Intent(requireContext(), PermissionActivity::class.java))
             }
         }
+    }
+
+    /** 填充设备信息卡：厂商 / 型号 / Android 版本 / 开发代号 / API 级别 */
+    private fun renderDeviceInfo() {
+        val codename = Build.VERSION.CODENAME.takeIf { it != "REL" }
+            // 正式版 CODENAME 固定为 REL，退回按 API 级别映射已知代号
+            ?: mapOf(
+                33 to "Tiramisu",
+                34 to "UpsideDownCake",
+                35 to "VanillaIceCream",
+                36 to "Baklava",
+            )[Build.VERSION.SDK_INT] ?: "REL"
+        binding.deviceRowManufacturer.text =
+            getString(R.string.device_label_manufacturer, Build.MANUFACTURER)
+        binding.deviceRowModel.text =
+            getString(R.string.device_label_model, Build.MODEL)
+        binding.deviceRowAndroid.text =
+            getString(R.string.device_label_android, Build.VERSION.RELEASE)
+        binding.deviceRowCodename.text =
+            getString(R.string.device_label_codename, codename)
+        binding.deviceRowApi.text =
+            getString(R.string.device_label_api, Build.VERSION.SDK_INT)
     }
 }

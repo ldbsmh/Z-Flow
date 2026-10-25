@@ -26,7 +26,6 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
     private lateinit var binding: ActivityPermissionBinding
     private lateinit var accessibilityRFAR: ActivityResultLauncher<Intent>
     private lateinit var overlayRFAR: ActivityResultLauncher<Intent>
-    private lateinit var notificationRFAR: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -42,9 +41,6 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
         overlayRFAR = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             checkOverlayPermission()
         }
-        notificationRFAR = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            checkNotificationPermission()
-        }
 
         // 只注册一次：放在点击里会随点击次数累加观察者
         ZFlow.me.isRunning.observe(this) {
@@ -55,7 +51,6 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
         binding.content.materialCardViewXposedInfo.setOnClickListener(this)
         binding.content.materialCardViewAccessibilityInfo.setOnClickListener(this)
         binding.content.materialCardViewShizukuInfo.setOnClickListener(this)
-        binding.content.materialCardViewNotificationInfo.setOnClickListener(this)
 
         checkPermission()
 
@@ -74,7 +69,6 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
 
     private fun checkPermission(): Boolean {
         checkXposedPermission()
-        checkNotificationPermission()
         checkKeepAliveService()
 
         val r1 = checkShizukuPermission()
@@ -156,21 +150,6 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
         }
     }
 
-    private fun checkNotificationPermission() {
-        val isActive = PermissionUtils.checkNotificationListenerPermission(this)
-        if (isActive) {
-            binding.content.infoNotificationBg.setBackgroundColor(getColor(R.color.success_color))
-            binding.content.imageViewNotificationService.setImageDrawable(AppCompatResources.getDrawable(this, R.drawable.ic_done))
-            binding.content.textViewNotificationServiceInfo.text = getString(R.string.notification_start)
-            binding.content.textViewNotificationServiceInfo.requestFocus()
-        } else {
-            binding.content.infoNotificationBg.setBackgroundColor(getColor(R.color.warn_color))
-            binding.content.imageViewNotificationService.setImageDrawable(AppCompatResources.getDrawable(this, R.drawable.ic_error_white))
-            binding.content.textViewNotificationServiceInfo.text = getString(R.string.notification_no_start)
-            binding.content.textViewNotificationServiceInfo.requestFocus()
-        }
-    }
-
     override fun onClick(v: View) {
         when(v.id) {
             R.id.materialCardView_xposed_info -> {
@@ -193,9 +172,6 @@ class PermissionActivity : AppCompatActivity(), View.OnClickListener {
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     "package:$packageName".toUri()
                 ))
-            }
-            R.id.materialCardView_notification_info -> {
-                notificationRFAR.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
         }
     }
