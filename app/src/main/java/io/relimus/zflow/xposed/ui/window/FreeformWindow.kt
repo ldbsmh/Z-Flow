@@ -56,6 +56,7 @@ import io.relimus.zflow.xposed.services.removeWindowIdentity
 
 import io.relimus.zflow.xposed.ui.config.FreeformConfig
 import io.relimus.zflow.xposed.utils.Instances
+import io.relimus.zflow.xposed.utils.ImeRetrigger
 import java.lang.reflect.Method
 import kotlin.math.abs
 import kotlin.math.max
@@ -407,6 +408,10 @@ class FreeformWindow(
                 }
                 onFreeFormRotationChanged()
             }
+            // 双击底栏中部：重推一遍 IME 的显示流程。
+            // 用来兜底「输入框点得动但键盘唤不出」——这种时候 IME 的焦点/状态已经和
+            // 实际脱节，用户手上唯一能自救的动作就是这个（长按是收进小窗，不能占用）。
+            ImeRetrigger.retrigger("bottomBar")
             return true
         }
     })
@@ -1550,6 +1555,8 @@ class FreeformWindow(
         } else if (componentName != null) {
             FreeformManager.startActivityOnDisplay(componentName, userId, Display.DEFAULT_DISPLAY)
         }
+        // 任务搬回主屏后 IME 目标还停在虚拟屏上，全屏应用会叫不出键盘，这里提前还一次。
+        ImeRetrigger.restoreToDefault("expand")
         finishAfterSurfaceExpand()
     }
 
@@ -2379,6 +2386,8 @@ class FreeformWindow(
     fun closeToBack() {
         if (isDestroyed || isClosedToBack) return
         isClosedToBack = true
+        // 小窗退出后把输入法还给默认屏，否则全屏应用点输入框也叫不出键盘。
+        ImeRetrigger.restoreToDefault("closeToBack")
         cleanupStep("spring animations") { cancelSpringAnimations() }
         detachWindowViews()
     }
