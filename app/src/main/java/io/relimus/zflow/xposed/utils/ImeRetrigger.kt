@@ -87,6 +87,18 @@ object ImeRetrigger {
 
     private val handler by lazy { Handler(Looper.getMainLooper()) }
 
+    /**
+     * 专门用来摸 IMMS 的后台线程。
+     *
+     * 调 IMMS 的方法都要先抢 `ImfLock`，而 `android.imms` 线程持锁期间会回调 WMS 去要
+     * global lock。一旦调用方自己还握着 global lock，或者把这条阻塞路径挂在主线程上，
+     * 都会把 system_server 卡死（主线程卡住 = 整个系统卡住，60s 后 Watchdog 直接杀进程）。
+     * 所以这类调用一律扔到这里，既不持锁、也不占主线程。
+     */
+    private val worker by lazy {
+        Handler(android.os.HandlerThread("ZFlowIme", android.os.Process.THREAD_PRIORITY_BACKGROUND).apply { start() }.looper)
+    }
+
     /** 上一次真正执行的时间，用来做连点节流。 */
     private var lastRunAt = 0L
 
@@ -122,6 +134,9 @@ object ImeRetrigger {
             }
             val lock = objectField(wms, "mGlobalLock")
 
+            // 锁内做完之后还要在锁外摸 IMMS 的屏，用这个变量把 DisplayContent 带出去。
+            var touched: Any? = null
+
             fun work() {
                 // 1. 虚拟屏上残留的 IME 目标清掉，别让 IMMS 还盯着已经没人用的屏。
                 displayContents(wms).forEach { dc ->
@@ -148,20 +163,34 @@ object ImeRetrigger {
                 val layout = callFirst(default, "setLayoutNeeded", emptyList<Any?>())
                 val traversal = requestTraversal(wms, default)
 
-                // 3. IMMS 侧「已显示」的残留状态也要清掉，否则新的显示请求会被
-                //    PHASE_SERVER_ALREADY_VISIBLE 直接取消（日志里就是这么失败的）。
-                val stateReset = resetImeVisibility(wms, default)
-
                 diag(
                     "restore($reason) 默认屏 clear=$clear reset=$reset layout=$layout traversal=$traversal " +
-                        "stateReset=[$stateReset] " + stateOf(default)
+                        stateOf(default)
                 )
+
+                // 只记下来，真正的 IMMS 调用留到锁外 —— 见下面第 3 步。
+                touched = default
             }
 
             if (lock != null) {
                 synchronized(lock) { runCatching { work() }.getOrElse { diag("restore($reason) 异常: ${describe(it)}") } }
             } else {
                 work()
+            }
+
+            // 3. IMMS 侧「已显示」的残留状态也要清掉，否则新的显示请求会被
+            //    PHASE_SERVER_ALREADY_VISIBLE 直接取消（日志里就是这么失败的）。
+            //
+            //    这一步**绝不能**放在上面那个 synchronized 里面，也不能在主线程做：
+            //    IMMS 的方法都要先拿 ImfLock，而 android.imms 线程持着 ImfLock 时会回调
+            //    WMS（`isImeInputTargetStaleForUpdate`）去要 global lock。
+            //    锁内调用 = 「持 WMS 锁等 ImfLock」对上「持 ImfLock 等 WMS 锁」，
+            //    标准的 ABBA 死锁，直接卡死整个 system_server（Watchdog 68s 后杀进程重启）。
+            touched?.let { dc ->
+                worker.post {
+                    runCatching { diag("restore($reason) stateReset=[${resetImeVisibility(wms, dc)}]") }
+                        .onFailure { diag("restore($reason) stateReset 异常: ${describe(it)}") }
+                }
             }
         }.onFailure { diag("restore($reason) 异常: ${describe(it)}") }
     }
@@ -201,6 +230,14 @@ object ImeRetrigger {
      *
      * 这里不硬写字段，走系统的隐藏入口让 IMMS 自己把状态刷回 hidden，
      * 下一次点输入框就是一次干净的显示请求。
+     *
+     * **调用约束（踩过一次系统卡死，务必守住）**：只能在 [worker] 上、且**不持有**
+     * WMS 的 `WindowManagerGlobalLock` 时调用。IMMS 的每个入口都先拿 `ImfLock`，
+     * 而 `android.imms` 线程持着 `ImfLock` 时会回调 WMS 的
+     * `isImeInputTargetStaleForUpdate` 去拿 global lock；持锁调用就是 ABBA 死锁，
+     * 主线程卡住 60s 后 Watchdog 杀 system_server 重启（现场见
+     * `/data/anr/anr_2026-11-08-18-51-19-167`：main 持 lock 等 ImfLock，
+     * android.imms 持 ImfLock 等 lock）。
      */
     private fun resetImeVisibility(wms: Any, dc: Any): String {
         if (imeWindowShown(wms)) return "键盘实际可见，跳过"
