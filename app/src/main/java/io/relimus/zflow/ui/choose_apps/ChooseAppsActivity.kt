@@ -127,8 +127,15 @@ class ChooseAppsActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             android.R.id.home -> finish()
-            R.id.choose_all -> viewModel.insertAllApps(renderedApps)
-            R.id.choose_all_cancel -> viewModel.deleteAll()
+            R.id.choose_all -> {
+                viewModel.insertAllApps(renderedApps)
+                // 横屏 / 白名单没有数据库回流，勾选态与置顶只能由列表本地同步
+                adapter?.syncAllChecked(true)
+            }
+            R.id.choose_all_cancel -> {
+                viewModel.deleteAll()
+                adapter?.syncAllChecked(false)
+            }
         }
         return super.onOptionsItemSelected(item)
     }
