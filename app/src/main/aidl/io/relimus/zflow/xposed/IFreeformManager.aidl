@@ -17,14 +17,14 @@ interface IFreeformManager {
                       int freeformDpi, int freeformSize, int freeformSizeLand,
                       int floatViewSize, int dimAmount, boolean manualAdjustFreeformRotation,
                       int sourceRotation, int sourceScreenWidth, int sourceScreenHeight,
-                      int dockStyle);
+                      int dockStyle, boolean imeDoubleTapRetrigger);
 
     void createMiniWindow(in ComponentName componentName, in PendingIntent pendingIntent,
                           int userId, int taskId,
                           int freeformDpi, int freeformSize, int freeformSizeLand,
                           int floatViewSize, int dimAmount, boolean manualAdjustFreeformRotation,
                           int sourceRotation, int sourceScreenWidth, int sourceScreenHeight,
-                          int dockStyle);
+                          int dockStyle, boolean imeDoubleTapRetrigger);
                           
     void destroyWindow(int displayId);
     void destroyAllWindows();

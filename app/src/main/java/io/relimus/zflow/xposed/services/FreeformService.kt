@@ -109,6 +109,9 @@ class FreeformService : Service() {
         val dimAmount = sp.getInt("freeform_dimming_amount", 20)
         val manualAdjustFreeformRotation = sp.getBoolean("manual_adjust_freeform_rotation", false)
         val dockStyle = sp.getInt("freeform_dock_style", 100)
+        // 默认开启：这个开关控制的是「双击底栏中部重唤输入法」，
+        // 它本身就是为解决小窗内键盘唤不出而加的兜底能力。
+        val imeDoubleTapRetrigger = sp.getBoolean("ime_double_tap_retrigger", true)
 
         XLog.d(
             "FreeformService: create component=$componentName userId=$userId taskId=$taskId " +
@@ -130,7 +133,8 @@ class FreeformService : Service() {
                 sourceRotation,
                 sourceScreenWidth,
                 sourceScreenHeight,
-                dockStyle
+                dockStyle,
+                imeDoubleTapRetrigger
             )
         } else {
             proxy.createWindow(
@@ -147,7 +151,8 @@ class FreeformService : Service() {
                 sourceRotation,
                 sourceScreenWidth,
                 sourceScreenHeight,
-                dockStyle
+                dockStyle,
+                imeDoubleTapRetrigger
             )
         }
     }

@@ -156,6 +156,12 @@
                 android:title="@string/manual_adjust_freeform_rotation_title"
                 android:summary="@string/manual_adjust_freeform_rotation_summary"
                 app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="ime_double_tap_retrigger"
+                android:title="@string/ime_double_tap_retrigger_title"
+                android:summary="@string/ime_double_tap_retrigger_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
         </PreferenceCategory>
         <PreferenceCategory
             android:layout="@layout/preference_category_title"

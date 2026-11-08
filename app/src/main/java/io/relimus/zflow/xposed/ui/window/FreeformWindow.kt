@@ -411,7 +411,10 @@ class FreeformWindow(
             // 双击底栏中部：重推一遍 IME 的显示流程。
             // 用来兜底「输入框点得动但键盘唤不出」——这种时候 IME 的焦点/状态已经和
             // 实际脱节，用户手上唯一能自救的动作就是这个（长按是收进小窗，不能占用）。
-            ImeRetrigger.retrigger("bottomBar")
+            // 开关在「运行规则与交互」里，关掉后双击只保留上面那段旋转行为。
+            if (config.imeDoubleTapRetrigger) {
+                ImeRetrigger.retrigger("bottomBar")
+            }
             return true
         }
     })

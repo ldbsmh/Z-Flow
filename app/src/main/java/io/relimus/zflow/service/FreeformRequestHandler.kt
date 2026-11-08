@@ -330,6 +330,7 @@ object FreeformRequestHandler {
         val dimAmount = sp.getInt("freeform_dimming_amount", 20)
         val manualAdjustFreeformRotation = sp.getBoolean("manual_adjust_freeform_rotation", false)
         val dockStyle = sp.getInt("freeform_dock_style", 100)
+        val imeDoubleTapRetrigger = sp.getBoolean("ime_double_tap_retrigger", true)
 
         XLog.i(
             "$TAG create component=$componentName userId=$userId taskId=$taskId " +
@@ -348,14 +349,16 @@ object FreeformRequestHandler {
                 componentName, pendingIntent, userId, taskId,
                 freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
                 dimAmount, manualAdjustFreeformRotation,
-                sourceRotation, sourceScreenWidth, sourceScreenHeight, dockStyle
+                sourceRotation, sourceScreenWidth, sourceScreenHeight, dockStyle,
+                imeDoubleTapRetrigger
             )
         } else {
             proxy.createWindow(
                 componentName, pendingIntent, userId, taskId,
                 freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
                 dimAmount, manualAdjustFreeformRotation,
-                sourceRotation, sourceScreenWidth, sourceScreenHeight, dockStyle
+                sourceRotation, sourceScreenWidth, sourceScreenHeight, dockStyle,
+                imeDoubleTapRetrigger
             )
         }
         return true

@@ -137,6 +137,8 @@
     <string name="floating_label">Open the Sidebar</string>
     <string name="manual_adjust_freeform_rotation_title">Manually adjust widget orientation (experimental)</string>
     <string name="manual_adjust_freeform_rotation_summary">When turned on, allows to manually rotate the freeform orientation by double-clicking the bottom bar middle button. Due to the diversity of devices, this function may not meet expectations, please treat it rationally</string>
+    <string name="ime_double_tap_retrigger_title">Double-tap bottom bar to recall keyboard</string>
+    <string name="ime_double_tap_retrigger_summary">When the keyboard does not show up after tapping an input field in the freeform window, double-clicking the bottom bar middle button recalls it. When turned off, double-tap only rotates the widget orientation (if that option is on)</string>
     <string name="foreground_notification_name">ForegroundService Notification</string>
     <string name="foreground_notification_title">Z-Flow is running in the background</string>
     <string name="foreground_notification_text">Click to open sidebar</string>

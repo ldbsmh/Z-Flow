@@ -140,6 +140,8 @@
     <string name="use_sui_refuse_to_fullscreen_summary">暂时只支持Android 12+。该功能建议仅在没有Xposed或者Xposed阻止失败时启用。尝试使用Shizuku/Sui阻止小窗内的应用从小窗跳出到全屏。该功能仍在测试中，不保证阻止成功，并且会导致屏幕闪烁、卡顿等问题</string>
     <string name="manual_adjust_freeform_rotation_title">手动调整小窗方向（实验性）</string>
     <string name="manual_adjust_freeform_rotation_summary">开启后，允许通过双击底栏中部按钮来手动旋转小窗方向。因为设备的多样性，该功能未必达到预期，请理性看待</string>
+    <string name="ime_double_tap_retrigger_title">双击底栏中部重唤输入法</string>
+    <string name="ime_double_tap_retrigger_summary">小窗内点输入框后键盘没出来时，双击底栏中部按钮可重新唤起。关闭后双击只用于旋转小窗方向（需同时开启手动调整方向）</string>
 
     <string name="category_floating">侧边栏</string>
     <string name="switch_floating">全局侧边栏</string>

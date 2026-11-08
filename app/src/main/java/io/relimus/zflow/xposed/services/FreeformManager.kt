@@ -699,13 +699,14 @@ object FreeformManager : IFreeformManager.Stub() {
         sourceRotation: Int,
         sourceScreenWidth: Int,
         sourceScreenHeight: Int,
-        dockStyle: Int
+        dockStyle: Int,
+        imeDoubleTapRetrigger: Boolean
     ) {
         createWindowInternal(
             componentName, pendingIntent, userId, taskId,
             freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
             dimAmount, manualAdjustFreeformRotation, sourceRotation, sourceScreenWidth,
-            sourceScreenHeight, dockStyle,
+            sourceScreenHeight, dockStyle, imeDoubleTapRetrigger,
             directToMini = false
         )
     }
@@ -724,13 +725,14 @@ object FreeformManager : IFreeformManager.Stub() {
         sourceRotation: Int,
         sourceScreenWidth: Int,
         sourceScreenHeight: Int,
-        dockStyle: Int
+        dockStyle: Int,
+        imeDoubleTapRetrigger: Boolean
     ) {
         createWindowInternal(
             componentName, pendingIntent, userId, taskId,
             freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
             dimAmount, manualAdjustFreeformRotation, sourceRotation, sourceScreenWidth,
-            sourceScreenHeight, dockStyle,
+            sourceScreenHeight, dockStyle, imeDoubleTapRetrigger,
             directToMini = true
         )
     }
@@ -750,6 +752,7 @@ object FreeformManager : IFreeformManager.Stub() {
         sourceScreenWidth: Int,
         sourceScreenHeight: Int,
         dockStyle: Int,
+        imeDoubleTapRetrigger: Boolean,
         directToMini: Boolean
     ) {
         if (!isReady) {
@@ -852,7 +855,8 @@ object FreeformManager : IFreeformManager.Stub() {
                     dimAmount = dimAmount / 100f,
                     manualAdjustFreeformRotation = manualAdjustFreeformRotation,
                     defaultLandscape = isLandscapeApp(componentName?.packageName),
-                    dockStyle = dockStyle
+                    dockStyle = dockStyle,
+                    imeDoubleTapRetrigger = imeDoubleTapRetrigger
                 )
 
                 val inheritedLocation = if (directToMini) {

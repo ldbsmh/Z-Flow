@@ -101,13 +101,14 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         sourceRotation: Int,
         sourceScreenWidth: Int,
         sourceScreenHeight: Int,
-        dockStyle: Int
+        dockStyle: Int,
+        imeDoubleTapRetrigger: Boolean
     ) {
         service?.createWindow(
             componentName, pendingIntent, userId, taskId,
             freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
             dimAmount, manualAdjustFreeformRotation, sourceRotation,
-            sourceScreenWidth, sourceScreenHeight, dockStyle
+            sourceScreenWidth, sourceScreenHeight, dockStyle, imeDoubleTapRetrigger
         )
     }
 
@@ -125,13 +126,14 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         sourceRotation: Int,
         sourceScreenWidth: Int,
         sourceScreenHeight: Int,
-        dockStyle: Int
+        dockStyle: Int,
+        imeDoubleTapRetrigger: Boolean
     ) {
         service?.createMiniWindow(
             componentName, pendingIntent, userId, taskId,
             freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
             dimAmount, manualAdjustFreeformRotation, sourceRotation,
-            sourceScreenWidth, sourceScreenHeight, dockStyle
+            sourceScreenWidth, sourceScreenHeight, dockStyle, imeDoubleTapRetrigger
         )
     }
 
