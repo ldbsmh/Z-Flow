@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import io.relimus.zflow.providers.LandscapeAppsProvider
 import io.relimus.zflow.providers.NotificationSettingsProvider
 import io.relimus.zflow.providers.ProviderAccess
+import io.relimus.zflow.providers.RadialAppsStore
 import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.room.FreeFormAppsEntity
 import io.relimus.zflow.room.FreeformBlacklistEntity
@@ -122,6 +123,7 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         TYPE_NOTIFICATION -> repository.getAllNotificationKeys()
         TYPE_BLACKLIST -> repository.getAllBlacklistKeys().orEmpty()
         TYPE_TRUSTED -> TrustedCallers.read(getApplication()).map { "$it|$TRUSTED_USER" }
+        TYPE_RADIAL -> withContext(Dispatchers.IO) { RadialAppsStore.read(getApplication()) }
         else -> repository.getAllFreeFormKeys()
     }
 
@@ -151,6 +153,11 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 TYPE_TRUSTED -> withContext(Dispatchers.IO) {
                     TrustedCallers.add(getApplication(), packageName)
                 }
+                TYPE_RADIAL -> withContext(Dispatchers.IO) {
+                    // 超上限时 add 返回 false，界面侧已经在点击前拦掉了，
+                    // 这里只兜住并发/重建导致的状态漂移。
+                    RadialAppsStore.add(getApplication(), RadialAppsStore.keyOf(packageName, userId))
+                }
                 else -> repository.insertFreeForm(packageName, userId)
             }
         }
@@ -169,6 +176,9 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 TYPE_TRUSTED -> withContext(Dispatchers.IO) {
                     TrustedCallers.remove(getApplication(), packageName)
                 }
+                TYPE_RADIAL -> withContext(Dispatchers.IO) {
+                    RadialAppsStore.remove(getApplication(), RadialAppsStore.keyOf(packageName, userId))
+                }
                 else -> repository.deleteFreeForm(packageName, userId)
             }
         }
@@ -185,6 +195,7 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                 TYPE_BLACKLIST -> repository.deleteAllBlacklist()
                 TYPE_LANDSCAPE -> landscapeCall(LandscapeAppsProvider.METHOD_CLEAR_ALL, null)
                 TYPE_TRUSTED -> withContext(Dispatchers.IO) { TrustedCallers.clear(getApplication()) }
+                TYPE_RADIAL -> withContext(Dispatchers.IO) { RadialAppsStore.clear(getApplication()) }
                 TYPE_FLOATING -> repository.deleteAllFreeForm()
             }
         }
@@ -226,6 +237,13 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
                     TrustedCallers.replace(
                         getApplication(),
                         allApps.map { it.applicationInfo.packageName }
+                    )
+                }
+                TYPE_RADIAL -> withContext(Dispatchers.IO) {
+                    // 轮盘只有 6 格，全选按列表顺序取前 6 个，不静默丢弃后面的。
+                    RadialAppsStore.write(
+                        getApplication(),
+                        allApps.map { RadialAppsStore.keyOf(it.applicationInfo.packageName, userIdOf(it)) }
                     )
                 }
                 else -> {
@@ -283,5 +301,8 @@ class ChooseAppsViewModel(application: Application) : AndroidViewModel(applicati
         const val TYPE_BLACKLIST = 3
         const val TYPE_LANDSCAPE = 4
         const val TYPE_TRUSTED = 5
+
+        /** 轮盘应用：名单存在 SharedPreferences 里，最多 [RadialAppsStore.MAX_ITEMS] 个。 */
+        const val TYPE_RADIAL = 6
     }
 }

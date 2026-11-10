@@ -8,18 +8,13 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.RadialGradient
 import android.graphics.RectF
-import android.graphics.Shader
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.animation.LinearInterpolator
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
- * 轮盘条目。[icon] 已经是按 [RadialMetrics.iconDiameter] 预渲染好的圆形位图。
+ * 轮盘条目。[icon] 已经是按圆盘内径预渲染好的圆形位图。
  */
 internal data class RadialItem(
     val packageName: String,
@@ -31,36 +26,63 @@ internal data class RadialItem(
 /**
  * 底角扇形轮盘。
  *
+ * 视觉参照 GestureEVO：**没有扇形底板**，每个应用是一枚独立的白色圆形按钮，
+ * 带柔和投影，按环错排。这样既不遮壁纸，条目多了也不会糊成一片。
+ *
  * 关键取舍：整个轮盘是一个 View、一次 Canvas 绘制，没有子 View。
- * 相对「每个图标一个 View + 各自动属性动画」的做法，这里
  * 1. 没有 measure/layout 开销，每帧只剩绘制本身；
  * 2. 动画由一条进度曲线驱动，退场可以直接从当前进度接管；
  * 3. 命中判定用纯几何（[RadialGeometry.selection]），不依赖 View 的矩形边界。
  *
  * 本 View **不消费触摸事件**：坐标由外部（Launcher 输入流）推入，
- * 因此它可以安全地叠在 Launcher 视图树最上层而不影响手势分发。
+ * 因此它可以安全地放在悬浮窗里而不影响手势分发。
  */
 internal class RadialMenuView(context: Context) : View(context) {
 
     private val density = resources.displayMetrics.density
-    private val platePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val scrimPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private var scrimShader: RadialGradient? = null
-    private var scrimRadius = -1f
-    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val hubPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    private val sectorPath = Path()
-    private val arcBounds = RectF()
+    /** 白色圆盘：不透明纯白，和 GestureEVO 的圆形按钮一致（半透明白在彩壁上会发灰）。 */
+    private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+
+    /** 圆盘下方的柔和投影（硬件加速下 setShadowLayer 不可靠，这里手绘一层） */
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(46, 0, 0, 0) }
+
+    /**
+     * 圆盘描边。
+     *
+     * 悬浮窗在部分 ROM 上被系统压到 80% 不透明度，浅色界面（聊天列表、白底设置页）
+     * 里白圆盘和白底会糊成一片，加一圈极浅的描边才能看出边界。
+     */
+    private val chipStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f * density
+        color = Color.argb(38, 0, 0, 0)
+    }
+
+    /** 选中光圈 */
+    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.argb(255, 90, 160, 255)
+        strokeWidth = 3f * density
+    }
+
+    /** 选中时的浅色高亮底 */
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(60, 90, 160, 255)
+    }
+
+    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val iconDestination = RectF()
 
     private var layout: RadialLayout? = null
     private var items: List<RadialItem> = emptyList()
 
+    /** 白色圆盘半径 */
+    private var chipRadius = 0f
+
+    /** 图标在位图里的半径（圆盘内缩一圈，形成白色描边） */
     private var iconRadius = 0f
-    private var outerRadius = 0f
+
     private var enterRadius = 0f
     private var keepRadius = 0f
 
@@ -77,14 +99,6 @@ internal class RadialMenuView(context: Context) : View(context) {
     /** 选中项变化回调，参数为索引（null 表示离开所有格子）。 */
     var onSelectionChanged: ((Int?) -> Unit)? = null
 
-    init {
-        platePaint.color = Color.argb(72, 24, 24, 26)
-        cellPaint.color = Color.argb(38, 255, 255, 255)
-        hubPaint.color = Color.argb(90, 255, 255, 255)
-        ringPaint.color = Color.argb(235, 255, 255, 255)
-        ringPaint.strokeWidth = 2.5f * density
-    }
-
     val currentSelection: Int?
         get() = selectedIndex
 
@@ -99,8 +113,8 @@ internal class RadialMenuView(context: Context) : View(context) {
         exitProgress = 0f
         selectionProgress = 0f
         selectedIndex = null
-        iconRadius = metrics.iconDiameter / 2f
-        outerRadius = metrics.outerRadius
+        chipRadius = metrics.iconDiameter / 2f
+        iconRadius = chipRadius * RadialLayoutSpec.ICON_INSET_RATIO
         enterRadius = metrics.enterRadius
         keepRadius = metrics.keepRadius
         invalidate()
@@ -215,85 +229,50 @@ internal class RadialMenuView(context: Context) : View(context) {
         val exit = if (exitProgress > 0f) RadialMotion.exit(exitProgress) else null
         val contentAlpha = (entry.contentAlpha * (exit?.contentAlpha ?: 1f)).coerceIn(0f, 1f)
         if (contentAlpha <= 0.01f) return
-        val sweep = (entry.sweepProgress * (exit?.sweepProgress ?: 1f)).coerceIn(0f, 1f)
-        if (sweep <= 0.001f) return
-        val plateScale = entry.plateScale * (exit?.plateScale ?: 1f)
-        val iconScale = entry.iconScale
-
-        // 注意：这里**不能**用 canvas.drawColor 做背景压暗。
-        // 本 View 是 MATCH_PARENT 覆盖整屏的，drawColor 会把整个桌面一起压暗，
-        // 且不随扇形收放。压暗只在扇形内部做（见下方 scrimPaint）。
-        val origin = currentLayout.origin
-        val baseAngle = if (currentLayout.corner == RadialCorner.BOTTOM_LEFT) 0f else -180f
-        val outer = outerRadius * plateScale
-        val startAngle = baseAngle + (currentLayout.itemAngles.last() - baseAngle) * sweep
-        val sweepAngle = (currentLayout.itemAngles.first() - currentLayout.itemAngles.last()) * sweep
-
-        sectorPath.reset()
-        arcBounds.set(origin.x - outer, origin.y - outer, origin.x + outer, origin.y + outer)
-        sectorPath.moveTo(origin.x, origin.y)
-        sectorPath.arcTo(arcBounds, startAngle, sweepAngle, false)
-        sectorPath.close()
-
-        // 扇形内的柔和压暗：从圆心向外淡出，让图标有对比度又不遮住桌面。
-        if (outer > 1f) {
-            if (scrimShader == null || scrimRadius != outer) {
-                scrimShader = RadialGradient(
-                    origin.x,
-                    origin.y,
-                    outer,
-                    intArrayOf(Color.argb(96, 0, 0, 0), Color.argb(0, 0, 0, 0)),
-                    floatArrayOf(0.45f, 1f),
-                    Shader.TileMode.CLAMP,
-                )
-                scrimRadius = outer
-            }
-            scrimPaint.shader = scrimShader
-            scrimPaint.alpha = (255f * contentAlpha).toInt().coerceIn(0, 255)
-            canvas.drawPath(sectorPath, scrimPaint)
-        }
-
-        platePaint.alpha = scaledAlpha(platePaint.color, contentAlpha)
-        canvas.drawPath(sectorPath, platePaint)
-
-        // 圆心锚点：让扇形看起来是从角落「长」出来的
-        hubPaint.alpha = scaledAlpha(hubPaint.color, contentAlpha)
-        canvas.drawCircle(origin.x, origin.y, 5f * density * plateScale, hubPaint)
+        val iconScale = entry.iconScale * (exit?.plateScale ?: 1f)
 
         val count = items.size
+        val shadowOffset = 4f * density
         for (index in items.indices) {
-            val angle = baseAngle + (currentLayout.itemAngles[index] - baseAngle) * sweep
-            val radians = angle * Math.PI.toFloat() / 180f
-            val centerX = origin.x + cos(radians) * currentLayout.radius * plateScale
-            val centerY = origin.y + sin(radians) * currentLayout.radius * plateScale
-
+            if (index >= currentLayout.itemCenters.size) break
             val stagger = RadialMotion.iconProgress(entryProgress, index, count)
             val alpha = (contentAlpha * stagger * 255f).toInt().coerceIn(0, 255)
             if (alpha <= 4) continue
 
+            val center = currentLayout.itemCenters[index]
             val isSelected = selectedIndex == index
-            val scale = iconScale * (if (isSelected) 1f + 0.08f * selectionProgress else 1f)
-            val radius = iconRadius * scale
+            val scale = iconScale * (if (isSelected) 1f + 0.10f * selectionProgress else 1f)
+            val radius = chipRadius * scale
+
+            // 投影：一层半透明黑，轻微下移，模拟悬浮
+            shadowPaint.alpha = (alpha * 0.18f).toInt().coerceIn(0, 255)
+            canvas.drawCircle(center.x, center.y + shadowOffset * scale, radius * 1.04f, shadowPaint)
+
+            chipPaint.alpha = alpha
+            canvas.drawCircle(center.x, center.y, radius, chipPaint)
+
+            chipStrokePaint.alpha = (alpha * 0.15f).toInt().coerceIn(0, 255)
+            canvas.drawCircle(center.x, center.y, radius, chipStrokePaint)
 
             if (isSelected) {
-                cellPaint.alpha = scaledAlpha(cellPaint.color, contentAlpha)
-                canvas.drawCircle(centerX, centerY, radius + 8f * density, cellPaint)
-                ringPaint.alpha = scaledAlpha(ringPaint.color, contentAlpha * (0.5f + 0.5f * selectionProgress))
-                canvas.drawCircle(centerX, centerY, radius + 5f * density, ringPaint)
+                highlightPaint.alpha = (alpha * (0.25f + 0.35f * selectionProgress)).toInt()
+                canvas.drawCircle(center.x, center.y, radius, highlightPaint)
+                ringPaint.alpha = (alpha * (0.65f + 0.35f * selectionProgress)).toInt()
+                canvas.drawCircle(center.x, center.y, radius - ringPaint.strokeWidth / 2f, ringPaint)
             }
 
             val icon = items[index].icon
             if (icon != null && !icon.isRecycled) {
-                iconDestination.set(centerX - radius, centerY - radius, centerX + radius, centerY + radius)
+                val iconR = iconRadius * scale
+                iconDestination.set(
+                    center.x - iconR,
+                    center.y - iconR,
+                    center.x + iconR,
+                    center.y + iconR,
+                )
                 iconPaint.alpha = alpha
                 canvas.drawBitmap(icon, null, iconDestination, iconPaint)
-            } else {
-                cellPaint.alpha = alpha
-                canvas.drawCircle(centerX, centerY, radius, cellPaint)
             }
         }
     }
-
-    private fun scaledAlpha(color: Int, factor: Float): Int =
-        (Color.alpha(color) * factor.coerceIn(0f, 1f)).toInt().coerceIn(0, 255)
 }

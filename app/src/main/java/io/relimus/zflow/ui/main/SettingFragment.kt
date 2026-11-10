@@ -19,6 +19,7 @@ import com.google.android.material.textfield.TextInputLayout
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.providers.RadialAppsStore
 import io.relimus.zflow.service.ForegroundService
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
@@ -70,6 +71,8 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                 findPreference<SwitchPreference>("show_floating")!!.onPreferenceChangeListener = this
                 findPreference<Preference>("quick_floating_app")!!.onPreferenceClickListener = this
                 findPreference<Preference>("trusted_callers")?.onPreferenceClickListener = this
+                findPreference<Preference>("radial_gesture_apps")?.onPreferenceClickListener = this
+                updateRadialAppsSummary()
             }
 
             KEY_APPEARANCE -> {
@@ -148,6 +151,17 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
     }
 
+    /** 轮盘名单的摘要：空名单要说清「会退回最近任务」，否则用户不知道为什么轮盘里是自己没用过的应用。 */
+    private fun updateRadialAppsSummary() {
+        val preference = findPreference<Preference>("radial_gesture_apps") ?: return
+        val count = RadialAppsStore.read(requireContext()).size
+        preference.summary = if (count == 0) {
+            getString(R.string.radial_apps_summary_empty)
+        } else {
+            getString(R.string.radial_apps_summary_count, count)
+        }
+    }
+
     override fun onPreferenceClick(preference: Preference): Boolean {
         val key = preference.key
         when {
@@ -192,6 +206,14 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                     Intent(requireContext(), ChooseAppsActivity::class.java)
                         .putExtra("type", ChooseAppsViewModel.TYPE_TRUSTED)
                 )
+            }
+
+            key == "radial_gesture_apps" -> {
+                startActivity(
+                    Intent(requireContext(), ChooseAppsActivity::class.java)
+                        .putExtra("type", ChooseAppsViewModel.TYPE_RADIAL)
+                )
+                return true
             }
 
             key == "reset_overlay_setting" -> {
@@ -306,5 +328,7 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
         if (arguments == null || arguments?.getString(ARG_PREFERENCE_ROOT) == null) {
             updateAllSummaries()
         }
+        // 从「轮盘应用」页返回时名单可能已经变了，摘要要跟着刷新。
+        updateRadialAppsSummary()
     }
 }

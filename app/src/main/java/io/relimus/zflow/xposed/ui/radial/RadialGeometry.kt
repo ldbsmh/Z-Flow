@@ -30,6 +30,8 @@ internal data class RadialLayout(
     val sweepDegrees: Float,
     val itemCenters: List<RadialPoint>,
     val itemAngles: List<Float>,
+    /** 每个条目所在的环序号（0 = 最内环），绘制与调试用。 */
+    val itemRings: List<Int> = emptyList(),
 ) {
     val isEmpty: Boolean
         get() = itemCenters.isEmpty()
@@ -75,6 +77,8 @@ internal object RadialGeometry {
         sweepDegrees: Float = DEFAULT_SWEEP_DEGREES,
         originInsetX: Float = 0f,
         originInsetY: Float = 0f,
+        rings: Int = 1,
+        ringStep: Float = 0f,
     ): RadialLayout {
         val safeWidth = width.takeIf { it.isFinite() && it > 0f } ?: 0f
         val safeHeight = height.takeIf { it.isFinite() && it > 0f } ?: 0f
@@ -90,29 +94,67 @@ internal object RadialGeometry {
             return RadialLayout(corner, origin, radius.coerceAtLeast(0f), sweep, emptyList(), emptyList())
         }
 
+        val ringCount = rings.coerceIn(1, 3)
+        val step = ringStep.takeIf { it.isFinite() && it > 0f } ?: 0f
+        val shares = ringShares(itemCount, ringCount)
         val safe = SAFE_DEGREES.coerceAtMost(sweep / 4f)
-        val step = (sweep - safe * 2f) / itemCount
+
         val centers = ArrayList<RadialPoint>(itemCount)
         val angles = ArrayList<Float>(itemCount)
+        val ringsOf = ArrayList<Int>(itemCount)
 
-        for (index in 0 until itemCount) {
-            // 索引 0 排在最外侧（最接近竖直线），与设置页的列表顺序一致。
-            val slot = itemCount - 1 - index
-            val angle = if (corner == RadialCorner.BOTTOM_LEFT) {
-                -safe - (slot + 0.5f) * step
-            } else {
-                -180f + safe + (slot + 0.5f) * step
-            }
-            angles.add(angle)
-            val radians = angle * PI.toFloat() / 180f
-            centers.add(
-                RadialPoint(
-                    x = origin.x + cos(radians) * radius,
-                    y = origin.y + sin(radians) * radius,
+        for (ring in 0 until ringCount) {
+            val count = shares[ring]
+            if (count <= 0) continue
+            val ringRadius = radius + ring * step
+            /*
+             * 各环用同一个张角、同样的槽位数，因此外环与内环**角度对齐**，
+             * 整体是「沿弧线弯过去的一块网格」。
+             *
+             * 刻意不做半格错排：错排后相邻两环的圆心距离会掉到接近一个圆盘直径，
+             * 真机上看起来就是糊在一起的一团（相比之下一列一列对齐才干净）。
+             */
+            val slot = (sweep - safe * 2f) / count
+
+            for (index in 0 until count) {
+                // 索引 0 排在最靠近竖直线的一端，与设置页的列表顺序一致。
+                val slotIndex = (count - 1 - index) + 0.5f
+                val angle = if (corner == RadialCorner.BOTTOM_LEFT) {
+                    -safe - slotIndex * slot
+                } else {
+                    -180f + safe + slotIndex * slot
+                }
+                angles.add(angle)
+                ringsOf.add(ring)
+                val radians = angle * PI.toFloat() / 180f
+                centers.add(
+                    RadialPoint(
+                        x = origin.x + cos(radians) * ringRadius,
+                        y = origin.y + sin(radians) * ringRadius,
+                    )
                 )
-            )
+            }
         }
-        return RadialLayout(corner, origin, radius, sweep, centers, angles)
+        return RadialLayout(corner, origin, radius, sweep, centers, angles, ringsOf)
+    }
+
+    /**
+     * 把 [count] 个条目分配到 [rings] 个环上（返回数组下标 0 = 最内环）。
+     *
+     * 从外环往内环分，外环多拿一格的余数：外环弧长更长，多放一格更均匀，
+     * 也不会出现「内环挤满、外环空一半」的观感。
+     */
+    fun ringShares(count: Int, rings: Int): IntArray {
+        val ringCount = rings.coerceIn(1, 3)
+        val shares = IntArray(ringCount)
+        var remaining = count.coerceAtLeast(0)
+        for (ring in ringCount - 1 downTo 0) {
+            val ringsLeft = ring + 1
+            val share = Math.ceil(remaining.toDouble() / ringsLeft).toInt()
+            shares[ring] = share
+            remaining -= share
+        }
+        return shares
     }
 
     /**

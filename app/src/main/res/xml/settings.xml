@@ -59,6 +59,11 @@
                 android:defaultValue="false"
                 app:iconSpaceReserved="false"/>
             <Preference
+                android:key="radial_gesture_apps"
+                android:title="@string/radial_apps_title"
+                android:summary="@string/radial_apps_summary"
+                app:iconSpaceReserved="false"/>
+            <Preference
                 android:key="trusted_callers"
                 app:title="@string/preference_trusted_callers"
                 android:summary="@string/preference_trusted_callers_summary"

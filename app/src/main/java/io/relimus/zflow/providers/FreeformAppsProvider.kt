@@ -32,6 +32,15 @@ class FreeformAppsProvider : ContentProvider() {
         const val AUTHORITY = "io.relimus.zflow.freeformapps.provider"
         const val METHOD_GET_APPS = "get_freeform_apps"
 
+        /**
+         * 轮盘专用的应用名单（用户在「轮盘应用」页里挑的）。
+         *
+         * 与 [METHOD_GET_APPS] 分开：小窗收藏应用面向的是「哪些应用允许开小窗」，
+         * 轮盘名单面向的是「手势弹出的那几个格子放谁」，两者的数量上限与
+         * 使用场景都不一样，混在一起会让用户改一处、另一处跟着变。
+         */
+        const val METHOD_GET_RADIAL_APPS = "get_radial_apps"
+
         /** 输出 `packageName|userId` 字符串数组，顺序即收藏顺序。 */
         const val EXTRA_KEYS = "keys"
 
@@ -65,6 +74,23 @@ class FreeformAppsProvider : ContentProvider() {
                         EXTRA_KEYS,
                         keys.take(MAX_ITEMS).toTypedArray(),
                     )
+                }
+            }
+
+            METHOD_GET_RADIAL_APPS -> {
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                if (!allowLauncherRead(ctx)) {
+                    val uid = ProviderAccess.callingUid()
+                    Log.w(TAG, "rejected read from uid=$uid")
+                    return ProviderAccess.denied("uid $uid is not a supported launcher")
+                }
+                val keys = runCatching { RadialAppsStore.read(ctx) }
+                    .getOrElse {
+                        Log.w(TAG, "radial apps read failed", it)
+                        return ProviderAccess.denied("radial list unavailable")
+                    }
+                Bundle().apply {
+                    putStringArray(EXTRA_KEYS, keys.take(RadialAppsStore.MAX_ITEMS).toTypedArray())
                 }
             }
 

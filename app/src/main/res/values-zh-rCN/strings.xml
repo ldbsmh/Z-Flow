@@ -160,6 +160,13 @@
     <string name="popup_freeform_enable_summary">开启后，长按桌面图标可打开小窗</string>
     <string name="radial_gesture_enable_title">上滑轮盘</string>
     <string name="radial_gesture_enable_summary">开启后，从屏幕底角斜向上滑会展开小窗应用轮盘，滑到目标松手即可打开</string>
+    <string name="radial_apps_title">轮盘应用</string>
+    <string name="radial_apps_summary">选择轮盘里显示的应用（最多 6 个，按勾选顺序排列）</string>
+    <string name="radial_apps_summary_empty">未选择，轮盘会临时显示最近使用的应用</string>
+    <string name="radial_apps_summary_count">已选 %1$d 个应用</string>
+    <string name="label_radial_apps">轮盘应用</string>
+    <string name="radial_apps_hint">最多选择 %1$d 个，顺序即轮盘里的排列顺序</string>
+    <string name="radial_apps_limit">轮盘最多只能放 %1$d 个应用</string>
     <string name="popup_bubble_block_title">屏蔽长按消息气泡</string>
     <string name="popup_bubble_block_summary">屏蔽 Android 17 长按图标弹出的消息气泡</string>
 
