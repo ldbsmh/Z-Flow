@@ -30,6 +30,9 @@ class StartFreeformReceiver private constructor() {
         const val SOURCE_RECENT_SWIPE = "recent_swipe"
         const val SOURCE_NOTIFICATION = "notification"
 
+        /** 底角轮盘选中应用。 */
+        const val SOURCE_RADIAL = "radial"
+
         /** Context must belong to the actual hook host. Fetch failure throws; never send unauthenticated. */
         fun newIntent(
             context: Context,

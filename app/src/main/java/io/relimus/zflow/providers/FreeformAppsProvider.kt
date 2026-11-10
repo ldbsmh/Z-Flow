@@ -1,0 +1,102 @@
+package io.relimus.zflow.providers
+
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.database.Cursor
+import android.net.Uri
+import android.os.Bundle
+import android.os.Process
+import android.util.Log
+import io.relimus.zflow.room.DatabaseRepository
+
+/**
+ * 把“小窗收藏应用”名单暴露给 Launcher 进程。
+ *
+ * 背景：轮盘需要知道要画哪几个应用，但名单存在 App 进程的数据库里，
+ * 而轮盘跑在 Launcher 进程（那里才能拿到手势输入与图标），
+ * 直接读对方的 SharedPreferences/数据库不可行，只能走 Provider。
+ *
+ * 安全边界与其它 Provider 一致：
+ * - 只读，没有写入口；
+ * - 调用方必须是本应用 / system / root，或 UID 属于受支持的 Launcher；
+ * - 失败返回带 [ProviderAccess.EXTRA_DENIED] 的 Bundle，调用方据此区分
+ *   「查询失败」与「用户确实没配置收藏」，不会把失败当成空名单去画一个空轮盘。
+ */
+class FreeformAppsProvider : ContentProvider() {
+
+    companion object {
+        private const val TAG = "FreeformAppsProvider"
+
+        const val AUTHORITY = "io.relimus.zflow.freeformapps.provider"
+        const val METHOD_GET_APPS = "get_freeform_apps"
+
+        /** 输出 `packageName|userId` 字符串数组，顺序即收藏顺序。 */
+        const val EXTRA_KEYS = "keys"
+
+        /** 轮盘最多显示 6 格，读多了也没用；顺便给跨进程数据一个上限。 */
+        const val MAX_ITEMS = 8
+
+        private val LAUNCHER_PACKAGES = setOf(
+            "com.android.launcher3",
+            "com.google.android.apps.nexuslauncher",
+        )
+    }
+
+    override fun onCreate(): Boolean = true
+
+    override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+        return when (method) {
+            METHOD_GET_APPS -> {
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                if (!allowLauncherRead(ctx)) {
+                    Log.w(TAG, "rejected read from uid=${ProviderAccess.callingUid()}")
+                    return ProviderAccess.denied("read not allowed")
+                }
+                Bundle().apply {
+                    putStringArray(
+                        EXTRA_KEYS,
+                        DatabaseRepository(ctx).getAllFreeFormKeys().take(MAX_ITEMS).toTypedArray(),
+                    )
+                }
+            }
+
+            else -> ProviderAccess.denied("unknown method")
+        }
+    }
+
+    /**
+     * Launcher 的 UID 与第三方应用一样是普通 app uid，无法用 uid 常量判断，
+     * 只能反查该 UID 名下是否装了受支持的 Launcher 包名。
+     */
+    private fun allowLauncherRead(context: android.content.Context): Boolean {
+        val uid = ProviderAccess.callingUid()
+        if (uid == Process.myUid() || uid == Process.SYSTEM_UID || uid == Process.ROOT_UID) {
+            return true
+        }
+        return runCatching {
+            context.packageManager.getPackagesForUid(uid)
+                ?.any { it in LAUNCHER_PACKAGES } == true
+        }.getOrDefault(false)
+    }
+
+    override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?,
+    ): Cursor? = null
+
+    override fun getType(uri: Uri): String? = null
+
+    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+
+    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
+
+    override fun update(
+        uri: Uri,
+        values: ContentValues?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+    ): Int = 0
+}

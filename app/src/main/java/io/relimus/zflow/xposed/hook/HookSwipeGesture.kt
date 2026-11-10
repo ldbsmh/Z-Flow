@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.view.InputEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
 import de.robv.android.xposed.XC_MethodHook
@@ -23,11 +24,19 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
+import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.providers.BlacklistProvider
 import io.relimus.zflow.providers.LandscapeAppsProvider
+import io.relimus.zflow.providers.RemoteSettings
 import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.hook.utils.XLog
+import io.relimus.zflow.xposed.ui.radial.RadialCorner
+import io.relimus.zflow.xposed.ui.radial.RadialGeometry
+import io.relimus.zflow.xposed.ui.radial.RadialGestureGate
+import io.relimus.zflow.xposed.ui.radial.RadialItem
+import io.relimus.zflow.xposed.ui.radial.RadialLayout
+import io.relimus.zflow.xposed.ui.radial.RadialMenuController
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
@@ -77,6 +86,9 @@ object HookSwipeGesture {
 
     // 诊断日志总开关，默认关闭，避免刷屏
     private const val ENABLE_DIAGNOSTIC_LOGS = false
+
+    /** 底角热区边长（dp）：从左右下角向内量的距离，超出即视为普通上滑。 */
+    private const val RADIAL_CORNER_HOTSPOT_DP = 32f
 
     @Volatile
     private var inited = false
@@ -208,6 +220,25 @@ object HookSwipeGesture {
      */
     @Volatile
     private var hintCommittedThisGesture = false
+
+    // ===== 底角轮盘 =====
+
+    /**
+     * 轮盘手势状态机。每次 ACTION_DOWN 按当前 touch slop 重新创建，
+     * 因此这里不是 val。
+     */
+    private var radialGate = RadialGestureGate(revealSlopPx = 24f)
+
+    /** 只用于角度判定的探针布局：展开前还不知道真实半径，这里只借它的圆心。 */
+    private var radialProbe: RadialLayout? = null
+
+    /** 本次手势是否由轮盘接管（已展开过）。 */
+    @Volatile
+    private var radialUsedThisGesture = false
+
+    /** 本次手势是否真的启动了轮盘里的小窗（决定要不要把落点改成 HOME）。 */
+    @Volatile
+    private var radialLaunchedThisGesture = false
 
     /**
      * resolveContext 解析出的可用 Context 缓存，避免每次手势结束后
@@ -384,6 +415,10 @@ object HookSwipeGesture {
         releaseInDropTarget = false
         hintCommittedThisGesture = false
         activeGestureHandler = null
+
+        // 轮盘：视图与图标缓存都要放掉，否则热重载后仍持有上一份位图
+        clearRadialState()
+        RadialMenuController.clearIconCache()
 
         lifecycleLog("init() enter")
 
@@ -824,6 +859,15 @@ object HookSwipeGesture {
         PortraitSwipeGestureHandler.reset()
         LandscapeSwipeGestureHandler.reset()
 
+        /*
+         * 只清掉上一轮可能残留的轮盘视图。
+         *
+         * 不能在这里 reset 轮盘状态机：本方法由 initStateCallbacks 触发，
+         * 时机在 ACTION_DOWN 之后，而热区正是在 DOWN 里记录的 ——
+         * 这里重置等于把本轮手势刚记下的底角信息抹掉，轮盘永远展不开。
+         */
+        RadialMenuController.dismiss(immediate = true)
+
         debugLog(
             "BEGIN " +
                 "handler=${identity(handler)} " +
@@ -919,6 +963,17 @@ object HookSwipeGesture {
         }
 
         if (!progress.isFinite()) {
+            return
+        }
+
+        /*
+         * 轮盘手势进行中不再显示落点提示：
+         * 两套浮层同时出现会让用户不知道松手会发生什么。
+         */
+        if (radialUsedThisGesture || radialGate.isActive) {
+            if (hintView != null) {
+                removeHint(immediate = true, reason = "radialActive")
+            }
             return
         }
 
@@ -1092,6 +1147,36 @@ object HookSwipeGesture {
         gestureState: Any,
         homeTarget: Any
     ) {
+        /*
+         * 轮盘已经接管过这次手势：无论如何都不再走「把当前应用变常窗」的老路径，
+         * 否则用户滑轮盘选中 A 应用，当前应用 B 也会被顺手开成小窗。
+         *
+         * 若轮盘真的启动了某个应用，把落点改成 HOME，避免源应用被手势带进
+         * 最近任务动画里和新开的小窗抢焦点；没选中任何东西时不动落点，
+         * 让 Launcher 按自己原本的语义收尾（通常就是回到桌面）。
+         */
+        if (radialUsedThisGesture || radialLaunchedThisGesture || RadialMenuController.isShowing) {
+            // ACTION_UP 可能没送达输入 Hook（Android 17），在这里补一次提交；
+            // finish() 保证与 ACTION_UP 那次互斥，不会重复启动。
+            commitRadialSelection(resolveLauncherContext(handler))
+            val launched = radialLaunchedThisGesture
+            clearRadialState()
+            hintCommittedThisGesture = false
+            releaseInDropTarget = false
+            hintDismissed = true
+            gestureArmed = false
+            removeHint(immediate = true, reason = "radialConsumed")
+            if (launched) {
+                runCatching {
+                    XposedHelpers.callMethod(gestureState, "setEndTarget", homeTarget)
+                }.onFailure {
+                    XLog.e("$DEBUG_TAG radial setEndTarget failed", it)
+                }
+            }
+            lifecycleLog("GESTURE_END_RADIAL launched=$launched")
+            return
+        }
+
         // Android 17：抬手 ACTION_UP 不再可靠地送达我们的输入 Hook，
         // releaseInDropTarget（raw-motion 命中测试）恒为 false。
         // 改以“提示框已展示（用户确实上滑到了提交区）”为准，
@@ -1767,6 +1852,181 @@ object HookSwipeGesture {
         )
     }
 
+    // ===== 底角轮盘 =====
+
+    /** 轮盘只在用户显式开启时接管手势；读不到设置一律当作关闭。 */
+    private fun radialEnabled(context: Context?): Boolean {
+        if (context == null) return false
+        return runCatching {
+            RemoteSettings.isFeatureEnabled(context, ZFlow.KEY_RADIAL_GESTURE_ENABLE, false)
+        }.getOrDefault(false)
+    }
+
+    private fun displayBounds(context: Context): Pair<Int, Int> {
+        return runCatching {
+            val metrics = context.getSystemService(WindowManager::class.java)
+                ?.currentWindowMetrics?.bounds
+            if (metrics != null && metrics.width() > 0 && metrics.height() > 0) {
+                metrics.width() to metrics.height()
+            } else {
+                val dm = context.resources.displayMetrics
+                dm.widthPixels to dm.heightPixels
+            }
+        }.getOrElse {
+            val dm = context.resources.displayMetrics
+            dm.widthPixels to dm.heightPixels
+        }
+    }
+
+    /**
+     * ACTION_DOWN：判断这次按下是否落在底角热区。
+     *
+     * 只记录，不展开 —— 单纯点一下底角不应该弹轮盘，
+     * 必须再满足「明显上滑 + 落在扇形张开的一侧」。
+     */
+    private fun armRadialGesture(context: Context?, event: MotionEvent) {
+        radialUsedThisGesture = false
+        radialLaunchedThisGesture = false
+        radialProbe = null
+        radialGate.reset()
+        if (!radialEnabled(context)) return
+        val safeContext = context ?: return
+        val (width, height) = displayBounds(safeContext)
+        val density = safeContext.resources.displayMetrics.density
+        val hotspot = (RADIAL_CORNER_HOTSPOT_DP * density).coerceAtMost(height * 0.25f)
+        val corner = RadialGestureGate.cornerAt(
+            x = event.rawX,
+            y = event.rawY,
+            width = width,
+            height = height,
+            hotspotWidth = hotspot,
+            hotspotHeight = hotspot,
+        ) ?: return
+
+        val slop = runCatching {
+            ViewConfiguration.get(safeContext).scaledTouchSlop.toFloat() * 2f
+        }.getOrDefault(24f).coerceAtLeast(12f)
+        val gate = RadialGestureGate(revealSlopPx = slop)
+        gate.arm(corner, event.rawX, event.rawY)
+        radialGate = gate
+        // 半径给 1f 只是为了得到一个带圆心的布局，命中判定并不使用它。
+        radialProbe = RadialGeometry.layout(
+            corner = corner,
+            width = width.toFloat(),
+            height = height.toFloat(),
+            radius = 1f,
+            itemCount = 1,
+        )
+    }
+
+    private fun resolveRadialParent(): ViewGroup? {
+        val handler = activeGestureHandler ?: return null
+        return runCatching {
+            val recentsView =
+                ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView") as? View
+                    ?: return null
+            ((recentsView.rootView as? ViewGroup) ?: (recentsView.parent as? ViewGroup))
+                ?.takeIf { it.isAttachedToWindow }
+        }.getOrNull()
+    }
+
+    /** @return true 表示事件已被轮盘消费，调用方应立即返回。 */
+    private fun handleRadialMove(context: Context?, event: MotionEvent): Boolean {
+        if (RadialMenuController.isShowing) {
+            RadialMenuController.updatePointer(event.rawX, event.rawY)
+            return true
+        }
+        if (!radialGate.isActive) return false
+        val probe = radialProbe ?: return false
+        if (!radialGate.shouldReveal(probe, event.rawX, event.rawY)) return false
+
+        val safeContext = context ?: return false
+        // Handler 还没就绪时先不展开，下一帧 MOVE 再试。
+        val parent = resolveRadialParent() ?: return false
+        val (width, height) = displayBounds(safeContext)
+        val corner = radialGate.corner ?: return false
+        val shown = runCatching {
+            RadialMenuController.reveal(safeContext, parent, corner, width, height)
+        }.onFailure {
+            XLog.e("$DEBUG_TAG radial reveal failed", it)
+        }.getOrDefault(false)
+
+        if (!shown) {
+            // 没有收藏应用 / Provider 拒绝：本次手势不再尝试，退回原本行为。
+            radialGate.reset()
+            radialProbe = null
+            return false
+        }
+        radialGate.markRevealed()
+        radialUsedThisGesture = true
+        RadialMenuController.updatePointer(event.rawX, event.rawY)
+        return true
+    }
+
+    /** @return true 表示这次手势由轮盘接管，原本的落点提示与启动流程都应跳过。 */
+    private fun handleRadialUp(context: Context?): Boolean {
+        if (!radialGate.isActive && !RadialMenuController.isShowing) return false
+        val revealed = radialGate.isRevealed || RadialMenuController.isShowing
+        commitRadialSelection(context)
+        radialProbe = null
+        return revealed
+    }
+
+    /**
+     * 提交当前选中项。
+     *
+     * ⚠️ 必须幂等：Android 17 上 ACTION_UP 不一定送达输入 Hook，
+     * 因此 [handleGestureEnd] 还要再调一次。真正的去重由 [RadialGestureGate.finish] 完成。
+     */
+    private fun commitRadialSelection(context: Context?) {
+        val item = RadialMenuController.currentItem()
+        RadialMenuController.dismiss()
+        if (!radialGate.finish()) return
+        if (item == null) return
+        val safeContext = context ?: resolveLauncherContext(activeGestureHandler)
+        if (safeContext == null) {
+            debugLog("RADIAL_COMMIT_NO_CONTEXT pkg=${item.packageName}")
+            return
+        }
+        launchRadialSelection(safeContext, item)
+    }
+
+    /** 从被 hook 的 Handler 上取 Launcher 的 Activity Context（广播鉴权需要真实调用方 UID）。 */
+    private fun resolveLauncherContext(handler: Any?): Context? {
+        if (handler == null) return null
+        return runCatching {
+            val recentsView = ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView")
+                ?: return null
+            XposedHelpers.callMethod(recentsView, "getContext") as? Context
+        }.getOrNull()
+    }
+
+    private fun launchRadialSelection(context: Context, item: RadialItem) {
+        runCatching {
+            val intent = StartFreeformReceiver.newIntent(
+                context = context,
+                packageName = item.packageName,
+                userId = item.userId,
+                miniMode = false,
+                source = StartFreeformReceiver.SOURCE_RADIAL,
+            )
+            context.sendBroadcast(intent)
+            radialLaunchedThisGesture = true
+            debugLog("RADIAL_LAUNCH pkg=${item.packageName} user=${item.userId}")
+        }.onFailure {
+            XLog.e("$DEBUG_TAG radial launch failed", it)
+        }
+    }
+
+    /** 清理轮盘运行态（新手势、异常恢复都走这里）。 */
+    private fun clearRadialState() {
+        radialUsedThisGesture = false
+        radialLaunchedThisGesture = false
+        radialProbe = null
+        radialGate.reset()
+        RadialMenuController.dismiss(immediate = true)
+    }
+
     private fun handleInputEvent(
         param: XC_MethodHook.MethodHookParam
     ) {
@@ -1830,9 +2090,15 @@ object HookSwipeGesture {
                     LandscapeSwipeGestureHandler.reset()
                     gestureDisplayMode = GestureDisplayMode.NONE
                 }
+
+                // 底角轮盘：只记录热区，是否展开留给 MOVE 决定。
+                armRadialGesture(ctx, event)
             }
 
             MotionEvent.ACTION_MOVE -> {
+                // 轮盘展开后，指针只喂给轮盘，不再走落点提示的命中测试。
+                if (handleRadialMove(ctx, event)) return
+
                 val target =
                     hintView ?: return
 
@@ -1859,6 +2125,9 @@ object HookSwipeGesture {
             }
 
             MotionEvent.ACTION_UP -> {
+                // 轮盘手势优先：展开过就由它提交/取消，不再计算落点命中。
+                if (handleRadialUp(ctx)) return
+
                 val target = hintView
 
                 val inside =
@@ -1905,6 +2174,9 @@ object HookSwipeGesture {
 
             MotionEvent.ACTION_CANCEL -> {
                 releaseInDropTarget = false
+                RadialMenuController.dismiss()
+                radialGate.finish()
+                radialProbe = null
             }
         }
     }
@@ -1974,6 +2246,8 @@ object HookSwipeGesture {
 
         gestureGeneration += 1L
         activeGestureHandler = null
+
+        clearRadialState()
 
         val activeView =
             hintView

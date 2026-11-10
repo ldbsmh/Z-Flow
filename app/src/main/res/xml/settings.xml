@@ -52,6 +52,12 @@
                 android:summary="@string/popup_freeform_enable_summary"
                 android:defaultValue="true"
                 app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="radial_gesture_enable"
+                android:title="@string/radial_gesture_enable_title"
+                android:summary="@string/radial_gesture_enable_summary"
+                android:defaultValue="false"
+                app:iconSpaceReserved="false"/>
             <Preference
                 android:key="trusted_callers"
                 app:title="@string/preference_trusted_callers"

@@ -36,6 +36,15 @@ class ZFlow : Application() {
 
         /** 屏蔽桌面长按 → 消息气泡（Android 17+）开关 */
         const val KEY_POPUP_BUBBLE_BLOCK = "popup_bubble_block"
+
+        /**
+         * 底角上滑轮盘开关。
+         *
+         * 轮盘主体跑在 Launcher 进程（那里才有手势输入与图标），
+         * 因此这个开关必须通过 Provider 跨进程读取，见
+         * [io.relimus.zflow.providers.NotificationSettingsProvider] 的白名单。
+         */
+        const val KEY_RADIAL_GESTURE_ENABLE = "radial_gesture_enable"
     }
 
     override fun onCreate() {

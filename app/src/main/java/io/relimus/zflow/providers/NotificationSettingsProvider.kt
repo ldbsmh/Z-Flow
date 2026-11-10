@@ -57,6 +57,7 @@ class NotificationSettingsProvider : ContentProvider() {
         private val ALLOWED_FEATURE_FLAGS = setOf(
             ZFlow.KEY_POPUP_FREEFORM_ENABLE,
             ZFlow.KEY_POPUP_BUBBLE_BLOCK,
+            ZFlow.KEY_RADIAL_GESTURE_ENABLE,
         )
     }
 

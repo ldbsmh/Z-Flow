@@ -151,6 +151,17 @@
             tools:ignore="ExportedContentProvider" />
 
         <!--
+            轮盘需要在小窗手势所在的 Launcher 进程里拿到收藏应用名单，
+            因此单独开一个只读 Provider：只允许本应用/system/root 与受支持的
+            Launcher UID 读取（见 FreeformAppsProvider.allowLauncherRead）。
+        -->
+        <provider
+            android:name=".providers.FreeformAppsProvider"
+            android:authorities="io.relimus.zflow.freeformapps.provider"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
+
+        <!--
             小窗请求的能力下发 Provider（io.relimus.zflow.request.auth）。
             exported：真实发送方（Launcher / SystemUI / 被 Hook 的第三方进程）
             各不相同，无法用单一权限表达；授权在代码内基于 Binder 调用方 UID
