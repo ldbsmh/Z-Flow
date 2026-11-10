@@ -127,4 +127,50 @@ class RadialGestureGateTest {
         assertTrue(gate.isIdle)
         assertFalse(gate.isActive)
     }
+
+    /**
+     * 手指刚动（未超过 slop）时还不需要给结论，继续暂扣是安全的。
+     */
+    @Test
+    fun tinyMovementStaysUndecided() {
+        val gate = RadialGestureGate(revealSlopPx = 24f)
+        gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
+        assertFalse(gate.isPastDecisionThreshold(44f, height - 44f))
+        assertFalse(gate.shouldAbandon(layout(), 44f, height - 44f))
+    }
+
+    /**
+     * 从底角横滑是系统返回手势，位移一旦超过阈值就必须交还给 Launcher。
+     *
+     * 早期版本在这里继续吞 MOVE，导致 Launcher 的输入 consumer 等不到后续事件，
+     * InputDispatcher 5 秒后把 ANR 记到 system 进程上。
+     */
+    @Test
+    fun sidewaysSwipeFromCornerAbandons() {
+        val gate = RadialGestureGate(revealSlopPx = 24f)
+        gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
+        val x = -60f
+        val y = height - 60f
+        assertTrue(gate.isPastDecisionThreshold(x, y))
+        assertFalse("方向不符时不应展开", gate.shouldReveal(layout(), x, y))
+        assertTrue("必须放手，不能继续吞事件", gate.shouldAbandon(layout(), x, y))
+    }
+
+    /** 从底角往下拖同理：位移够大、方向不符，必须放手。 */
+    @Test
+    fun downwardDragFromCornerAbandons() {
+        val gate = RadialGestureGate(revealSlopPx = 24f)
+        gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
+        assertTrue(gate.shouldAbandon(layout(), 40f, height + 10f))
+    }
+
+    /** 已经展开的手势不再走「放弃」分支，事件继续由轮盘接管。 */
+    @Test
+    fun revealedGateIsPastDecisionThreshold() {
+        val gate = RadialGestureGate(revealSlopPx = 24f)
+        gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
+        gate.markRevealed()
+        assertFalse(gate.isPastDecisionThreshold(120f, height - 220f))
+        assertFalse(gate.shouldAbandon(layout(), 120f, height - 220f))
+    }
 }

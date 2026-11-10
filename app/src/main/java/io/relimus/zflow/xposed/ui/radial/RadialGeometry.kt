@@ -204,11 +204,17 @@ internal object RadialGeometry {
     fun isWithinSweep(layout: RadialLayout, x: Float, y: Float, toleranceDegrees: Float = 8f): Boolean {
         val angle = polarDegrees(layout, x, y)
         if (angle.isNaN()) return false
-        // 左角扇形角度落在 [-90-ε, 0+ε]；右角落在 [-180-ε, -90+ε]。
+        /*
+         * 容差只朝「贴近竖直线」那一侧放宽，水平一侧一律不放。
+         *
+         * 之前两侧都加容差（0° + tolerance），底角区域的横滑返回手势极角
+         * 本来就在 0° 附近，于是从底角往屏幕内横扫会被判成「在扇形内」，
+         * 轮盘被误触发并吞掉整条返回手势 —— 这是 system 进程 ANR 的来源之一。
+         */
         return if (layout.corner == RadialCorner.BOTTOM_LEFT) {
-            angle in (-90f - toleranceDegrees)..(0f + toleranceDegrees)
+            angle in (-90f - toleranceDegrees)..0f
         } else {
-            angle in (-180f - toleranceDegrees)..(-90f + toleranceDegrees)
+            angle in -180f..(-90f + toleranceDegrees)
         }
     }
 }

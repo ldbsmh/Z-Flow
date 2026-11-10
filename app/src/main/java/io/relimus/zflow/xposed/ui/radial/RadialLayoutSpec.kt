@@ -66,7 +66,14 @@ internal object RadialLayoutSpec {
     private const val ICON_GAP_DP = 10f
     private const val OUTER_PADDING_DP = 8f
     private const val SCREEN_PADDING_DP = 6f
-    private const val CORNER_INSET_DP = 8f
+    /**
+     * 扇形圆心相对屏幕角落的内缩（dp）。
+     *
+     * 手势判定用的探针布局必须用同一个值：探针只借 layout 的圆心算极角，
+     * 圆心若与真实布局差几十像素，同一个点上算出的角度会差好几度，
+     * 底角横滑就有机会混进「在扇形内」。
+     */
+    internal const val CORNER_INSET_DP = 8f
 
     /** 容量上限：6 格按 2x3 排布，再往上加就只能靠缩圆盘，观感会崩。 */
     const val MAX_ITEMS = 6

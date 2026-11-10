@@ -305,6 +305,20 @@ internal object RadialMenuController {
     )
 
     /**
+     * 名单的进程内缓存，跨手势复用。
+     *
+     * 一次展开要读两份名单（轮盘应用 + 小窗收藏），每次都是跨进程 Binder；
+     * 如果 Z-Flow 进程刚好被系统回收，第一次调用还要负责把它冷启动起来 ——
+     * 那是几百毫秒级别的同步开销，而这个调用点正好落在 Launcher 的输入回调里，
+     * 事件会在 InputDispatcher 侧堆积。命中缓存可以把这份成本摊到第一次之外。
+     *
+     * TTL 取 3 秒：既能让连续两次手势复用，又不至于让用户改完名单后长时间看不到变化。
+     */
+    private var cachedFavorites: List<Favorite> = emptyList()
+    private var cachedFavoritesAt = 0L
+    private const val FAVORITES_TTL_MS = 3_000L
+
+    /**
      * 取轮盘条目，顺序为：用户在「轮盘应用」里挑的名单 → 小窗收藏应用 → 最近任务。
      *
      * 前两级是「用户明确指定过的」，第三级只是兜底：绝大多数用户从没打开过
@@ -313,6 +327,19 @@ internal object RadialMenuController {
      * 一旦用户配置了任一份名单，就严格按配置来。
      */
     private fun loadFavorites(context: Context): List<Favorite> {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (cachedFavorites.isNotEmpty() && now - cachedFavoritesAt < FAVORITES_TTL_MS) {
+            return cachedFavorites
+        }
+        val loaded = queryFavorites(context)
+        if (loaded.isNotEmpty()) {
+            cachedFavorites = loaded
+            cachedFavoritesAt = now
+        }
+        return loaded
+    }
+
+    private fun queryFavorites(context: Context): List<Favorite> {
         val radial = loadProviderList(context, FreeformAppsProvider.METHOD_GET_RADIAL_APPS)
         if (radial.isNotEmpty()) return radial
 

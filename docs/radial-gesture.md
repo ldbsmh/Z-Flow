@@ -7,17 +7,49 @@
 | 阶段 | 判定 | 说明 |
 |---|---|---|
 | 起手 | 按下点落在左下/右下热区内（56dp 高、22% 屏宽） | 超出热区一律按原有上滑处理 |
-| 展开 | 位移 > `touchSlop`，`dy < 0`，且指针落在扇形张开的一侧（容差 20°） | 只认「斜向内上滑」，沿底边横扫不会触发 |
+| 展开 | 位移 > `touchSlop`，**垂直位移朝上且超过半个阈值**，且指针落在扇形张开的一侧（容差 20°） | 只认「斜向内上滑」，沿底边横扫不会触发 |
 | 选择 | 最近格心 + 进入半径，带 0.62×圆盘直径的迟滞 | 手指滑出弧线外仍可继续选，边界不抖 |
 | 提交 | 松手时取选中项 | 未选中任何一格则不打开，退回 Launcher 原本行为 |
 
-- 开关：设置 → 启动与触发 → 桌面与手势 → 上滑轮盘（默认开启开关项见 `settings.xml`）。
+- 开关：设置 → 启动与触发 → 桌面与手势 → 上滑轮盘（默认关闭，见 `settings.xml`）。
 - 名单：设置 → 启动与触发 → 桌面与手势 → 轮盘应用（最多 6 个，**勾选顺序即轮盘排列顺序**）。
 - 展开期间不再显示原有的落点提示：两套浮层同时出现会让用户不知道松手会发生什么。
 - 展开期间 Launcher 的输入被**整段吃掉**（DOWN/MOVE/UP/CANCEL 都拦），
   否则最近任务卡片会和轮盘一起出现。
-- Android 17 上 `ACTION_UP` 不一定送达输入 Hook，因此手势结束回调里会再补一次提交，
-  由 `RadialGestureGate.finish()` 保证一次手势只提交一次。
+- **吃掉事件就必须给出终态**，这是硬约束，不是优化项：见下面「为什么不能让手势悬着」。
+- Android 17 上 `ACTION_UP` 不一定送达输入 Hook。因为 DOWN 已经被拦下，
+  Launcher 根本不会创建 `AbsSwipeUpHandler`，手势结束回调也就不会触发 ——
+  所以 `ACTION_UP` 这里没有兜底，必须靠看门狗（见下）。
+
+## 为什么不能让手势悬着
+
+轮盘在 `ACTION_DOWN` 就把事件拦下，这是必须的（否则最近任务卡片会和轮盘一起出现）。
+代价是：**Launcher 从这一刻起再也收不到这条手势的任何事件**，而它注册在
+system 侧的 `recents_animation_input_consumer` 一直在等后续 MotionEvent。
+
+一旦我们拦了 DOWN 却迟迟不给终态（UP 丢失、方向判定迟迟不落地、上一轮的悬浮窗没摘干净），
+InputDispatcher 等满 5 秒就报：
+
+```
+am_anr: [0,<pid>,system,...,Input dispatching timed out
+        (recents_animation_input_consumer is not responding. Waited 5001ms for MotionEvent).]
+```
+
+注意 ANR 记在 `system` 进程上（consumer 注册在 system 侧），所以用户看到的是
+**「进程 system 没有响应」**，而不是「桌面没有响应」——这也是它看起来跟轮盘没关系的原因。
+
+四条独立的出口保证「悬着」不会发生：
+
+| 出口 | 触发条件 | 行为 |
+|---|---|---|
+| 方向否决 | 位移越过阈值但不满足「朝上 + 在扇形内」 | 立刻 `clearRadialState()` 并**放行该 MOVE** |
+| 新手势清场 | 任何 `ACTION_DOWN` 发现上一轮还 active / 悬浮窗还在 | 先清场再重新判定 |
+| 无主悬浮窗 | 收到 MOVE 时悬浮窗还在但 gate 已 idle | 摘掉悬浮窗并放行，不吞事件 |
+| 看门狗 | 未展开 2 秒 / 已展开 6 秒没有任何新事件 | 清场（只清理，不提交选择） |
+
+看门狗超时只清理、不提交：输入流已经断了，用户并没有完成「滑到目标再松手」，
+这时替他启动一个应用属于误操作。
+
 
 ## 尺寸与排布
 
@@ -159,3 +191,27 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 | `reveal abort: provider_error` | Provider 未注册 / Binder 异常 | 确认 APK 已更新（该 Provider 是新增的） |
 | `reveal ok` 但屏幕没东西 | 视图挂上了但没画出来 | 看 `host=` 是 overlay 还是 viewgroup，以及该窗口的 `alpha`（可能被系统压到 0.8） |
 | `fallback: recent tasks count=0` | 没有名单也没有最近任务 | 属于首次开机未使用状态，先用几个应用再试 |
+| `abandon: direction rejected` | 底角起手但方向不是上滑（横滑返回 / 下拖） | **正常行为**，已把事件交还 Launcher |
+| `down: reap stale gesture` | 上一轮手势没正常收尾，新 DOWN 时清场 | **正常兜底**，若频繁出现说明 UP 一直没送达 |
+| `move: menu showing without gate` | 悬浮窗残留且已无活跃手势 | **正常兜底**，同上 |
+| `watchdog: gesture never finished` | 超时（未展开 2s / 已展开 6s）没有新事件 | **正常兜底**，清场但不提交选择 |
+| `reveal slow: Nms` | reveal 在主线程上耗时超过一帧 | N 接近或超过 1000ms 要警惕：那时 `contentResolver.call` 很可能正在冷启动 Z-Flow 进程 |
+
+### 出现「进程 system 没有响应」
+
+这是 **ANR 记错对象**的典型样子：真正被卡的是 Launcher 的输入消费，但
+`recents_animation_input_consumer` 注册在 system 侧，所以 ANR 打到了 `system` 进程上。
+
+```bash
+adb logcat -b events -d | grep am_anr
+# am_anr: [0,<pid>,system,...,Input dispatching timed out
+#         (recents_animation_input_consumer is not responding. Waited 5001ms for MotionEvent).]
+```
+
+看到这条就先查 `adb logcat -s ZFlowRadial` 里有没有上面表格中的四个兜底日志。
+四条出口都正常时不会再出现该 ANR；若仍出现，按顺序怀疑：
+
+1. `reveal slow` 动辄上千毫秒 —— reveal 在主线程上做跨进程调用，事件堆积；
+2. 兜底日志一条都没有 —— 该 ROM 上 `ACTION_UP` 与看门狗都被绕过，需要重新确认 hook 点；
+3. 有 `armed` 但之后长时间空白 —— 主线程被别的东西卡住，看 `dumpsys` 里的主线程栈。
+

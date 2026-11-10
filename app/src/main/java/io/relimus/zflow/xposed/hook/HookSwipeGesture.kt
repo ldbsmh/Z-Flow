@@ -36,6 +36,7 @@ import io.relimus.zflow.xposed.ui.radial.RadialGeometry
 import io.relimus.zflow.xposed.ui.radial.RadialGestureGate
 import io.relimus.zflow.xposed.ui.radial.RadialItem
 import io.relimus.zflow.xposed.ui.radial.RadialLayout
+import io.relimus.zflow.xposed.ui.radial.RadialLayoutSpec
 import io.relimus.zflow.xposed.ui.radial.RadialMenuController
 import io.relimus.zflow.xposed.ui.radial.RadialTrace
 import java.util.Collections
@@ -106,6 +107,26 @@ object HookSwipeGesture {
 
     /** 水平热区宽度的下限（dp），避免窄屏上比例算出来过小。 */
     private const val RADIAL_CORNER_MIN_WIDTH_DP = 96f
+
+    /**
+     * 已按下但还没展开时，扣着事件的最长时间（毫秒）。
+     *
+     * 这段时间里屏幕上什么都没有，用户看到的就是「按下去没反应」，
+     * 扣久了等同于卡死。位移一旦越过判定阈值，MOVE 分支会立刻给出
+     * 「展开」或「放弃」的结论，只有手指一直不动才会走到这个超时。
+     */
+    private const val RADIAL_ARMED_TIMEOUT_MS = 2_000L
+
+    /**
+     * 轮盘已经展开后，无事件的最长时间（毫秒）。
+     *
+     * 比 [RADIAL_ARMED_TIMEOUT_MS] 宽松得多：此时轮盘是可见的，用户看得懂
+     * 自己在干什么，停下来挑一两秒很正常，不该被硬切掉。
+     *
+     * 它和 InputDispatcher 的 5 秒并不冲突：ANR 的前提是「有事件送不进去」，
+     * 而按住不动本身不产生新事件；真要有新事件（手指动了）就会重挂看门狗。
+     */
+    private const val RADIAL_REVEALED_TIMEOUT_MS = 6_000L
 
     /**
      * 轮盘开关缓存的有效期。
@@ -303,6 +324,35 @@ object HookSwipeGesture {
     /** 后台补读开关的节流时间戳，避免每次 DOWN 都起线程。 */
     @Volatile
     private var radialFlagRetryAt = 0L
+
+    /**
+     * 轮盘手势的看门狗。
+     *
+     * 为什么非有不可：这条 ROM 上 `ACTION_UP` 并不可靠，而我们又在 DOWN 阶段
+     * 就把事件吞掉了 —— Launcher 因此根本不会创建 `AbsSwipeUpHandler`，
+     * `handleGestureEnd` 里的那次「补提交」永远不会执行。两件事叠起来就是：
+     * UP 一丢，`radialGate` 永久停在 ARMED/REVEALED，悬浮窗也一直挂着，
+     * 之后任何一条 MOVE 都会被当成「轮盘还在展开」吞掉。
+     *
+     * Launcher 的 `recents_animation_input_consumer` 收不到后续事件，
+     * InputDispatcher 等满 5 秒后报 `Input dispatching timed out`；
+     * 因为这个 consumer 注册在 system 侧，ANR 会归到 system 进程，
+     * 用户看到的就是「进程 system 没有响应」。
+     *
+     * 超时只清理、不提交：输入流已经断了，用户并没有完成「滑到目标再松手」，
+     * 这时替他启动一个应用属于误操作。
+     */
+    private val radialWatchdogHandler by lazy { Handler(Looper.getMainLooper()) }
+
+    private val radialWatchdog = Runnable {
+        if (radialGate.isActive || RadialMenuController.isShowing) {
+            RadialTrace.log(
+                "watchdog: gesture never finished state=${radialGate.state} " +
+                    "showing=${RadialMenuController.isShowing}"
+            )
+            clearRadialState()
+        }
+    }
 
     /**
      * resolveContext 解析出的可用 Context 缓存，避免每次手势结束后
@@ -2099,19 +2149,25 @@ object HookSwipeGesture {
         val gate = RadialGestureGate(revealSlopPx = slop)
         gate.arm(corner, event.rawX, event.rawY)
         radialGate = gate
-        // 半径给 1f 只是为了得到一个带圆心的布局，命中判定并不使用它。
+        // 半径给 1f 只是为了得到一个带圆心的布局，命中判定并不使用它；
+        // 圆心内缩必须与真实布局保持一致，否则极角会偏出好几度。
+        val probeInset = RadialLayoutSpec.CORNER_INSET_DP * density
         radialProbe = RadialGeometry.layout(
             corner = corner,
             width = width.toFloat(),
             height = height.toFloat(),
             radius = 1f,
             itemCount = 1,
+            originInsetX = probeInset,
+            originInsetY = probeInset,
         )
         RadialTrace.log(
             "armed corner=$corner xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
                 "screen=${width}x$height slop=${slop.toInt()} " +
                 "parent=${parent?.javaClass?.simpleName ?: "none"}"
         )
+        // 从这里起事件归我们暂扣，必须有超时兜底：UP 丢失时不能一直扣着。
+        armRadialWatchdog()
     }
 
     private fun resolveRadialParent(): ViewGroup? {
@@ -2181,6 +2237,18 @@ object HookSwipeGesture {
     /** @return true 表示事件已被轮盘消费，调用方应立即返回。 */
     private fun handleRadialMove(context: Context?, event: MotionEvent): Boolean {
         if (RadialMenuController.isShowing) {
+            /*
+             * 悬浮窗可能来自上一轮没正常收尾的手势（UP 丢失）。
+             * 那种情况下 radialGate 已经 idle —— 如果这里继续无条件吞 MOVE，
+             * 事件流就永远停在我们手里，Launcher 的输入 consumer 会被判超时。
+             * 所以「本次手势有没有 gate」才是能否接管事件的唯一依据。
+             */
+            if (!radialGate.isActive) {
+                RadialTrace.log("move: menu showing without gate, dismiss stale menu")
+                RadialMenuController.dismiss(immediate = true)
+                return false
+            }
+            armRadialWatchdog()
             RadialMenuController.updatePointer(event.rawX, event.rawY)
             return true
         }
@@ -2206,12 +2274,23 @@ object HookSwipeGesture {
         val parent = resolveRadialParent()
         val (width, height) = displayBounds(safeContext)
         val corner = radialGate.corner ?: return false
+        val revealStartedAt = SystemClock.uptimeMillis()
         val shown = runCatching {
             RadialMenuController.reveal(safeContext, parent, corner, width, height)
         }.onFailure {
             XLog.e("$DEBUG_TAG radial reveal failed", it)
             RadialTrace.log("reveal threw ${it.javaClass.simpleName}:${it.message}")
         }.getOrDefault(false)
+        /*
+         * reveal 是同步跑在主线程的输入回调里的，包含跨进程取名单（可能把
+         * Z-Flow 进程拉起来）、解析图标、解码 Bitmap 和 addView。
+         * 一旦这里耗时过长，事件会在 InputDispatcher 侧堆积，
+         * 同样会走到「system 没有响应」。超过一帧就留痕，方便定位。
+         */
+        val revealCost = SystemClock.uptimeMillis() - revealStartedAt
+        if (revealCost >= 32L) {
+            RadialTrace.log("reveal slow: ${revealCost}ms shown=$shown")
+        }
 
         if (!shown) {
             // 没有收藏应用 / Provider 拒绝：本次手势不再尝试，退回原本行为。
@@ -2224,6 +2303,8 @@ object HookSwipeGesture {
         }
         radialGate.markRevealed()
         radialUsedThisGesture = true
+        // 状态切到 REVEALED，看门狗改用更宽松的「展开后」超时。
+        armRadialWatchdog()
         RadialMenuController.updatePointer(event.rawX, event.rawY)
         return true
     }
@@ -2275,6 +2356,8 @@ object HookSwipeGesture {
         val item = RadialMenuController.currentItem()
         val wasShowing = RadialMenuController.isShowing
         RadialMenuController.dismiss()
+        // 手势已有终态：退场动画还在跑，看门狗不该在这时把它切成立即移除。
+        disarmRadialWatchdog()
         if (!radialGate.finish()) return
         if (item == null) {
             if (wasShowing) RadialTrace.log("commit: no selection (cancelled)")
@@ -2323,7 +2406,28 @@ object HookSwipeGesture {
         radialRevealAttempted = false
         radialProbe = null
         radialGate.reset()
+        disarmRadialWatchdog()
         RadialMenuController.dismiss(immediate = true)
+    }
+
+    /**
+     * 重挂看门狗。活跃手势每来一条事件就顺延一次，
+     * 因此只有「事件流真的断了」才会被判超时，用户按住慢慢挑不会被误伤。
+     */
+    private fun armRadialWatchdog() {
+        val timeout = if (radialGate.isRevealed) {
+            RADIAL_REVEALED_TIMEOUT_MS
+        } else {
+            RADIAL_ARMED_TIMEOUT_MS
+        }
+        runCatching {
+            radialWatchdogHandler.removeCallbacks(radialWatchdog)
+            radialWatchdogHandler.postDelayed(radialWatchdog, timeout)
+        }
+    }
+
+    private fun disarmRadialWatchdog() {
+        runCatching { radialWatchdogHandler.removeCallbacks(radialWatchdog) }
     }
 
     /** @return true 表示事件已被轮盘消费，调用方必须阻止 Launcher 继续处理。 */
@@ -2368,6 +2472,22 @@ object HookSwipeGesture {
                 releaseInDropTarget = false
 
                 /*
+                 * 新的一条输入序列开始，先把上一轮的残留清干净。
+                 *
+                 * armRadialGesture 只会 reset 状态机，不会摘悬浮窗；而 UP 一旦丢失，
+                 * 悬浮窗会一直挂在屏幕上、radialGate 也一直 active，
+                 * 之后每条 MOVE 都会被当成「本轮轮盘」吞掉 —— 这就是
+                 * 「进程 system 没有响应」的来源。
+                 */
+                if (radialGate.isActive || RadialMenuController.isShowing) {
+                    RadialTrace.log(
+                        "down: reap stale gesture state=${radialGate.state} " +
+                            "showing=${RadialMenuController.isShowing}"
+                    )
+                    clearRadialState()
+                }
+
+                /*
                  * ACTION_DOWN 表示开始了一条新的输入序列。
                  *
                  * 某些情况下，上一轮手势结束后，活动 Handler 不会再报告
@@ -2408,7 +2528,33 @@ object HookSwipeGesture {
             MotionEvent.ACTION_MOVE -> {
                 // 轮盘展开后，指针只喂给轮盘，不再走落点提示的命中测试。
                 if (handleRadialMove(ctx, event)) return true
-                if (radialGate.isActive) return true
+
+                if (radialGate.isActive) {
+                    /*
+                     * 状态还停在 ARMED、没到展开条件。
+                     *
+                     * 位移一旦越过判定阈值却又不满足「向上 + 落在扇形内」
+                     * （典型是沿底边横滑的返回手势、以及从底角往下拖），
+                     * 就必须立刻放手。继续扣着这条 MOVE 的代价不是「手势失灵」，
+                     * 而是 Launcher 的 recents_animation_input_consumer 永远等不到
+                     * 后续事件，InputDispatcher 等满 5 秒后把 ANR 记到 system 进程上。
+                     */
+                    val probe = radialProbe
+                    if (probe != null &&
+                        radialGate.shouldAbandon(probe, event.rawX, event.rawY)
+                    ) {
+                        RadialTrace.log(
+                            "abandon: direction rejected " +
+                                "xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
+                                "down=(${radialGate.downX.toInt()},${radialGate.downY.toInt()})"
+                        )
+                        clearRadialState()
+                        return false
+                    }
+                    // 位移还不到阈值：继续暂扣（手指刚动，事件极少），并顺延看门狗。
+                    armRadialWatchdog()
+                    return true
+                }
 
                 val target =
                     hintView ?: return false
@@ -2494,6 +2640,7 @@ object HookSwipeGesture {
                 RadialMenuController.dismiss()
                 radialGate.finish()
                 radialProbe = null
+                disarmRadialWatchdog()
                 if (consumed) return true
             }
         }
