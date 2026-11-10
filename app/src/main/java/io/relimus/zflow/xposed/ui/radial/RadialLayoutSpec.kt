@@ -2,12 +2,15 @@ package io.relimus.zflow.xposed.ui.radial
 
 import kotlin.math.PI
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 
 /**
  * 轮盘的尺寸预算。全部为像素单位，由 [RadialLayoutSpec.fit] 按屏幕与密度算出。
  *
  * [iconDiameter] 是**白色圆盘**的直径，里面再按 [ICON_INSET_RATIO] 放图标。
+ * [shares] 是每环的格子数（下标 0 = 最内环），绘制必须用它而不是重新分配，
+ * 否则格数与半径对不上，环内就会挤在一起。
  */
 internal data class RadialMetrics(
     val radius: Float,
@@ -18,30 +21,29 @@ internal data class RadialMetrics(
     val originInsetX: Float,
     val originInsetY: Float,
     val fitScale: Float,
-    /** 环数：条目多时排成两环，而不是把单环拉到手臂够不到的地方。 */
+    /** 环数：条目多时逐层往外排，而不是把单环拉到手臂够不到的地方。 */
     val rings: Int = 1,
     /** 相邻环的半径差。 */
     val ringStep: Float = 0f,
+    /** 每环格子数，内 → 外。 */
+    val shares: List<Int> = emptyList(),
 )
 
 /**
  * 自适应尺寸计算。
  *
- * 视觉基线对齐 GestureEVO：**圆盘大、间隙均匀**。所有条目共用同一套尺寸，
- * 因此约束只有三条：
+ * 视觉基线对齐 GestureEVO：**圆盘大、间隙均匀、逐层往外铺开**。
  *
- * 1. 同环相邻格子的弧长间距 >= 圆盘直径 + [ICON_GAP_DP]；
- * 2. 外环边缘（半径 + 半个圆盘 + 内边距）不超过 [MAX_RADIUS_DP]，
- *    也就是「从底角伸手能舒服够到」的范围；
- * 3. 整个扇形必须落在屏幕内，超了等比缩小。
+ * 排布策略是「先决定每环放几个，再反推半径」：
  *
- * 第 2 条压不住时先缩小圆盘（而不是把半径推到屏幕另一头）：
- * 半径过大时手指要划过半个屏幕才能选中，手感会明显变差。
+ * 1. 环数按条目数取 1 / 2 / 3（<=3 单弧、4~6 两环、7~13 三环）；
+ * 2. 枚举所有「内少外多」的格数组合（如 13 个的 3+4+6），
+ *    对每种组合算出满足「同环弦长 >= 圆盘 + 间隙」所需的最小内环半径，
+ *    取最紧凑的那一种 —— 13 个自然收敛到 3+4+6，正是 GestureEVO 的三层观感；
+ * 3. 外缘超过屏幕可用范围时先缩圆盘，缩到下限仍放不下才等比缩放。
  *
- * 排布策略：
- * - <= [SINGLE_RING_MAX] 个：单弧，一圈到底；
- * - 6 个：内外两环**角度对齐**（2 列 x 3 行，沿弧线弯过去的网格），
- *   蜂窝错排会让相邻两环的圆心距离接近圆盘直径，看起来是糊在一起的一团。
+ * 第 2 步刻意不用「容量整除」的贪心：贪心在 4 个时会给出一环 1 个、
+ * 二环 3 个的细长布局，内环孤零零一个圆看起来像画错了。
  */
 internal object RadialLayoutSpec {
 
@@ -51,14 +53,11 @@ internal object RadialLayoutSpec {
     /** 图标在圆盘里占的比例：留出白边，视觉上更像 GestureEVO 的圆形按钮。 */
     const val ICON_INSET_RATIO = 0.62f
 
-    /** 外缘允许的最大半径（含半个圆盘与内边距）。 */
-    private const val MAX_RADIUS_DP = 250f
-
-    /** 单条弧能舒服排下的最大条目数，再往上排两环。 */
-    private const val SINGLE_RING_MAX = 5
-
-    /** 最近的一个圆盘离角落的距离，避免整组贴着导航条。 */
-    private const val MIN_RADIUS_DP = 96f
+    /**
+     * 允许的最大圆盘。三个环要靠「圆盘 + 间隙」当步长往外推，
+     * 大圆盘 + 三环在手机上会直接顶到屏幕对角，因此封顶 72dp。
+     */
+    private const val MAX_ICON_DP = 72f
 
     /** 圆盘下限：再小就看不清、也点不准。 */
     private const val MIN_ICON_DP = 34f
@@ -66,8 +65,17 @@ internal object RadialLayoutSpec {
     private const val ICON_GAP_DP = 10f
     private const val OUTER_PADDING_DP = 8f
     private const val SCREEN_PADDING_DP = 6f
+
     /**
-     * 扇形圆心相对屏幕角落的内缩（dp）。
+     * 内环半径下限：轮盘要「浮」在触发点上方一段距离，而不是挤在手指边上。
+     *
+     * 取 108dp 是实机观感的分界：再小，第一个圆盘会贴着屏幕边缘，
+     * 手指刚动就已经压在图标上，既看不清也容易误选。
+     */
+    private const val MIN_INNER_RADIUS_DP = 108f
+
+    /**
+     * 圆心相对屏幕角落的内缩（dp）。
      *
      * 手势判定用的探针布局必须用同一个值：探针只借 layout 的圆心算极角，
      * 圆心若与真实布局差几十像素，同一个点上算出的角度会差好几度，
@@ -75,9 +83,32 @@ internal object RadialLayoutSpec {
      */
     internal const val CORNER_INSET_DP = 8f
 
-    /** 容量上限：6 格按 2x3 排布，再往上加就只能靠缩圆盘，观感会崩。 */
-    const val MAX_ITEMS = 6
+    /** 单弧能舒服排下的最大条目数，再往上分两环。 */
+    private const val SINGLE_RING_MAX = 3
+
+    /** 两环能舒服排下的最大条目数，再往上分三环。 */
+    private const val DOUBLE_RING_MAX = 6
+
+    /** 容量上限：三环 3+4+6 共 13 个。 */
+    const val MAX_ITEMS = 13
     const val MIN_ITEMS = 1
+
+    /** 与 [RadialGeometry] 保持一致的屏幕边缘留角，尺寸计算里要用同一份。 */
+    private const val SAFE_DEGREES = 3f
+
+    /** 条目数对应的环数。 */
+    fun ringsFor(count: Int): Int = when {
+        count <= SINGLE_RING_MAX -> 1
+        count <= DOUBLE_RING_MAX -> 2
+        else -> 3
+    }
+
+    private class Solution(
+        val radius: Float,
+        val step: Float,
+        val shares: IntArray,
+        val edge: Float,
+    )
 
     fun fit(
         widthPx: Int,
@@ -87,76 +118,83 @@ internal object RadialLayoutSpec {
         iconSizeDp: Float = BASE_ICON_DP,
         sweepDegrees: Float = RadialGeometry.DEFAULT_SWEEP_DEGREES,
         hitRadiusDp: Float? = null,
+        /** 触发点相对屏幕底边的抬升（px），圆心跟着一起上移。 */
+        triggerOffsetYPx: Float = 0f,
     ): RadialMetrics {
         val densitySafe = density.takeIf { it.isFinite() && it > 0f } ?: 1f
         val count = itemCount.coerceIn(MIN_ITEMS, MAX_ITEMS)
         val width = widthPx.coerceAtLeast(1).toFloat()
         val height = heightPx.coerceAtLeast(1).toFloat()
 
-        val iconDp = iconSizeDp.coerceIn(MIN_ICON_DP, 72f)
+        val iconDp = iconSizeDp.coerceIn(MIN_ICON_DP, MAX_ICON_DP)
         val gap = ICON_GAP_DP * densitySafe
         val outerPadding = OUTER_PADDING_DP * densitySafe
         val screenPadding = SCREEN_PADDING_DP * densitySafe
         val inset = CORNER_INSET_DP * densitySafe
+        val triggerOffset = triggerOffsetYPx.takeIf { it.isFinite() && it > 0f } ?: 0f
 
         val safeSweep = sweepDegrees.takeIf { it.isFinite() && it > 0f }
             ?.coerceIn(30f, 170f) ?: RadialGeometry.DEFAULT_SWEEP_DEGREES
-
-        val rings = if (count > SINGLE_RING_MAX) 2 else 1
-        val shares = RadialGeometry.ringShares(count, rings)
-        // 与 RadialGeometry.layout 用同一份留角，否则算出来的半径会略微偏小。
         val safe = SAFE_DEGREES.coerceAtMost(safeSweep / 4f)
+        // 各环共用的可用张角（弧度），弦长约束都基于它。
+        val usable = (safeSweep - safe * 2f) * PI.toFloat() / 180f
 
-        /*
-         * 内环半径的下限 = 各环「自己排得下」所需半径里最大的那个。
-         * 外环半径 = 内环 + step，所以外环的需求要减去 step 再比较。
-         */
-        fun innerRadiusFor(diameter: Float): Float {
+        val rings = ringsFor(count)
+        val minPerRing = if (count >= rings * 2) 2 else 1
+        val candidates = candidateShares(count, rings, minPerRing)
+        val minInnerBase = MIN_INNER_RADIUS_DP * densitySafe
+
+        /** 给定圆盘直径，求最紧凑且放得下的排布；返回 null 表示一个组合都不成立。 */
+        fun solve(diameter: Float): Solution? {
             val step = diameter + gap
-            var need = 0f
-            for (ring in shares.indices) {
-                val perRing = shares[ring]
-                if (perRing <= 0) continue
-                val slotRadians = (safeSweep - safe * 2f) / perRing *
-                    PI.toFloat() / 180f
-                val chord = 2f * sin(slotRadians / 2f)
-                if (chord <= 0.0001f) continue
-                val ringNeed = (diameter + gap) / chord - ring * step
-                need = max(need, ringNeed)
+            val minInner = max(minInnerBase, step * 1.05f)
+            var best: Solution? = null
+            for (shares in candidates) {
+                // 每种组合所需的内环半径：各环需求减去自己已经外移的距离。
+                var need = minInner
+                for (ring in shares.indices) {
+                    val perRing = shares[ring]
+                    if (perRing <= 1) continue
+                    val required = step / (2f * sin(usable / (2f * perRing)))
+                    need = max(need, required - ring * step)
+                }
+                val edge = need + (rings - 1) * step + diameter / 2f + outerPadding
+                if (best == null || need < best.radius - 0.5f) {
+                    best = Solution(need, step, shares, edge)
+                }
             }
-            return max(need, MIN_RADIUS_DP * densitySafe)
+            return best
         }
 
-        val maxRadius = MAX_RADIUS_DP * densitySafe
+        // 圆心到最远圆盘外缘的距离必须落在屏幕内（触发点上移后向上空间会变小）。
+        val allowedX = width - inset - screenPadding
+        val allowedY = height - inset - triggerOffset - screenPadding
+        val allowed = min(allowedX, allowedY)
+
         val minIcon = MIN_ICON_DP * densitySafe
-
         var diameter = iconDp * densitySafe
-        var radius = 0f
-        var step = 0f
-        while (true) {
-            step = diameter + gap
-            radius = innerRadiusFor(diameter)
-            val outerEdge = radius + (rings - 1) * step + diameter / 2f + outerPadding
-            if (outerEdge <= maxRadius + 0.5f || diameter <= minIcon) break
+        var solution = solve(diameter)
+        while (solution != null && solution.edge > allowed + 0.5f && diameter > minIcon) {
             diameter -= 2f * densitySafe
+            solution = solve(diameter)
         }
-        diameter = diameter.coerceAtLeast(minIcon)
+        var radius = solution?.radius ?: minInnerBase
+        var step = solution?.step ?: (diameter + gap)
+        var shares = solution?.shares ?: IntArray(rings) { count / rings }
+        var edge = solution?.edge ?: (radius + (rings - 1) * step + diameter / 2f + outerPadding)
 
-        // 圆心到最远圆盘外缘的距离必须落在屏幕内。
-        val allowed = minOf(width, height) - screenPadding * 2f - inset
-        val needed = radius + (rings - 1) * step + diameter / 2f + outerPadding
         var fitScale = 1f
-        if (needed > allowed && allowed > 0f) {
-            fitScale = (allowed / needed).coerceIn(0.55f, 1f)
+        if (edge > allowed && allowed > 0f) {
+            fitScale = (allowed / edge).coerceIn(0.5f, 1f)
             radius *= fitScale
             step *= fitScale
             diameter *= fitScale
+            edge *= fitScale
         }
 
-        val outerRadius = radius + (rings - 1) * step + diameter / 2f + outerPadding
         /*
          * 命中半径按半径比例给，而不是只按圆盘大小：
-         * 手指从底角划出约三分之一半径就开始跟手选中，靠近角落则取消。
+         * 三环时内环与触发点之间隔着一整圈，手指要划过一段才开始跟手选中。
          */
         val enter = hitRadiusDp
             ?.takeIf { it.isFinite() && it > 0f }
@@ -169,17 +207,48 @@ internal object RadialLayoutSpec {
         return RadialMetrics(
             radius = radius,
             iconDiameter = diameter,
-            outerRadius = outerRadius,
+            outerRadius = edge,
             enterRadius = enter,
             keepRadius = keep,
             originInsetX = inset,
-            originInsetY = inset,
+            originInsetY = inset + triggerOffset,
             fitScale = fitScale,
             rings = rings,
             ringStep = step,
+            shares = shares.toList(),
         )
     }
 
-    /** 与 [RadialGeometry] 保持一致的屏幕边缘留角，尺寸计算里要用同一份。 */
-    private const val SAFE_DEGREES = 3f
+    /**
+     * 所有「内少外多」的格数组合。
+     *
+     * 只用内环 <= 中环 <= 外环这一条约束：反过来的组合（内环塞满、外环空着）
+     * 在视觉上是反的，算出来的半径也不会更小。
+     */
+    private fun candidateShares(count: Int, rings: Int, minPerRing: Int): List<IntArray> {
+        val result = ArrayList<IntArray>()
+        val current = IntArray(rings)
+        fun walk(ring: Int, remaining: Int, previous: Int) {
+            if (ring == rings - 1) {
+                if (remaining < previous || remaining < minPerRing) return
+                current[ring] = remaining
+                result.add(current.copyOf())
+                return
+            }
+            val tail = rings - ring - 1
+            val lower = max(previous, minPerRing)
+            val upper = remaining - tail * lower
+            for (value in lower..upper) {
+                current[ring] = value
+                walk(ring + 1, remaining - value, value)
+            }
+        }
+        walk(0, count, minPerRing)
+        // 极端情况下（比如 7 个三环且 minPerRing=2）组合表可能为空，退化为均分。
+        if (result.isEmpty()) {
+            val base = count / rings
+            result.add(IntArray(rings) { if (it == rings - 1) count - base * (rings - 1) else base })
+        }
+        return result
+    }
 }

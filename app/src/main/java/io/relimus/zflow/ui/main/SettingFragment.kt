@@ -72,6 +72,18 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                 findPreference<Preference>("quick_floating_app")!!.onPreferenceClickListener = this
                 findPreference<Preference>("trusted_callers")?.onPreferenceClickListener = this
                 findPreference<Preference>("radial_gesture_apps")?.onPreferenceClickListener = this
+                findPreference<SeekBarPreference>("radial_trigger_height")?.apply {
+                    // 右侧已经由 showSeekBarValue 显示数字，标题下方补一句带百分号的说明，
+                    // 否则「12」看不出是百分比还是 dp。
+                    summary = getString(R.string.radial_trigger_height_value, value)
+                    setOnPreferenceChangeListener { pref, newValue ->
+                        pref.summary = getString(
+                            R.string.radial_trigger_height_value,
+                            (newValue as? Int) ?: 0,
+                        )
+                        true
+                    }
+                }
                 updateRadialAppsSummary()
             }
 
@@ -330,5 +342,8 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
         }
         // 从「轮盘应用」页返回时名单可能已经变了，摘要要跟着刷新。
         updateRadialAppsSummary()
+        findPreference<SeekBarPreference>("radial_trigger_height")?.let { pref ->
+            pref.summary = getString(R.string.radial_trigger_height_value, pref.value)
+        }
     }
 }

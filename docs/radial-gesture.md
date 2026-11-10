@@ -1,18 +1,25 @@
 # 底角上滑轮盘
 
-从屏幕左右下角斜向上滑，扇形展开最多 6 个应用，滑到目标松手即以小窗打开。
+从屏幕左右下角斜向上滑，扇形展开最多 13 个应用（三环 3+4+6），滑到目标松手即以小窗打开。
 
 ## 交互规则
 
 | 阶段 | 判定 | 说明 |
 |---|---|---|
-| 起手 | 按下点落在左下/右下热区内（56dp 高、22% 屏宽） | 超出热区一律按原有上滑处理 |
+| 起手 | 按下点落在左下/右下热区内（以触发点为中心，上下各 40dp，宽 22% 屏宽） | 超出热区一律按原有上滑处理 |
 | 展开 | 位移 > `touchSlop`，**垂直位移朝上且超过半个阈值**，且指针落在扇形张开的一侧（容差 20°） | 只认「斜向内上滑」，沿底边横扫不会触发 |
 | 选择 | 最近格心 + 进入半径，带 0.62×圆盘直径的迟滞 | 手指滑出弧线外仍可继续选，边界不抖 |
 | 提交 | 松手时取选中项 | 未选中任何一格则不打开，退回 Launcher 原本行为 |
 
 - 开关：设置 → 启动与触发 → 桌面与手势 → 上滑轮盘（默认关闭，见 `settings.xml`）。
-- 名单：设置 → 启动与触发 → 桌面与手势 → 轮盘应用（最多 6 个，**勾选顺序即轮盘排列顺序**）。
+- 触发位置：同页「触发位置」，可选两侧 / 仅左侧 / 仅右侧。只开一侧时另一侧的底角
+  完全不响应，把那个角让回系统手势。
+- 触发点高度：同页「触发点高度」，0%～30%（相对屏高）。热区与轮盘锚点一起上移，
+  **热区厚度不变**，所以调高不会把屏幕下半部分的上滑手势全部吃掉。
+  但要注意：调得越高，那块屏幕区域原本的上滑（滚动列表等）越容易被轮盘接管。
+- 轮盘离指距离：内环半径下限 108dp，白色圆盘整体「浮」在触发点上方一段距离，
+  而不是挤在手指边上（之前贴得近，手指刚动就压在图标上）。
+- 名单：设置 → 启动与触发 → 桌面与手势 → 轮盘应用（最多 13 个，**勾选顺序即轮盘排列顺序**）。
 - 展开期间不再显示原有的落点提示：两套浮层同时出现会让用户不知道松手会发生什么。
 - 展开期间 Launcher 的输入被**整段吃掉**（DOWN/MOVE/UP/CANCEL 都拦），
   否则最近任务卡片会和轮盘一起出现。
@@ -53,22 +60,44 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 
 ## 尺寸与排布
 
-视觉基线对齐 GestureEVO 的圆形按钮：圆盘大、间隙均匀。
+视觉基线对齐 GestureEVO 的圆形按钮：圆盘大、间隙均匀、逐层往外铺开。
 
 | 参数 | 值 |
 |---|---|
 | 圆盘（白色圆底）直径 | 56dp，最小不低于 34dp |
 | 相邻圆盘间隙 | 10dp |
-| 外缘上限（半径 + 半个圆盘 + 内边距） | 250dp |
+| 内环半径下限 | 108dp（轮盘要浮在触发点上方，不能贴着手指） |
 | 扇形张角 | 84°（两侧各留 3°，90° 会让最外格贴住屏幕边缘） |
-| ≤5 个 | 单弧排布 |
-| 6 个 | 内外两环、**角度对齐**（沿弧线弯过去的 2 列 × 3 行网格） |
+| ≤3 个 | 单弧排布 |
+| 4～6 个 | 两环 |
+| 7～13 个 | 三环，13 个时正好 3 + 4 + 6 |
 
-半径不是写死的：先按「同环相邻格子的弦长 ≥ 圆盘 + 间隙」求出内环最小半径，
-再用「外缘 ≤ 250dp」把圆盘往下收；两者冲突时优先保证圆盘饱满度不低于 34dp。
+排布算法是「先定每环几个，再反推半径」：
 
-两环**刻意不做半格错排**：错排后内环与外环的圆心距会掉到接近一个圆盘直径，
-真机上看起来是糊在一起的一团（这也是最初版本被反馈「太乱」的原因）。
+1. 枚举所有「内少外多」的格数组合（13 个的三环共十来种，如 3+4+6、4+4+5、2+5+6）；
+2. 对每种组合算出满足「同环相邻格弦长 ≥ 圆盘 + 间隙」所需的最小内环半径；
+3. 取最紧凑的那一种 —— 13 个自然收敛到 **3+4+6**，正是 GestureEVO 的三层观感；
+4. 外缘超出屏幕可用范围时先缩圆盘，缩到下限仍放不下才等比缩放。
+
+第 1 步刻意不用「容量整除」的贪心：贪心在 4 个时会给出一环 1 个、二环 3 个的细长布局，
+内环孤零零一个圆看起来像画错了。因此数量 ≥ 环数×2 时强制每环至少 2 个。
+
+同一环内均分可用张角；不同环格数不同，因此**不做跨环角度对齐**（这也是它看起来像
+「沿弧线铺开的三层网格」而不是方格子的原因）。
+
+## 触发点
+
+| 项 | 存储键 | 取值 |
+|---|---|---|
+| 起手侧 | `radial_trigger_side` | `both` / `left` / `right`，默认 `both` |
+| 触发点高度 | `radial_trigger_height` | 0～30（百分比），默认 0（贴底） |
+
+两项都写在 `app_settings` 里，由 `RadialTriggerSettings` 统一读取，
+跨进程通过 `NotificationSettingsProvider.get_radial_trigger` 暴露给 Launcher。
+
+热区是一条以触发点为中心、上下各 40dp 的水平带，宽度 22% 屏宽（下限 96dp）。
+触发点高度直接改变圆心 y：`anchorY = height - 8dp内缩 - height × 百分比`，
+手势探针（只用来算极角）用的是同一个圆心，否则同一个点上算出的角度会差好几度。
 
 ## 数据来源
 
@@ -79,7 +108,8 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 3. 最近任务（`ActivityManager.getRecentTasks`，去重后取前 6 个）。
 
 第 3 级只是兜底：绝大多数用户从没打开过任何一列表，纯配置制在真机上的体验就是
-「从底角上滑毫无反应」。
+「从底角上滑毫无反应」。兜底刻意只取 6 个（两环）而不是填满 13 个三层 ——
+一屏陌生应用摊在手指前面反而更难选。
 
 ## 分层
 
@@ -87,13 +117,14 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 |---|---|---|---|
 | 几何 | `xposed/ui/radial/RadialGeometry.kt` | 扇形布局、最近格命中、迟滞 | ✅ |
 | 动画 | `xposed/ui/radial/RadialMotion.kt` | 入场/退场/选中/错峰曲线（纯函数） | ✅ |
-| 尺寸 | `xposed/ui/radial/RadialLayoutSpec.kt` | 弧长间距、舒适半径、圆盘尺寸、单/双环 | ✅ |
+| 尺寸 | `xposed/ui/radial/RadialLayoutSpec.kt` | 弧长间距、舒适半径、圆盘尺寸、1~3 环分配 | ✅ |
 | 状态 | `xposed/ui/radial/RadialGestureGate.kt` | 热区 → 展开 → 提交的状态机 | ✅ |
 | 绘制 | `xposed/ui/radial/RadialMenuView.kt` | 单 Canvas 绘制（白色圆盘 + 圆形图标 + 选中环） | — |
 | 装配 | `xposed/ui/radial/RadialMenuController.kt` | 取名单/图标、开悬浮窗、推指针、交出选中项 | — |
 | 接入 | `xposed/hook/HookSwipeGesture.kt` | 复用 Launcher 输入流驱动轮盘 | — |
 | 数据 | `providers/FreeformAppsProvider.kt` | 把两份名单只读暴露给 Launcher 进程 | — |
 | 数据 | `providers/RadialAppsStore.kt` | 轮盘名单的读写（App 进程内） | — |
+| 数据 | `providers/RadialTriggerSettings.kt` | 触发点（左右侧 + 高度）的读写 | — |
 
 ## 悬浮窗
 
@@ -115,7 +146,7 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 | 命中缺陷 | 无（但 `keepRadius=0`，无迟滞） | 圆形图标配方形判定：四角假命中、格间丢选 | 最近格心 + 可测迟滞 |
 | 绘制 | 单 Canvas | 每格一个 View + 属性动画 | 单 Canvas（取前者） |
 | 动画 | 多段手写贝塞尔，可单测 | `AnimatorSet` + Overshoot 交错，参数写死 | 进度曲线纯函数，可单测 |
-| 容量 | 固定 84°、≤7 格 | 网格列 × 行 | 84°、≤6 格（单弧 / 2×3） |
+| 容量 | 固定 84°、≤7 格 | 网格列 × 行 | 84°、≤13 格（单弧 / 双环 / 三环 3+4+6） |
 | 可测性 | 11 个纯函数单测 | 2 个几何单测 | 4 个测试类覆盖几何/动画/尺寸/状态机 |
 
 刻意**没有**沿用 GestureEVO 的两处做法：
@@ -139,12 +170,15 @@ ColorOS 特定形态上，这里把半径做成按「弧长间距 + 舒适半径
 
 - `RadialGeometryTest`：左右角镜像、槽位顺序、均匀间距、最近格命中、迟滞、扇区角度；
 - `RadialMotionTest`：端点精确、展开/收拢单调、过冲有界、错峰顺序；
-- `RadialLayoutSpecTest`：弧长间距不小于图标直径、扇形不出屏、小屏等比缩放、条目数夹取；
-- `RadialGestureGateTest`：热区命中、位移不足不展开、横扫不展开、一次手势只提交一次。
+- `RadialLayoutSpecTest`：弧长间距不小于图标直径、13 个收敛到 3+4+6、4~6 个用两环且内环不孤零零、
+  扇形不出屏、小屏等比缩放、触发点上移让圆心跟着上移、条目数夹取；
+- `RadialGestureGateTest`：热区命中、单侧设置关闭另一角、触发点上移后热区跟着移动、
+  位移不足不展开、横扫不展开、一次手势只提交一次。
 
 ## 已知限制
 
-- 轮盘条目上限 6：84° 弧上再多就只能靠缩圆盘，观感会明显变差。
+- 轮盘条目上限 13：再往上加就只能缩圆盘，白色按钮会小到看不清图标。
+- 三层时外缘可到约 308dp，接近单手拇指的舒适极限；只想用几个应用时建议保持 ≤6 个。
 - **悬浮窗会被部分 ROM 压到 80% 不透明度**（小米/澎湃实测：`dumpsys window` 里
   `mAttrs.alpha=0.8`，即使客户端 `LayoutParams.alpha` 显式写 1.0 也会被改写）。
   原因是桌面进程没有 `SYSTEM_ALERT_WINDOW` 这个 appop，系统对「不可信悬浮窗」
@@ -152,7 +186,8 @@ ColorOS 特定形态上，这里把半径做成按「弧长间距 + 舒适半径
   彻底解决要把绘制搬到 Z-Flow 自己的无障碍浮层（GestureEVO 走的就是那条路），
   当前版本先用「纯白圆盘 + 1.2dp 描边 + 更实的投影」把边界做清楚。
 - 只按当前用户解析图标（名单里其它用户的应用图标可能不精确）。
-- 图标在首次展开时同步加载（≤6 个 drawable），之后命中进程内缓存。
+- 图标在**后台线程**异步加载（最多 13 个 drawable），先出白圆盘、图标随后落位；
+  位图按 `包名|userId|尺寸` 缓存 24 个，避免每次展开都重新解码。
 - 依赖 Launcher 的 `onInputEvent` 能拿到 `ACTION_MOVE`——与原落点提示走的是同一条链路，
   因此能力边界与原手势一致，不会额外要求新权限。
 
@@ -170,11 +205,11 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 一次手势的正常链路是这几行：
 
 ```
-[radial] down raw=(1400,3160) screen=1440x3200 hotspot=360x210 enabled=true corner=BOTTOM_RIGHT ctx=com.android.quickstep.TouchInteractionHandler
-[radial] armed corner=BOTTOM_RIGHT xy=(1400,3160) screen=1440x3200 slop=60 parent=DecorView
-[radial] reveal try xy=(1390,3100) down=(1400,3160) handler=...LauncherSwipeHandlerV2@...
+[radial] down raw=(1380,3100) screen=1440x3200 hotspot=360x300 anchorY=3170 side=BOTH height=0% enabled=true corner=BOTTOM_RIGHT
+[radial] armed corner=BOTTOM_RIGHT xy=(1380,3100) screen=1440x3200 slop=60 triggerOffset=0 parent=DecorView
+[radial] reveal try xy=(1350,3010) down=(1380,3100) handler=...LauncherSwipeHandlerV2@...
 [radial] overlay attached type=2006 alpha=1.0
-[radial] reveal ok corner=BOTTOM_RIGHT count=3 radius=550 icon=210 origin=(1410,3170) host=overlay(2006)
+[radial] reveal ok corner=BOTTOM_RIGHT count=13 rings=3 shares=[3, 4, 6] screen=1440x3200 radius=598 icon=210 origin=(1410,3170) host=overlay(2006)
 [radial] commit: pkg=com.tencent.mm user=0
 ```
 
@@ -183,7 +218,8 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 | 缺哪行 | 含义 | 处理 |
 |---|---|---|
 | `armed` 之前是 `skip: switch off` | 设置里的「上滑轮盘」没开 | 打开开关；若确认已开，看是否 `skip: no context` |
-| `skip: outside corner hotspot` | 起手点不在底角热区（56dp 高 / 22% 屏宽） | 从更靠角落的位置起手，或调 `RADIAL_CORNER_HOTSPOT_DP` / `RADIAL_CORNER_WIDTH_FRACTION` |
+| `corner=null` 且 `side=LEFT`（或 `RIGHT`） | 当前只允许一侧起手，按到了另一侧 | 正常行为；到「触发位置」改成「两侧」 |
+| `skip: outside corner hotspot` | 起手点不在热区（以触发点为中心上下各 40dp / 22% 屏宽） | 从更靠近触发点的位置起手，或调 `RADIAL_CORNER_HOTSPOT_DP` / `RADIAL_CORNER_WIDTH_FRACTION` |
 | 只有 `armed`，没有 `reveal try` | `ACTION_MOVE` 没送到输入 Hook，或方向被 `shouldReveal` 挡掉 | 松手时会打 `up: armed but never revealed`；若连松手日志都没有，说明该 ROM 截断了 MOVE 流 |
 | `overlay type=2006 failed` 后仍 `overlay attached` | 系统浮层被拒，退回了 `APPLICATION_OVERLAY` | 属于预期降级；若两种都失败会继续打 `overlay type=... failed` |
 | `reveal abort: empty_favorites` | 三份名单都空（同时会弹一次 Toast） | 到「轮盘应用」里勾几个应用 |

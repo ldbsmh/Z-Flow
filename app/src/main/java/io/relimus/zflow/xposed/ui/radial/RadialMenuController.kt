@@ -28,6 +28,14 @@ internal object RadialMenuController {
     /** 图标缓存上限；被 hook 的 Launcher 进程长期存活，必须封顶。 */
     private const val ICON_CACHE_LIMIT = 24
 
+    /**
+     * 兜底名单最多显示几个最近任务。
+     *
+     * 用户没配置名单时才走这条路径。这时塞满三层（13 个）等于把一屏陌生应用
+     * 摊在手指前面，反而更难选；6 个（两环）既够用也不会让人不知所措。
+     */
+    private const val RECENT_FALLBACK_LIMIT = 6
+
     /** 不该出现在轮盘里的包名：模块自己、系统 UI、桌面。 */
     private val IGNORED_PACKAGES = setOf(
         "io.relimus.zflow",
@@ -39,6 +47,10 @@ internal object RadialMenuController {
     private var view: RadialMenuView? = null
     private var hostRef: WeakReference<ViewGroup>? = null
     private var windowRef: WeakReference<android.view.WindowManager>? = null
+
+    /** 展开批次号：后台补图标时校验，丢弃上一次窗口的过期结果。 */
+    @Volatile
+    private var iconGeneration = 0
 
     /** 实际生效的窗口类型，仅用于诊断（见 [attach] 里的选择顺序）。 */
     private var windowType = android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -87,6 +99,7 @@ internal object RadialMenuController {
         corner: RadialCorner,
         widthPx: Int,
         heightPx: Int,
+        triggerOffsetYPx: Float = 0f,
     ): Boolean {
         lastFailureReason = null
         dismiss(immediate = true)
@@ -105,6 +118,7 @@ internal object RadialMenuController {
             heightPx = heightPx,
             density = context.resources.displayMetrics.density,
             itemCount = count,
+            triggerOffsetYPx = triggerOffsetYPx,
         )
         val placed = RadialGeometry.layout(
             corner = corner,
@@ -116,6 +130,7 @@ internal object RadialMenuController {
             originInsetY = fitted.originInsetY,
             rings = fitted.rings,
             ringStep = fitted.ringStep,
+            shares = fitted.shares.toIntArray(),
         )
         if (placed.isEmpty) {
             lastFailureReason = "empty_layout count=$count"
@@ -125,17 +140,25 @@ internal object RadialMenuController {
         val iconSize = (fitted.iconDiameter * RadialLayoutSpec.ICON_INSET_RATIO)
             .toInt()
             .coerceAtLeast(1)
-        val loaded = favorites.take(count).map { favorite ->
+        /*
+         * 先挂上「有格子、没图标」的版本，图标在后台线程补。
+         *
+         * 三环最多 13 个应用，逐个 getApplicationIcon + 裁圆 + 解码在输入回调里
+         * 同步跑要上百毫秒，事件会在 InputDispatcher 侧堆积（之前 ANR 的成因之一）。
+         * 白圆盘先出来，图标随后落位，观感上只是「图标稍晚一点出现」。
+         */
+        val chosen = favorites.take(count)
+        val placeholders = chosen.map { favorite ->
             RadialItem(
                 packageName = favorite.packageName,
                 userId = favorite.userId,
                 label = favorite.label,
-                icon = circularIcon(context, favorite, iconSize),
+                icon = null,
             )
         }
 
         val menu = RadialMenuView(context)
-        menu.configure(placed, fitted, loaded)
+        menu.configure(placed, fitted, placeholders)
         if (!attach(menu, parent)) return false
         menu.isClickable = false
         menu.isFocusable = false
@@ -143,14 +166,47 @@ internal object RadialMenuController {
         menu.animateIn()
 
         view = menu
-        items = loaded
+        items = placeholders
+        loadIconsAsync(context, chosen, menu, iconSize, ++iconGeneration)
+
         RadialTrace.log(
-            "reveal ok corner=$corner count=$count screen=${widthPx}x${heightPx} " +
+            "reveal ok corner=$corner count=$count rings=${fitted.rings} " +
+                "shares=${fitted.shares} screen=${widthPx}x${heightPx} " +
                 "radius=${fitted.radius.toInt()} icon=${fitted.iconDiameter.toInt()} " +
                 "origin=(${placed.origin.x.toInt()},${placed.origin.y.toInt()}) " +
                 "host=${if (windowRef != null) "overlay($windowType)" else "viewgroup"}"
         )
         return true
+    }
+
+    /**
+     * 后台补图标。
+     *
+     * [generation] 用来丢弃过期任务：用户可能在手势取消后立刻再展开一次，
+     * 上一个窗口的图标不能画到新窗口上（数量相同但应用不同，会配错图）。
+     */
+    private fun loadIconsAsync(
+        context: Context,
+        chosen: List<Favorite>,
+        menu: RadialMenuView,
+        iconSize: Int,
+        generation: Int,
+    ) {
+        val app = context.applicationContext ?: context
+        runCatching {
+            Thread({
+                val bitmaps = chosen.map { favorite ->
+                    runCatching { circularIcon(app, favorite, iconSize) }.getOrNull()
+                }
+                if (generation != iconGeneration) return@Thread
+                menu.post {
+                    if (generation != iconGeneration || view !== menu) return@post
+                    menu.applyIcons(bitmaps)
+                    val missing = bitmaps.count { it == null }
+                    if (missing > 0) RadialTrace.log("icons missing=$missing/${bitmaps.size}")
+                }
+            }, "zflow-radial-icons").apply { isDaemon = true }.start()
+        }
     }
 
     /**
@@ -260,6 +316,8 @@ internal object RadialMenuController {
     fun dismiss(immediate: Boolean = false, onFinished: (() -> Unit)? = null) {
         val menu = view
         val windowManager = windowRef?.get()
+        // 让还在跑的后台任务失效，避免把图标写到下一个窗口上。
+        iconGeneration += 1
         view = null
         hostRef = null
         windowRef = null
@@ -366,7 +424,7 @@ internal object RadialMenuController {
                 ?: return@runCatching emptyList()
             @Suppress("DEPRECATION")
             val tasks = am.getRecentTasks(
-                RadialLayoutSpec.MAX_ITEMS * 4,
+                RECENT_FALLBACK_LIMIT * 4,
                 android.app.ActivityManager.RECENT_IGNORE_UNAVAILABLE,
             )
             val seen = LinkedHashSet<String>()
@@ -376,7 +434,7 @@ internal object RadialMenuController {
                     ?: continue
                 if (pkg == context.packageName || pkg in IGNORED_PACKAGES) continue
                 seen.add(pkg)
-                if (seen.size >= RadialLayoutSpec.MAX_ITEMS) break
+                if (seen.size >= RECENT_FALLBACK_LIMIT) break
             }
             seen.toList()
         }.getOrElse { throwable ->

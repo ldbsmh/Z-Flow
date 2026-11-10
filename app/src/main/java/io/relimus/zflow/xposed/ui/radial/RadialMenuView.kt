@@ -27,7 +27,8 @@ internal data class RadialItem(
  * 底角扇形轮盘。
  *
  * 视觉参照 GestureEVO：**没有扇形底板**，每个应用是一枚独立的白色圆形按钮，
- * 带柔和投影，按环错排。这样既不遮壁纸，条目多了也不会糊成一片。
+ * 带柔和投影，按环逐层往外铺开（最多三层 3+4+6）。这样既不遮壁纸，
+ * 条目多了也不会糊成一片。
  *
  * 关键取舍：整个轮盘是一个 View、一次 Canvas 绘制，没有子 View。
  * 1. 没有 measure/layout 开销，每帧只剩绘制本身；
@@ -117,6 +118,21 @@ internal class RadialMenuView(context: Context) : View(context) {
         iconRadius = chipRadius * RadialLayoutSpec.ICON_INSET_RATIO
         enterRadius = metrics.enterRadius
         keepRadius = metrics.keepRadius
+        invalidate()
+    }
+
+    /**
+     * 后台线程算好的图标落位。
+     *
+     * 只在数量一致时生效：数量对不上说明这是上一轮窗口的结果，
+     * 直接丢弃比画到错误的格子上安全。
+     */
+    fun applyIcons(icons: List<Bitmap?>) {
+        if (icons.size != items.size) return
+        items = items.mapIndexed { index, item ->
+            val icon = icons[index]
+            if (icon == null || icon.isRecycled) item else item.copy(icon = icon)
+        }
         invalidate()
     }
 

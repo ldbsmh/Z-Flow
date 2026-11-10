@@ -110,6 +110,38 @@ object RemoteSettings {
         isFeatureEnabledOrNull(context, key) ?: default
 
     /**
+     * 读取轮盘的触发点配置（哪一侧 + 离底边多高）。
+     *
+     * 读不到返回 null 而不是默认值：被 hook 的进程需要区分「用户设成了贴底两侧」
+     * 和「Provider 还没起来」，前者可以静默使用，后者要退避重试。
+     */
+    fun getRadialTrigger(context: Context): RadialTriggerSettings.Config? {
+        val cacheKey = "radial_trigger"
+        val now = android.os.SystemClock.uptimeMillis()
+        cache[cacheKey]?.let { cached ->
+            if (now - cached.at < FLAG_CACHE_MS) return cached.value as? RadialTriggerSettings.Config
+        }
+        val value = runCatching {
+            val result = call(context, NotificationSettingsProvider.METHOD_GET_RADIAL_TRIGGER, null)
+            if (result == null || result.isDenied()) {
+                null
+            } else {
+                RadialTriggerSettings.Config(
+                    side = RadialTriggerSettings.Side.from(
+                        result.getString(NotificationSettingsProvider.EXTRA_TRIGGER_SIDE)
+                    ),
+                    heightPercent = result.getInt(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_HEIGHT,
+                        RadialTriggerSettings.DEFAULT_HEIGHT_PERCENT,
+                    ).coerceIn(0, RadialTriggerSettings.MAX_HEIGHT_PERCENT),
+                )
+            }
+        }.getOrNull()
+        if (value != null) cache[cacheKey] = CacheEntry(value, now)
+        return value
+    }
+
+    /**
      * 读取“通知小窗”总开关（notify_freeform）。
      * 关掉时通知上不显示小窗按钮。
      */

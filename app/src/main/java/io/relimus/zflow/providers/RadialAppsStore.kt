@@ -15,8 +15,13 @@ import io.relimus.zflow.app.ZFlow
  */
 object RadialAppsStore {
 
-    /** 与 [io.relimus.zflow.xposed.ui.radial.RadialLayoutSpec.MAX_ITEMS] 对齐。 */
-    const val MAX_ITEMS = 6
+    /**
+     * 与 [io.relimus.zflow.xposed.ui.radial.RadialLayoutSpec.MAX_ITEMS] 对齐。
+     *
+     * 13 = 三环 3+4+6，正好是轮盘能干净排下的极限：再多一格就必须缩圆盘，
+     * 白色按钮会小到看不清图标。
+     */
+    const val MAX_ITEMS = 13
 
     private const val KEY = "radial_apps"
     private const val SEPARATOR = "\n"

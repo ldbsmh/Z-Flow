@@ -66,7 +66,10 @@ internal object RadialGeometry {
      * @param itemCount 条目数；<= 0 时返回空布局而不是抛异常
      * @param sweepDegrees 扇形张角，调用方可以按条目数收窄
      * @param originInsetX 圆心相对屏幕角落的水平内缩（避开圆角）
-     * @param originInsetY 圆心垂直内缩（避开手势条）
+     * @param originInsetY 圆心垂直内缩（避开手势条，也用于「触发点上移」）
+     * @param rings 环数；每环格子数由 [shares] 决定，不传时按 [ringShares] 均分
+     * @param shares 每环格子数（内 → 外）。尺寸计算（[RadialLayoutSpec]）已经
+     *        选定了一份「内少外多」的分配，这里必须沿用，否则环内会挤在一起
      */
     fun layout(
         corner: RadialCorner,
@@ -79,6 +82,7 @@ internal object RadialGeometry {
         originInsetY: Float = 0f,
         rings: Int = 1,
         ringStep: Float = 0f,
+        shares: IntArray? = null,
     ): RadialLayout {
         val safeWidth = width.takeIf { it.isFinite() && it > 0f } ?: 0f
         val safeHeight = height.takeIf { it.isFinite() && it > 0f } ?: 0f
@@ -96,7 +100,11 @@ internal object RadialGeometry {
 
         val ringCount = rings.coerceIn(1, 3)
         val step = ringStep.takeIf { it.isFinite() && it > 0f } ?: 0f
-        val shares = ringShares(itemCount, ringCount)
+        // 尺寸计算已经选好每环格数时直接沿用：它与半径是配套算出来的，
+        // 这里再均分一次会让内环格数变多、弦长不足而互相重叠。
+        val shares = shares
+            ?.takeIf { it.size == ringCount && it.all { n -> n > 0 } && it.sum() == itemCount }
+            ?: ringShares(itemCount, ringCount)
         val safe = SAFE_DEGREES.coerceAtMost(sweep / 4f)
 
         val centers = ArrayList<RadialPoint>(itemCount)

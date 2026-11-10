@@ -58,6 +58,24 @@
                 android:summary="@string/radial_gesture_enable_summary"
                 android:defaultValue="false"
                 app:iconSpaceReserved="false"/>
+            <ListPreference
+                android:key="radial_trigger_side"
+                android:title="@string/radial_trigger_side_title"
+                android:summary="@string/radial_trigger_side_summary"
+                android:entries="@array/radial_trigger_side_entries"
+                android:entryValues="@array/radial_trigger_side_values"
+                android:defaultValue="both"
+                android:dependency="radial_gesture_enable"
+                app:useSimpleSummaryProvider="true"
+                app:iconSpaceReserved="false"/>
+            <SeekBarPreference
+                android:key="radial_trigger_height"
+                android:title="@string/radial_trigger_height_title"
+                android:max="30"
+                android:defaultValue="0"
+                android:dependency="radial_gesture_enable"
+                app:showSeekBarValue="true"
+                app:iconSpaceReserved="false"/>
             <Preference
                 android:key="radial_gesture_apps"
                 android:title="@string/radial_apps_title"

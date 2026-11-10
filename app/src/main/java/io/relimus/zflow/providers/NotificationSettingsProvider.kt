@@ -42,6 +42,11 @@ class NotificationSettingsProvider : ContentProvider() {
         const val EXTRA_FLAG_KEY = "flag_key"
         const val EXTRA_FLAG_VALUE = "flag_value"
 
+        /** 读取轮盘的触发点配置（哪一侧 + 离底边多高） */
+        const val METHOD_GET_RADIAL_TRIGGER = "get_radial_trigger"
+        const val EXTRA_TRIGGER_SIDE = "trigger_side"
+        const val EXTRA_TRIGGER_HEIGHT = "trigger_height"
+
         private const val PREFS_NAME = "app_settings"
         private const val KEY_NOTIFY_FREEFORM = "notify_freeform"
         private const val KEY_MAX_FREEFORM = "max_freeform_windows"
@@ -122,6 +127,15 @@ class NotificationSettingsProvider : ContentProvider() {
                     .getBoolean(key, fallback)
 
                 Bundle().apply { putBoolean(EXTRA_FLAG_VALUE, enabled) }
+            }
+
+            METHOD_GET_RADIAL_TRIGGER -> {
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                val config = RadialTriggerSettings.read(ctx)
+                Bundle().apply {
+                    putString(EXTRA_TRIGGER_SIDE, config.side.name.lowercase())
+                    putInt(EXTRA_TRIGGER_HEIGHT, config.heightPercent)
+                }
             }
 
             METHOD_GET_APP_LIST_VERSION -> {

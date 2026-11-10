@@ -32,10 +32,8 @@ import io.relimus.zflow.providers.RemoteSettings
 import io.relimus.zflow.utils.cast
 import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.ui.radial.RadialCorner
-import io.relimus.zflow.xposed.ui.radial.RadialGeometry
 import io.relimus.zflow.xposed.ui.radial.RadialGestureGate
 import io.relimus.zflow.xposed.ui.radial.RadialItem
-import io.relimus.zflow.xposed.ui.radial.RadialLayout
 import io.relimus.zflow.xposed.ui.radial.RadialLayoutSpec
 import io.relimus.zflow.xposed.ui.radial.RadialMenuController
 import io.relimus.zflow.xposed.ui.radial.RadialTrace
@@ -90,12 +88,13 @@ object HookSwipeGesture {
     private const val ENABLE_DIAGNOSTIC_LOGS = false
 
     /**
-     * 底角热区：从屏幕底部向内量的高度（dp）。
+     * 触发热区的半高（dp）。热区总高是它的两倍，以触发点为中心上下各一半。
      *
-     * 32dp 只覆盖到手势条的抬手上沿，稍有偏移就落在热区外，
-     * 表现为「从底角上滑没反应」；56dp 与系统手势区上沿留了余量。
+     * 40dp 对应「底部手势条 + 一点余量」：贴底时热区覆盖屏幕最下方约 80dp，
+     * 与系统手势区基本重合；把触发点调高后整条热区跟着上移，厚度不变，
+     * 不会因为调高而把屏幕下半部分的上滑手势全部吃掉。
      */
-    private const val RADIAL_CORNER_HOTSPOT_DP = 56f
+    private const val RADIAL_CORNER_HOTSPOT_DP = 40f
 
     /**
      * 底角热区的水平宽度占屏宽的比例。
@@ -275,8 +274,17 @@ object HookSwipeGesture {
      */
     private var radialGate = RadialGestureGate(revealSlopPx = 24f)
 
-    /** 只用于角度判定的探针布局：展开前还不知道真实半径，这里只借它的圆心。 */
-    private var radialProbe: RadialLayout? = null
+    /** 本次手势的触发点上移量（px），展开时原样传给轮盘，保证锚点一致。 */
+    @Volatile
+    private var radialTriggerOffsetY = 0f
+
+    /** 上一次成功读到的触发点配置；Provider 短暂不可用时沿用它，避免触发点跳变。 */
+    @Volatile
+    private var radialTriggerConfig = io.relimus.zflow.providers.RadialTriggerSettings.Config()
+
+    /** 触发点配置读取失败后的退避时间戳（避免每条 DOWN 都去撞一次 Binder）。 */
+    @Volatile
+    private var radialTriggerRetryAt = 0L
 
     /** 本次手势是否已经尝试过展开（用于只记一次失败原因，避免每个 MOVE 刷日志）。 */
     @Volatile
@@ -2055,6 +2063,25 @@ object HookSwipeGesture {
         }
     }
 
+    /**
+     * 触发点配置（哪一侧、离底边多高）。
+     *
+     * 读失败时沿用上一次成功的值，并在 3 秒内不再重试：这个调用点就在 ACTION_DOWN
+     * 里，每条手势都撞一次不可用的 Provider 会直接拖慢输入分发。
+     */
+    private fun triggerConfig(context: Context): io.relimus.zflow.providers.RadialTriggerSettings.Config {
+        val now = SystemClock.uptimeMillis()
+        if (now < radialTriggerRetryAt) return radialTriggerConfig
+        val value = runCatching { RemoteSettings.getRadialTrigger(context) }.getOrNull()
+        if (value == null) {
+            radialTriggerRetryAt = now + 3_000L
+            RadialTrace.log("trigger config unavailable, keep ${radialTriggerConfig.side}")
+            return radialTriggerConfig
+        }
+        radialTriggerConfig = value
+        return value
+    }
+
     private fun displayBounds(context: Context): Pair<Int, Int> {
         return runCatching {
             val metrics = context.getSystemService(WindowManager::class.java)
@@ -2081,7 +2108,6 @@ object HookSwipeGesture {
         radialUsedThisGesture = false
         radialLaunchedThisGesture = false
         radialRevealAttempted = false
-        radialProbe = null
         radialGate.reset()
 
         val safeContext = context
@@ -2091,12 +2117,17 @@ object HookSwipeGesture {
         }
         val (width, height) = displayBounds(safeContext)
         val density = safeContext.resources.displayMetrics.density
-        val hotspotHeight =
-            (RADIAL_CORNER_HOTSPOT_DP * density).coerceAtMost(height * 0.25f)
+        val hotspotHalf = (RADIAL_CORNER_HOTSPOT_DP * density)
+            .coerceAtMost(height * 0.12f)
         val hotspotWidth = maxOf(
             RADIAL_CORNER_MIN_WIDTH_DP * density,
             width * RADIAL_CORNER_WIDTH_FRACTION,
         ).coerceAtMost(width * 0.45f)
+
+        // 触发点配置：读不到就按「贴底 + 两侧」处理，并在后台重试（见 remindTriggerConfig）。
+        val trigger = triggerConfig(safeContext)
+        val triggerOffsetY = height * trigger.heightPercent / 100f
+        val anchorY = height - RadialLayoutSpec.CORNER_INSET_DP * density - triggerOffsetY
 
         val corner = RadialGestureGate.cornerAt(
             x = event.rawX,
@@ -2104,7 +2135,9 @@ object HookSwipeGesture {
             width = width,
             height = height,
             hotspotWidth = hotspotWidth,
-            hotspotHeight = hotspotHeight,
+            hotspotHalfHeight = hotspotHalf,
+            anchorY = anchorY,
+            sides = trigger.side,
         )
         val enabled = radialEnabled(safeContext)
 
@@ -2114,14 +2147,15 @@ object HookSwipeGesture {
          * 这里也会把两者都打出来，避免出现「连一条日志都没有」的死角。
          */
         val nowAtDown = SystemClock.uptimeMillis()
-        val nearBottom = event.rawY >= height - hotspotHeight * 2f
+        val nearBottom = event.rawY >= anchorY - hotspotHalf * 2f
         val shouldTrace = corner != null ||
             (nearBottom && nowAtDown - lastRadialDownTraceAt >= 200L)
         if (shouldTrace) {
             lastRadialDownTraceAt = nowAtDown
             RadialTrace.log(
                 "down raw=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
-                    "screen=${width}x$height hotspot=${hotspotWidth.toInt()}x${hotspotHeight.toInt()} " +
+                    "screen=${width}x$height hotspot=${hotspotWidth.toInt()}x${(hotspotHalf * 2).toInt()} " +
+                    "anchorY=${anchorY.toInt()} side=${trigger.side} height=${trigger.heightPercent}% " +
                     "enabled=$enabled corner=$corner " +
                     "thread=${Thread.currentThread().name} ctx=${safeContext.javaClass.name}"
             )
@@ -2149,21 +2183,10 @@ object HookSwipeGesture {
         val gate = RadialGestureGate(revealSlopPx = slop)
         gate.arm(corner, event.rawX, event.rawY)
         radialGate = gate
-        // 半径给 1f 只是为了得到一个带圆心的布局，命中判定并不使用它；
-        // 圆心内缩必须与真实布局保持一致，否则极角会偏出好几度。
-        val probeInset = RadialLayoutSpec.CORNER_INSET_DP * density
-        radialProbe = RadialGeometry.layout(
-            corner = corner,
-            width = width.toFloat(),
-            height = height.toFloat(),
-            radius = 1f,
-            itemCount = 1,
-            originInsetX = probeInset,
-            originInsetY = probeInset,
-        )
+        radialTriggerOffsetY = triggerOffsetY
         RadialTrace.log(
             "armed corner=$corner xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
-                "screen=${width}x$height slop=${slop.toInt()} " +
+                "screen=${width}x$height slop=${slop.toInt()} triggerOffset=${triggerOffsetY.toInt()} " +
                 "parent=${parent?.javaClass?.simpleName ?: "none"}"
         )
         // 从这里起事件归我们暂扣，必须有超时兜底：UP 丢失时不能一直扣着。
@@ -2253,8 +2276,7 @@ object HookSwipeGesture {
             return true
         }
         if (!radialGate.isActive) return false
-        val probe = radialProbe ?: return false
-        if (!radialGate.shouldReveal(probe, event.rawX, event.rawY)) return false
+        if (!radialGate.shouldReveal(event.rawX, event.rawY)) return false
 
         val safeContext = context ?: return false
         val firstAttempt = !radialRevealAttempted
@@ -2276,7 +2298,14 @@ object HookSwipeGesture {
         val corner = radialGate.corner ?: return false
         val revealStartedAt = SystemClock.uptimeMillis()
         val shown = runCatching {
-            RadialMenuController.reveal(safeContext, parent, corner, width, height)
+            RadialMenuController.reveal(
+                safeContext,
+                parent,
+                corner,
+                width,
+                height,
+                radialTriggerOffsetY,
+            )
         }.onFailure {
             XLog.e("$DEBUG_TAG radial reveal failed", it)
             RadialTrace.log("reveal threw ${it.javaClass.simpleName}:${it.message}")
@@ -2298,8 +2327,7 @@ object HookSwipeGesture {
             RadialTrace.log("reveal abort: $reason")
             maybeExplainRadialFailure(safeContext, reason)
             radialGate.reset()
-            radialProbe = null
-            return false
+                return false
         }
         radialGate.markRevealed()
         radialUsedThisGesture = true
@@ -2321,7 +2349,6 @@ object HookSwipeGesture {
             )
         }
         commitRadialSelection(context)
-        radialProbe = null
         return revealed
     }
 
@@ -2404,7 +2431,6 @@ object HookSwipeGesture {
         radialUsedThisGesture = false
         radialLaunchedThisGesture = false
         radialRevealAttempted = false
-        radialProbe = null
         radialGate.reset()
         disarmRadialWatchdog()
         RadialMenuController.dismiss(immediate = true)
@@ -2533,16 +2559,13 @@ object HookSwipeGesture {
                     /*
                      * 状态还停在 ARMED、没到展开条件。
                      *
-                     * 位移一旦越过判定阈值却又不满足「向上 + 落在扇形内」
+                     * 位移一旦越过判定阈值却又不满足「斜向上」
                      * （典型是沿底边横滑的返回手势、以及从底角往下拖），
                      * 就必须立刻放手。继续扣着这条 MOVE 的代价不是「手势失灵」，
                      * 而是 Launcher 的 recents_animation_input_consumer 永远等不到
                      * 后续事件，InputDispatcher 等满 5 秒后把 ANR 记到 system 进程上。
                      */
-                    val probe = radialProbe
-                    if (probe != null &&
-                        radialGate.shouldAbandon(probe, event.rawX, event.rawY)
-                    ) {
+                    if (radialGate.shouldAbandon(event.rawX, event.rawY)) {
                         RadialTrace.log(
                             "abandon: direction rejected " +
                                 "xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
@@ -2639,8 +2662,7 @@ object HookSwipeGesture {
                 releaseInDropTarget = false
                 RadialMenuController.dismiss()
                 radialGate.finish()
-                radialProbe = null
-                disarmRadialWatchdog()
+                        disarmRadialWatchdog()
                 if (consumed) return true
             }
         }

@@ -1,5 +1,8 @@
 package io.relimus.zflow.xposed.ui.radial
 
+import io.relimus.zflow.providers.RadialTriggerSettings
+import kotlin.math.abs
+
 /**
  * 轮盘手势的状态机。
  *
@@ -55,11 +58,20 @@ internal class RadialGestureGate(
     }
 
     /**
-     * 是否应该展开轮盘：已 ARMED、位移超过阈值、且落在扇形张开的一侧。
+     * 是否应该展开轮盘：已 ARMED、位移超过阈值、且方向是「斜向上」。
      *
-     * 第三个条件很关键：沿底边横扫（返回手势的方向）不应触发轮盘。
+     * 方向判定**只看位移向量**，不看轮盘圆心的极角。
+     *
+     * 之前用极角判定（指针相对圆心的角度是否落在扇形张角内），在「触发点高度 > 0」
+     * 时会错杀：圆心已经上移到屏幕中段，手指从底边起手时还在圆心下方，
+     * 位移明明是向上的，算出来的极角却指向下方（正角度），于是被判成
+     * `abandon: direction rejected` —— 表现为「把触发点调高后，从底角上滑反而没反应」。
+     *
+     * 两条约束替代它：
+     * 1. 垂直分量必须真的朝上，并且超过半个阈值（挡住近水平滑动）；
+     * 2. 水平分量不能压倒垂直分量（挡住沿底边横划的返回手势）。
      */
-    fun shouldReveal(layout: RadialLayout, x: Float, y: Float): Boolean {
+    fun shouldReveal(x: Float, y: Float): Boolean {
         if (state != State.ARMED) return false
         if (!x.isFinite() || !y.isFinite()) return false
         val dx = x - downX
@@ -68,20 +80,13 @@ internal class RadialGestureGate(
         /*
          * 垂直分量必须真的朝上，而且要有分量。
          *
-         * 只看「dy < 0 + 极角在扇形内」是不够的：底角热区本身离屏幕角落有几十像素，
-         * 横滑返回手势的 dy 只有 -5px 左右，极角算出来却是 -12°，
-         * 正好落在扇形范围内 —— 真机上就是从底角往屏幕内横扫会误触发轮盘。
-         * 要求垂直位移超过半个阈值，把这类近水平滑动挡在门外。
+         * 只看「dy < 0」是不够的：底角区域的横滑返回手势 dy 只有 -5px 左右，
+         * 加上热区本身有厚度，横扫很容易混进来。要求垂直位移超过半个阈值。
          */
         if (dy > -revealSlopPx * 0.5f) return false
-        /*
-         * 展开判定比最终选中判定松一些（20° 而不是 8°）。
-         *
-         * 展开只是一个「闸门」，真正的选中由扇形布局接管；这里收得太紧会出现
-         * 「贴着屏幕左边缘往上滑」被判在扇形外，表现为底角上滑时灵时不灵。
-         * 横向扫动依然会被角度范围挡住（水平一侧不加容差，见 isWithinSweep）。
-         */
-        return RadialGeometry.isWithinSweep(layout, x, y, toleranceDegrees = 20f)
+        // 纯横扫（水平位移远大于垂直位移）交给系统返回手势，不抢。
+        if (abs(dx) > abs(dy) * MAX_HORIZONTAL_RATIO) return false
+        return true
     }
 
     /**
@@ -108,9 +113,9 @@ internal class RadialGestureGate(
      * 5 秒后 InputDispatcher 报 `Input dispatching timed out`，
      * ANR 归到 system 进程，用户看到的是「进程 system 没有响应」。
      */
-    fun shouldAbandon(layout: RadialLayout, x: Float, y: Float): Boolean {
+    fun shouldAbandon(x: Float, y: Float): Boolean {
         if (!isPastDecisionThreshold(x, y)) return false
-        return !shouldReveal(layout, x, y)
+        return !shouldReveal(x, y)
     }
 
     fun markRevealed() {
@@ -133,10 +138,22 @@ internal class RadialGestureGate(
 
     companion object {
         /**
+         * 水平位移允许是垂直位移的几倍。
+         *
+         * 2.5 倍对应「约 68° 的斜滑」：真实使用里从底角斜向上划通常在 30°～60°，
+         * 再平就属于沿底边横扫（系统返回手势），不该被轮盘截胡。
+         */
+        private const val MAX_HORIZONTAL_RATIO = 2.5f
+
+        /**
          * 判断按下点属于哪个底角热区。
          *
-         * [hotspotWidth]/[hotspotHeight] 是热区边长（px），按屏幕短边比例约束，
-         * 避免在小屏上把整个底边都吃掉。
+         * 热区是一条**跟着触发点上移**的水平带：以 [anchorY] 为中心、
+         * 上下各 [hotspotHalfHeight]。这样「把触发点调高」之后，
+         * 起手位置和轮盘锚点一起上移，不会出现「轮盘在上面、手指却在最底部」的错位。
+         *
+         * [sides] 决定允许哪一侧起手：只开左侧时右角完全不响应，
+         * 把右下角让给系统手势 / 用户原有习惯。
          */
         fun cornerAt(
             x: Float,
@@ -144,14 +161,16 @@ internal class RadialGestureGate(
             width: Int,
             height: Int,
             hotspotWidth: Float,
-            hotspotHeight: Float,
+            hotspotHalfHeight: Float,
+            anchorY: Float,
+            sides: RadialTriggerSettings.Side,
         ): RadialCorner? {
             if (width <= 0 || height <= 0) return null
             if (!x.isFinite() || !y.isFinite()) return null
-            if (y < height - hotspotHeight) return null
+            if (y < anchorY - hotspotHalfHeight || y > anchorY + hotspotHalfHeight) return null
             return when {
-                x <= hotspotWidth -> RadialCorner.BOTTOM_LEFT
-                x >= width - hotspotWidth -> RadialCorner.BOTTOM_RIGHT
+                x <= hotspotWidth && sides.allowsLeft -> RadialCorner.BOTTOM_LEFT
+                x >= width - hotspotWidth && sides.allowsRight -> RadialCorner.BOTTOM_RIGHT
                 else -> null
             }
         }

@@ -1,5 +1,6 @@
 package io.relimus.zflow.xposed.ui.radial
 
+import io.relimus.zflow.providers.RadialTriggerSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -15,34 +16,87 @@ class RadialGestureGateTest {
     private val height = 2400
     private val hotspotW = 96f
     private val hotspotH = 96f
-
-    private fun layout() = RadialGeometry.layout(
-        corner = RadialCorner.BOTTOM_LEFT,
-        width = width.toFloat(),
-        height = height.toFloat(),
-        radius = 460f,
-        itemCount = 6,
-    )
+    private val anchorY = height - 8f
+    private val both = RadialTriggerSettings.Side.BOTH
 
     @Test
     fun cornerHotspotCoversBothBottomCornersOnly() {
         assertEquals(
             RadialCorner.BOTTOM_LEFT,
-            RadialGestureGate.cornerAt(20f, height - 20f, width, height, hotspotW, hotspotH),
+            RadialGestureGate.cornerAt(20f, height - 20f, width, height, hotspotW, hotspotH, anchorY, both),
         )
         assertEquals(
             RadialCorner.BOTTOM_RIGHT,
-            RadialGestureGate.cornerAt(width - 20f, height - 20f, width, height, hotspotW, hotspotH),
+            RadialGestureGate.cornerAt(width - 20f, height - 20f, width, height, hotspotW, hotspotH, anchorY, both),
         )
-        assertNull(RadialGestureGate.cornerAt(width / 2f, height - 20f, width, height, hotspotW, hotspotH))
-        assertNull(RadialGestureGate.cornerAt(20f, height / 2f, width, height, hotspotW, hotspotH))
+        assertNull(
+            RadialGestureGate.cornerAt(width / 2f, height - 20f, width, height, hotspotW, hotspotH, anchorY, both)
+        )
+        assertNull(
+            RadialGestureGate.cornerAt(20f, height / 2f, width, height, hotspotW, hotspotH, anchorY, both)
+        )
+    }
+
+    /** 只开左侧：右下角必须完全不响应，把那个角让回系统手势。 */
+    @Test
+    fun sideSettingDisablesTheOtherCorner() {
+        assertEquals(
+            RadialCorner.BOTTOM_LEFT,
+            RadialGestureGate.cornerAt(
+                20f, height - 20f, width, height, hotspotW, hotspotH, anchorY,
+                RadialTriggerSettings.Side.LEFT,
+            ),
+        )
+        assertNull(
+            RadialGestureGate.cornerAt(
+                width - 20f, height - 20f, width, height, hotspotW, hotspotH, anchorY,
+                RadialTriggerSettings.Side.LEFT,
+            )
+        )
+        assertNull(
+            RadialGestureGate.cornerAt(
+                20f, height - 20f, width, height, hotspotW, hotspotH, anchorY,
+                RadialTriggerSettings.Side.RIGHT,
+            )
+        )
+        assertEquals(
+            RadialCorner.BOTTOM_RIGHT,
+            RadialGestureGate.cornerAt(
+                width - 20f, height - 20f, width, height, hotspotW, hotspotH, anchorY,
+                RadialTriggerSettings.Side.RIGHT,
+            ),
+        )
+    }
+
+    /**
+     * 触发点上移后整条热区跟着走：原来贴底的位置失效，新高度的位置生效。
+     *
+     * 热区厚度不变，所以不会因为调高而把屏幕下半部分的上滑手势全部吃掉。
+     */
+    @Test
+    fun raisedTriggerMovesTheHotspotBand() {
+        val raisedAnchor = height * 0.8f
+        assertNull(
+            "贴底位置应当脱离热区",
+            RadialGestureGate.cornerAt(20f, height - 20f, width, height, hotspotW, hotspotH, raisedAnchor, both),
+        )
+        assertEquals(
+            RadialCorner.BOTTOM_LEFT,
+            RadialGestureGate.cornerAt(20f, raisedAnchor, width, height, hotspotW, hotspotH, raisedAnchor, both),
+        )
+        assertNull(
+            "热区带外（更上方）不应命中",
+            RadialGestureGate.cornerAt(
+                20f, raisedAnchor - hotspotH * 2f, width, height, hotspotW, hotspotH, raisedAnchor, both,
+            ),
+        )
     }
 
     @Test
     fun tapWithoutMovementDoesNotReveal() {
         val gate = RadialGestureGate(revealSlopPx = 24f)
         gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
-        assertFalse(gate.shouldReveal(layout(), 44f, height - 44f))
+        assertFalse(gate.shouldReveal(44f, height - 44f))
         assertTrue(gate.isActive)
         assertFalse(gate.isRevealed)
     }
@@ -51,7 +105,7 @@ class RadialGestureGateTest {
     fun upwardSwipeBeyondSlopReveals() {
         val gate = RadialGestureGate(revealSlopPx = 24f)
         gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
-        assertTrue(gate.shouldReveal(layout(), 120f, height - 220f))
+        assertTrue(gate.shouldReveal(120f, height - 220f))
         gate.markRevealed()
         assertTrue(gate.isRevealed)
     }
@@ -60,8 +114,8 @@ class RadialGestureGateTest {
     fun downwardOrSidewaysMovementDoesNotReveal() {
         val gate = RadialGestureGate(revealSlopPx = 24f)
         gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
-        assertFalse("向下不应展开", gate.shouldReveal(layout(), 40f, height + 10f))
-        assertFalse("向屏幕外左侧不应展开", gate.shouldReveal(layout(), -60f, height - 60f))
+        assertFalse("向下不应展开", gate.shouldReveal(40f, height + 10f))
+        assertFalse("向屏幕外左侧不应展开", gate.shouldReveal(-60f, height - 60f))
     }
 
     /**
@@ -74,22 +128,15 @@ class RadialGestureGateTest {
     fun edgeHuggingUpwardSwipeReveals() {
         val gate = RadialGestureGate(revealSlopPx = 24f)
         gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
-        assertTrue(gate.shouldReveal(layout(), 2f, height - 240f))
+        assertTrue(gate.shouldReveal(2f, height - 240f))
     }
 
     /** 右角同理：角度约 -101° 落在 (-200, -70) 内，应当展开。 */
     @Test
     fun rightCornerEdgeHuggingSwipeReveals() {
-        val right = RadialGeometry.layout(
-            corner = RadialCorner.BOTTOM_RIGHT,
-            width = width.toFloat(),
-            height = height.toFloat(),
-            radius = 460f,
-            itemCount = 6,
-        )
         val gate = RadialGestureGate(revealSlopPx = 24f)
         gate.arm(RadialCorner.BOTTOM_RIGHT, width - 40f, height - 40f)
-        assertTrue(gate.shouldReveal(right, width - 2f, height - 240f))
+        assertTrue(gate.shouldReveal(width - 2f, height - 240f))
     }
 
     @Test
@@ -136,7 +183,7 @@ class RadialGestureGateTest {
         val gate = RadialGestureGate(revealSlopPx = 24f)
         gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
         assertFalse(gate.isPastDecisionThreshold(44f, height - 44f))
-        assertFalse(gate.shouldAbandon(layout(), 44f, height - 44f))
+        assertFalse(gate.shouldAbandon(44f, height - 44f))
     }
 
     /**
@@ -152,8 +199,8 @@ class RadialGestureGateTest {
         val x = -60f
         val y = height - 60f
         assertTrue(gate.isPastDecisionThreshold(x, y))
-        assertFalse("方向不符时不应展开", gate.shouldReveal(layout(), x, y))
-        assertTrue("必须放手，不能继续吞事件", gate.shouldAbandon(layout(), x, y))
+        assertFalse("方向不符时不应展开", gate.shouldReveal(x, y))
+        assertTrue("必须放手，不能继续吞事件", gate.shouldAbandon(x, y))
     }
 
     /** 从底角往下拖同理：位移够大、方向不符，必须放手。 */
@@ -161,7 +208,7 @@ class RadialGestureGateTest {
     fun downwardDragFromCornerAbandons() {
         val gate = RadialGestureGate(revealSlopPx = 24f)
         gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
-        assertTrue(gate.shouldAbandon(layout(), 40f, height + 10f))
+        assertTrue(gate.shouldAbandon(40f, height + 10f))
     }
 
     /** 已经展开的手势不再走「放弃」分支，事件继续由轮盘接管。 */
@@ -171,6 +218,6 @@ class RadialGestureGateTest {
         gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
         gate.markRevealed()
         assertFalse(gate.isPastDecisionThreshold(120f, height - 220f))
-        assertFalse(gate.shouldAbandon(layout(), 120f, height - 220f))
+        assertFalse(gate.shouldAbandon(120f, height - 220f))
     }
 }
