@@ -71,3 +71,36 @@ ColorOS 特定形态上，这里把半径做成按「弧长间距 + 屏幕内」
 - 图标在首次展开时同步加载（≤6 个 drawable），之后命中进程内缓存。
 - 依赖 Launcher 的 `onInputEvent` 能拿到 `ACTION_MOVE`——与原落点提示走的是同一条链路，
   因此能力边界与原手势一致，不会额外要求新权限。
+
+## 排查：上滑没反应时看哪里
+
+轮盘的每条失败路径都会**静默退回原本手势**，所以它自带一条常开的诊断链路
+（不受 `HookSwipeGesture.ENABLE_DIAGNOSTIC_LOGS` 控制，见 `RadialTrace`）：
+
+```bash
+adb logcat -s ZFlowRadial
+```
+
+LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
+
+一次手势的正常链路是这四行：
+
+```
+[radial] armed corner=BOTTOM_LEFT xy=(48,2380) screen=1080x2400 slop=44
+[radial] reveal try xy=(96,2210) down=(48,2380) handler=...FallbackGestureHandler@...
+[radial] reveal ok corner=... count=6 screen=1080x2400 radius=462 icon=126 origin=(0,2400)
+[radial] commit: pkg=com.tencent.mm user=0
+```
+
+对照缺席的那一行：
+
+| 缺哪行 | 含义 | 处理 |
+|---|---|---|
+| `armed` 之前是 `skip: switch off` | 设置里的「上滑轮盘」没开 | 打开开关；若确认已开，看是否 `skip: no context` |
+| `skip: outside corner hotspot` | 起手点不在底角热区（现在 56dp 高 / 22% 屏宽） | 从更靠角落的位置起手，或调 `RADIAL_CORNER_HOTSPOT_DP` / `RADIAL_CORNER_WIDTH_FRACTION` |
+| 只有 `armed`，没有 `reveal try` | `ACTION_MOVE` 没送到输入 Hook，或方向被 `shouldReveal` 挡掉 | 松手时会打 `up: armed but never revealed`；若连松手日志都没有，说明该 ROM 截断了 MOVE 流 |
+| `reveal wait: no parent view` | 找不到可挂载的父容器 | 已有 `radialParentRef` 兜底；仍失败说明 RecentsView 树还没就绪 |
+| `reveal abort: empty_favorites` | 收藏名单为空（同时会弹一次 Toast） | 到 Z-Flow 里添加「小窗收藏应用」 |
+| `reveal abort: provider_denied` | Launcher UID 未被 Provider 放行 | 看 `adb logcat -s FreeformAppsProvider` 里的 uid，补进白名单 |
+| `reveal abort: provider_error` | Provider 未注册 / Binder 异常 | 确认 APK 已更新（该 Provider 是新增的） |
+| `reveal ok` 但屏幕没东西 | 视图挂上了但没画出来 | 看 `parent=` 是哪个容器，以及是否被 Launcher 的 clip 裁掉 |

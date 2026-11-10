@@ -49,6 +49,15 @@ internal object RadialMenuController {
         get() = view?.parent != null
 
     /**
+     * 上一次 [reveal] 失败的原因，仅用于诊断日志。
+     *
+     * 轮盘失败时一律静默退回原本手势，若不留这个字段，
+     * 真机上只能看到「没反应」，无法判断是名单为空还是 Provider 被拒。
+     */
+    var lastFailureReason: String? = null
+        private set
+
+    /**
      * 展开轮盘。
      *
      * @param parent 承载轮盘的父容器（Launcher 根视图）；轮盘不消费触摸，
@@ -63,10 +72,16 @@ internal object RadialMenuController {
         widthPx: Int,
         heightPx: Int,
     ): Boolean {
+        lastFailureReason = null
         dismiss(immediate = true)
 
         val favorites = loadFavorites(context)
-        if (favorites.isEmpty()) return false
+        if (favorites.isEmpty()) {
+            // loadFavorites 已经在内部把具体原因写进 lastFailureReason，
+            // 这里只兜住「确实一条都没配」的情况。
+            if (lastFailureReason == null) lastFailureReason = "no_favorites"
+            return false
+        }
         val count = favorites.size.coerceAtMost(RadialLayoutSpec.MAX_ITEMS)
 
         val fitted = RadialLayoutSpec.fit(
@@ -84,7 +99,10 @@ internal object RadialMenuController {
             originInsetX = fitted.originInsetX,
             originInsetY = fitted.originInsetY,
         )
-        if (placed.isEmpty) return false
+        if (placed.isEmpty) {
+            lastFailureReason = "empty_layout count=$count"
+            return false
+        }
 
         val iconSize = fitted.iconDiameter.toInt().coerceAtLeast(1)
         val loaded = favorites.take(count).map { favorite ->
@@ -98,13 +116,19 @@ internal object RadialMenuController {
 
         val menu = RadialMenuView(context)
         menu.configure(placed, fitted, loaded)
-        parent.addView(
-            menu,
-            ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            ),
-        )
+        val attached = runCatching {
+            parent.addView(
+                menu,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }.onFailure { throwable ->
+            lastFailureReason = "add_view_failed ${throwable.javaClass.simpleName}:${throwable.message}"
+            RadialTrace.log(lastFailureReason!!)
+        }.isSuccess
+        if (!attached) return false
         menu.isClickable = false
         menu.isFocusable = false
         menu.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -113,6 +137,12 @@ internal object RadialMenuController {
         view = menu
         hostRef = WeakReference(parent)
         items = loaded
+        RadialTrace.log(
+            "reveal ok corner=$corner count=$count screen=${widthPx}x${heightPx} " +
+                "radius=${fitted.radius.toInt()} icon=${fitted.iconDiameter.toInt()} " +
+                "origin=(${placed.origin.x.toInt()},${placed.origin.y.toInt()}) " +
+                "parent=${parent.javaClass.simpleName}"
+        )
         return true
     }
 
@@ -173,24 +203,47 @@ internal object RadialMenuController {
      * 轮盘只是手势的一种呈现，宁可退回原本行为，也不要在 Launcher 里抛异常。
      */
     private fun loadFavorites(context: Context): List<Favorite> {
-        val keys = runCatching {
-            val bundle = context.contentResolver.call(
+        val bundle = runCatching {
+            context.contentResolver.call(
                 Uri.parse("content://${FreeformAppsProvider.AUTHORITY}"),
                 FreeformAppsProvider.METHOD_GET_APPS,
                 null,
                 null,
-            ) ?: return emptyList()
-            if (ProviderAccess.isDenied(bundle)) return emptyList()
-            bundle.getStringArray(FreeformAppsProvider.EXTRA_KEYS)?.toList().orEmpty()
-        }.getOrElse { return emptyList() }
+            )
+        }.getOrElse { throwable ->
+            lastFailureReason = "provider_error ${throwable.javaClass.simpleName}:${throwable.message}"
+            return emptyList()
+        }
+        if (bundle == null) {
+            lastFailureReason = "provider_null"
+            return emptyList()
+        }
+        if (ProviderAccess.isDenied(bundle)) {
+            // Provider 拒绝（Launcher UID 不在白名单）：必须与「用户没配收藏」区分开，
+            // 否则真机上只会看到「没反应」。
+            lastFailureReason = "provider_denied ${bundle.getString(ProviderAccess.EXTRA_REASON)}"
+            return emptyList()
+        }
+        val keys = bundle.getStringArray(FreeformAppsProvider.EXTRA_KEYS)?.toList().orEmpty()
+        if (keys.isEmpty()) {
+            lastFailureReason = "empty_favorites"
+            return emptyList()
+        }
 
         return keys.take(RadialLayoutSpec.MAX_ITEMS).mapNotNull { key ->
             val parts = key.split('|')
-            if (parts.size != 2) return@mapNotNull null
+            if (parts.size != 2) {
+                RadialTrace.log("skip malformed key=$key")
+                return@mapNotNull null
+            }
             val packageName = parts[0]
             if (packageName.isEmpty()) return@mapNotNull null
             val userId = parts[1].toIntOrNull() ?: 0
             val resolved = resolveApp(context, packageName)
+            if (resolved == null) {
+                // 图标取不到不算失败：格子照画，用包名当标题。
+                RadialTrace.log("icon unresolved pkg=$packageName")
+            }
             Favorite(
                 packageName = packageName,
                 userId = userId,

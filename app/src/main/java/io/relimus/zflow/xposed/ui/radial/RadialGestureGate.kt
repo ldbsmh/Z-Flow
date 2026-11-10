@@ -65,7 +65,16 @@ internal class RadialGestureGate(
         val dx = x - downX
         val dy = y - downY
         if (dx * dx + dy * dy < revealSlopPx * revealSlopPx) return false
-        return RadialGeometry.isWithinSweep(layout, x, y)
+        // 必须是向上走：沿底边横扫是返回手势，不能被轮盘截胡。
+        if (dy >= 0f) return false
+        /*
+         * 展开判定比最终选中判定松一些（20° 而不是 8°）。
+         *
+         * 展开只是一个「闸门」，真正的选中由扇形布局接管；这里收得太紧会出现
+         * 「贴着屏幕左边缘往上滑」被判在扇形外（角度 -101° 落在 -98° 之外），
+         * 表现为底角上滑时灵时不灵。横向扫动依然会被角度范围挡住。
+         */
+        return RadialGeometry.isWithinSweep(layout, x, y, toleranceDegrees = 20f)
     }
 
     fun markRevealed() {

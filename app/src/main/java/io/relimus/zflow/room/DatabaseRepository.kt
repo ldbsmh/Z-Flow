@@ -101,9 +101,18 @@ class DatabaseRepository(context: Context) {
 
     /** 同步读取已选项（`packageName|userId`），必须在后台线程调用。 */
     fun getAllFreeFormKeys(): List<String> =
+        getAllFreeFormKeysOrNull().orEmpty()
+
+    /**
+     * 同 [getAllFreeFormKeys]，但把「读取失败」与「确实为空」区分开。
+     *
+     * Provider 需要这个区分：失败必须回 denied，否则 Launcher 侧会把一次
+     * 数据库异常当成「用户没配收藏」，轮盘静默失效且无从排查。
+     */
+    fun getAllFreeFormKeysOrNull(): List<String>? =
         runCatching { freeFormAppsDao.getAllWithUser() }
-            .getOrDefault(emptyList())
-            .map { "${it.packageName}|${it.userId}" }
+            .getOrNull()
+            ?.map { "${it.packageName}|${it.userId}" }
 
     // ========== 通知接管应用列表 ==========
 

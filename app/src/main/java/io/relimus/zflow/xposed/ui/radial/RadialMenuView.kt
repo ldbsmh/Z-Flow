@@ -9,7 +9,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RadialGradient
 import android.graphics.RectF
+import android.graphics.Shader
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.animation.LinearInterpolator
@@ -42,6 +44,9 @@ internal class RadialMenuView(context: Context) : View(context) {
 
     private val density = resources.displayMetrics.density
     private val platePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val scrimPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var scrimShader: RadialGradient? = null
+    private var scrimRadius = -1f
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -149,7 +154,8 @@ internal class RadialMenuView(context: Context) : View(context) {
     /** 推入手指坐标（与 View 同一坐标系，调用方负责换算）。 */
     fun updatePointer(x: Float, y: Float) {
         val currentLayout = layout ?: return
-        if (entryProgress <= 0f) return
+        // 不能因为入场动画还没开始（entryProgress == 0）就丢掉指针：
+        // 展开那一帧 pointer 会先到，丢了就要用户再动一下才有选中。
         val next = RadialGeometry.selection(
             layout = currentLayout,
             x = x,
@@ -214,8 +220,9 @@ internal class RadialMenuView(context: Context) : View(context) {
         val plateScale = entry.plateScale * (exit?.plateScale ?: 1f)
         val iconScale = entry.iconScale
 
-        canvas.drawColor(alphaOf(Color.argb(26, 0, 0, 0), contentAlpha))
-
+        // 注意：这里**不能**用 canvas.drawColor 做背景压暗。
+        // 本 View 是 MATCH_PARENT 覆盖整屏的，drawColor 会把整个桌面一起压暗，
+        // 且不随扇形收放。压暗只在扇形内部做（见下方 scrimPaint）。
         val origin = currentLayout.origin
         val baseAngle = if (currentLayout.corner == RadialCorner.BOTTOM_LEFT) 0f else -180f
         val outer = outerRadius * plateScale
@@ -227,6 +234,25 @@ internal class RadialMenuView(context: Context) : View(context) {
         sectorPath.moveTo(origin.x, origin.y)
         sectorPath.arcTo(arcBounds, startAngle, sweepAngle, false)
         sectorPath.close()
+
+        // 扇形内的柔和压暗：从圆心向外淡出，让图标有对比度又不遮住桌面。
+        if (outer > 1f) {
+            if (scrimShader == null || scrimRadius != outer) {
+                scrimShader = RadialGradient(
+                    origin.x,
+                    origin.y,
+                    outer,
+                    intArrayOf(Color.argb(96, 0, 0, 0), Color.argb(0, 0, 0, 0)),
+                    floatArrayOf(0.45f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+                scrimRadius = outer
+            }
+            scrimPaint.shader = scrimShader
+            scrimPaint.alpha = (255f * contentAlpha).toInt().coerceIn(0, 255)
+            canvas.drawPath(sectorPath, scrimPaint)
+        }
+
         platePaint.alpha = scaledAlpha(platePaint.color, contentAlpha)
         canvas.drawPath(sectorPath, platePaint)
 
@@ -270,9 +296,4 @@ internal class RadialMenuView(context: Context) : View(context) {
 
     private fun scaledAlpha(color: Int, factor: Float): Int =
         (Color.alpha(color) * factor.coerceIn(0f, 1f)).toInt().coerceIn(0, 255)
-
-    private fun alphaOf(color: Int, factor: Float): Int {
-        val scaled = scaledAlpha(color, factor)
-        return Color.argb(scaled, Color.red(color), Color.green(color), Color.blue(color))
-    }
 }

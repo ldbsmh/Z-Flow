@@ -64,6 +64,34 @@ class RadialGestureGateTest {
         assertFalse("向屏幕外左侧不应展开", gate.shouldReveal(layout(), -60f, height - 60f))
     }
 
+    /**
+     * 贴着屏幕左边缘往上滑（角度约 -101°）也要能展开。
+     *
+     * 这是真实手感里最常见的起手方式；按 8° 容差会被判在扇形外，
+     * 表现为「底角上滑时灵时不灵」。
+     */
+    @Test
+    fun edgeHuggingUpwardSwipeReveals() {
+        val gate = RadialGestureGate(revealSlopPx = 24f)
+        gate.arm(RadialCorner.BOTTOM_LEFT, 40f, height - 40f)
+        assertTrue(gate.shouldReveal(layout(), 2f, height - 240f))
+    }
+
+    /** 右角同理：角度约 -101° 落在 (-200, -70) 内，应当展开。 */
+    @Test
+    fun rightCornerEdgeHuggingSwipeReveals() {
+        val right = RadialGeometry.layout(
+            corner = RadialCorner.BOTTOM_RIGHT,
+            width = width.toFloat(),
+            height = height.toFloat(),
+            radius = 460f,
+            itemCount = 6,
+        )
+        val gate = RadialGestureGate(revealSlopPx = 24f)
+        gate.arm(RadialCorner.BOTTOM_RIGHT, width - 40f, height - 40f)
+        assertTrue(gate.shouldReveal(right, width - 2f, height - 240f))
+    }
+
     @Test
     fun commitHappensOncePerGesture() {
         val gate = RadialGestureGate(revealSlopPx = 24f)

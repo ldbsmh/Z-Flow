@@ -37,6 +37,7 @@ import io.relimus.zflow.xposed.ui.radial.RadialGestureGate
 import io.relimus.zflow.xposed.ui.radial.RadialItem
 import io.relimus.zflow.xposed.ui.radial.RadialLayout
 import io.relimus.zflow.xposed.ui.radial.RadialMenuController
+import io.relimus.zflow.xposed.ui.radial.RadialTrace
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
@@ -87,8 +88,24 @@ object HookSwipeGesture {
     // 诊断日志总开关，默认关闭，避免刷屏
     private const val ENABLE_DIAGNOSTIC_LOGS = false
 
-    /** 底角热区边长（dp）：从左右下角向内量的距离，超出即视为普通上滑。 */
-    private const val RADIAL_CORNER_HOTSPOT_DP = 32f
+    /**
+     * 底角热区：从屏幕底部向内量的高度（dp）。
+     *
+     * 32dp 只覆盖到手势条的抬手上沿，稍有偏移就落在热区外，
+     * 表现为「从底角上滑没反应」；56dp 与系统手势区上沿留了余量。
+     */
+    private const val RADIAL_CORNER_HOTSPOT_DP = 56f
+
+    /**
+     * 底角热区的水平宽度占屏宽的比例。
+     *
+     * 只在最外侧 32dp 内起手太苛刻（1080p 上约 88px），
+     * 用户从底角斜向上滑通常会偏内一些，取 22% 后角落才有足够宽的可起手区。
+     */
+    private const val RADIAL_CORNER_WIDTH_FRACTION = 0.22f
+
+    /** 水平热区宽度的下限（dp），避免窄屏上比例算出来过小。 */
+    private const val RADIAL_CORNER_MIN_WIDTH_DP = 96f
 
     @Volatile
     private var inited = false
@@ -231,6 +248,23 @@ object HookSwipeGesture {
 
     /** 只用于角度判定的探针布局：展开前还不知道真实半径，这里只借它的圆心。 */
     private var radialProbe: RadialLayout? = null
+
+    /** 本次手势是否已经尝试过展开（用于只记一次失败原因，避免每个 MOVE 刷日志）。 */
+    @Volatile
+    private var radialRevealAttempted = false
+
+    /** 「轮盘没有可显示应用」的提示每个进程只弹一次。 */
+    @Volatile
+    private var radialEmptyToastShown = false
+
+    /**
+     * 上一次成功用于挂载浮层的父容器。
+     *
+     * 轮盘靠 activeGestureHandler 反查 mRecentsView 来定位父容器，
+     * 但 Handler 在某些 ROM 上可能已被回收/替换；落点提示成功挂过一次后，
+     * 这里留一份弱引用作为兜底，避免「提示能显示、轮盘却挂不上去」。
+     */
+    private var radialParentRef: java.lang.ref.WeakReference<ViewGroup>? = null
 
     /** 本次手势是否由轮盘接管（已展开过）。 */
     @Volatile
@@ -1354,6 +1388,9 @@ object HookSwipeGesture {
             return
         }
 
+        // 落点提示能挂上去，说明这个父容器可用：留给轮盘做兜底。
+        radialParentRef = java.lang.ref.WeakReference(parent)
+
         val context =
             recentsView.context
 
@@ -1887,21 +1924,51 @@ object HookSwipeGesture {
     private fun armRadialGesture(context: Context?, event: MotionEvent) {
         radialUsedThisGesture = false
         radialLaunchedThisGesture = false
+        radialRevealAttempted = false
         radialProbe = null
         radialGate.reset()
-        if (!radialEnabled(context)) return
-        val safeContext = context ?: return
+
+        val safeContext = context
+        if (safeContext == null) {
+            RadialTrace.log("skip: no context at DOWN")
+            return
+        }
         val (width, height) = displayBounds(safeContext)
         val density = safeContext.resources.displayMetrics.density
-        val hotspot = (RADIAL_CORNER_HOTSPOT_DP * density).coerceAtMost(height * 0.25f)
+        val hotspotHeight =
+            (RADIAL_CORNER_HOTSPOT_DP * density).coerceAtMost(height * 0.25f)
+        val hotspotWidth = maxOf(
+            RADIAL_CORNER_MIN_WIDTH_DP * density,
+            width * RADIAL_CORNER_WIDTH_FRACTION,
+        ).coerceAtMost(width * 0.45f)
+
+        val nearBottom = event.rawY >= height - hotspotHeight
+        if (!radialEnabled(safeContext)) {
+            // 只在用户确实从底部起手时提示一次，避免每次点击都刷日志。
+            if (nearBottom) RadialTrace.log("skip: switch off")
+            return
+        }
+
         val corner = RadialGestureGate.cornerAt(
             x = event.rawX,
             y = event.rawY,
             width = width,
             height = height,
-            hotspotWidth = hotspot,
-            hotspotHeight = hotspot,
-        ) ?: return
+            hotspotWidth = hotspotWidth,
+            hotspotHeight = hotspotHeight,
+        )
+        if (corner == null) {
+            // 底部中间起手是高频操作（普通上滑），只在底角附近失败时记录。
+            if (nearBottom && (event.rawX <= hotspotWidth * 1.5f ||
+                    event.rawX >= width - hotspotWidth * 1.5f)
+            ) {
+                RadialTrace.log(
+                    "skip: outside corner hotspot xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
+                        "screen=${width}x$height hotspot=${hotspotWidth.toInt()}x${hotspotHeight.toInt()}"
+                )
+            }
+            return
+        }
 
         val slop = runCatching {
             ViewConfiguration.get(safeContext).scaledTouchSlop.toFloat() * 2f
@@ -1917,17 +1984,32 @@ object HookSwipeGesture {
             radius = 1f,
             itemCount = 1,
         )
+        RadialTrace.log(
+            "armed corner=$corner xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
+                "screen=${width}x$height slop=${slop.toInt()}"
+        )
     }
 
     private fun resolveRadialParent(): ViewGroup? {
-        val handler = activeGestureHandler ?: return null
-        return runCatching {
-            val recentsView =
-                ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView") as? View
-                    ?: return null
-            ((recentsView.rootView as? ViewGroup) ?: (recentsView.parent as? ViewGroup))
-                ?.takeIf { it.isAttachedToWindow }
-        }.getOrNull()
+        val handler = activeGestureHandler
+        if (handler != null) {
+            val resolved = runCatching {
+                val recentsView =
+                    ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView") as? View
+                val candidate = recentsView?.let {
+                    (it.rootView as? ViewGroup) ?: (it.parent as? ViewGroup)
+                }
+                candidate?.takeIf { it.isAttachedToWindow }
+            }.getOrNull()
+            if (resolved != null) {
+                radialParentRef = java.lang.ref.WeakReference(resolved)
+                return resolved
+            }
+        }
+        // 兜底：落点提示成功挂载过的父容器。Handler 被替换/回收时仍能浮出来。
+        val cached = radialParentRef?.get()
+        if (cached != null && cached.isAttachedToWindow) return cached
+        return null
     }
 
     /** @return true 表示事件已被轮盘消费，调用方应立即返回。 */
@@ -1941,18 +2023,36 @@ object HookSwipeGesture {
         if (!radialGate.shouldReveal(probe, event.rawX, event.rawY)) return false
 
         val safeContext = context ?: return false
+        val firstAttempt = !radialRevealAttempted
+        if (firstAttempt) {
+            radialRevealAttempted = true
+            RadialTrace.log(
+                "reveal try xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
+                    "down=(${radialGate.downX.toInt()},${radialGate.downY.toInt()}) " +
+                    "handler=${identity(activeGestureHandler)}"
+            )
+        }
+
         // Handler 还没就绪时先不展开，下一帧 MOVE 再试。
-        val parent = resolveRadialParent() ?: return false
+        val parent = resolveRadialParent()
+        if (parent == null) {
+            if (firstAttempt) RadialTrace.log("reveal wait: no parent view")
+            return false
+        }
         val (width, height) = displayBounds(safeContext)
         val corner = radialGate.corner ?: return false
         val shown = runCatching {
             RadialMenuController.reveal(safeContext, parent, corner, width, height)
         }.onFailure {
             XLog.e("$DEBUG_TAG radial reveal failed", it)
+            RadialTrace.log("reveal threw ${it.javaClass.simpleName}:${it.message}")
         }.getOrDefault(false)
 
         if (!shown) {
             // 没有收藏应用 / Provider 拒绝：本次手势不再尝试，退回原本行为。
+            val reason = RadialMenuController.lastFailureReason
+            RadialTrace.log("reveal abort: $reason")
+            maybeExplainRadialFailure(safeContext, reason)
             radialGate.reset()
             radialProbe = null
             return false
@@ -1967,9 +2067,37 @@ object HookSwipeGesture {
     private fun handleRadialUp(context: Context?): Boolean {
         if (!radialGate.isActive && !RadialMenuController.isShowing) return false
         val revealed = radialGate.isRevealed || RadialMenuController.isShowing
+        if (radialGate.isActive && !revealed) {
+            // 热区按下了但没有越过展开阈值：说明方向/位移被 shouldReveal 挡掉。
+            RadialTrace.log(
+                "up: armed but never revealed " +
+                    "down=(${radialGate.downX.toInt()},${radialGate.downY.toInt()})"
+            )
+        }
         commitRadialSelection(context)
         radialProbe = null
         return revealed
+    }
+
+    /**
+     * 轮盘展不开且是「用户没配收藏」时，用一次 Toast 说明原因。
+     *
+     * 这条路径原本是纯静默的：用户从底角上滑看到没有任何反应，
+     * 完全不知道是没配置还是功能坏了。每个进程只提示一次。
+     */
+    private fun maybeExplainRadialFailure(context: Context, reason: String?) {
+        if (reason == null || !reason.startsWith("empty_favorites")) return
+        if (radialEmptyToastShown) return
+        radialEmptyToastShown = true
+        runCatching {
+            android.widget.Toast.makeText(
+                context,
+                "轮盘里还没有应用：请先在 Z-Flow 里添加「小窗收藏应用」",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }.onFailure {
+            RadialTrace.log("toast failed ${it.javaClass.simpleName}")
+        }
     }
 
     /**
@@ -1980,14 +2108,19 @@ object HookSwipeGesture {
      */
     private fun commitRadialSelection(context: Context?) {
         val item = RadialMenuController.currentItem()
+        val wasShowing = RadialMenuController.isShowing
         RadialMenuController.dismiss()
         if (!radialGate.finish()) return
-        if (item == null) return
-        val safeContext = context ?: resolveLauncherContext(activeGestureHandler)
-        if (safeContext == null) {
-            debugLog("RADIAL_COMMIT_NO_CONTEXT pkg=${item.packageName}")
+        if (item == null) {
+            if (wasShowing) RadialTrace.log("commit: no selection (cancelled)")
             return
         }
+        val safeContext = context ?: resolveLauncherContext(activeGestureHandler)
+        if (safeContext == null) {
+            RadialTrace.log("commit: no launcher context pkg=${item.packageName}")
+            return
+        }
+        RadialTrace.log("commit: pkg=${item.packageName} user=${item.userId}")
         launchRadialSelection(safeContext, item)
     }
 
@@ -2022,6 +2155,7 @@ object HookSwipeGesture {
     private fun clearRadialState() {
         radialUsedThisGesture = false
         radialLaunchedThisGesture = false
+        radialRevealAttempted = false
         radialProbe = null
         radialGate.reset()
         RadialMenuController.dismiss(immediate = true)

@@ -2,6 +2,8 @@ package io.relimus.zflow.providers
 
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
@@ -49,13 +51,19 @@ class FreeformAppsProvider : ContentProvider() {
             METHOD_GET_APPS -> {
                 val ctx = context ?: return ProviderAccess.denied("context unavailable")
                 if (!allowLauncherRead(ctx)) {
-                    Log.w(TAG, "rejected read from uid=${ProviderAccess.callingUid()}")
-                    return ProviderAccess.denied("read not allowed")
+                    val uid = ProviderAccess.callingUid()
+                    Log.w(TAG, "rejected read from uid=$uid")
+                    return ProviderAccess.denied("uid $uid is not a supported launcher")
                 }
+                val keys = DatabaseRepository(ctx).getAllFreeFormKeysOrNull()
+                    ?: return ProviderAccess.denied("database unavailable").also {
+                        Log.w(TAG, "database read failed")
+                    }
+                Log.i(TAG, "serving ${keys.size} favorites")
                 Bundle().apply {
                     putStringArray(
                         EXTRA_KEYS,
-                        DatabaseRepository(ctx).getAllFreeFormKeys().take(MAX_ITEMS).toTypedArray(),
+                        keys.take(MAX_ITEMS).toTypedArray(),
                     )
                 }
             }
@@ -73,10 +81,27 @@ class FreeformAppsProvider : ContentProvider() {
         if (uid == Process.myUid() || uid == Process.SYSTEM_UID || uid == Process.ROOT_UID) {
             return true
         }
-        return runCatching {
-            context.packageManager.getPackagesForUid(uid)
-                ?.any { it in LAUNCHER_PACKAGES } == true
-        }.getOrDefault(false)
+        val packages = runCatching {
+            context.packageManager.getPackagesForUid(uid)?.toSet().orEmpty()
+        }.getOrDefault(emptySet())
+        if (packages.isEmpty()) return false
+        if (packages.any { it in LAUNCHER_PACKAGES }) return true
+
+        /*
+         * 兜底：调用方是不是当前默认桌面。
+         *
+         * OEM 桌面包名无法穷举（ColorOS/HyperOS/OriginOS 各有各的），
+         * 但「谁是 HOME」永远只有一个答案，比维护包名白名单稳。
+         * 仍然只放行桌面：轮盘只该被桌面进程读取。
+         */
+        val home = runCatching {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            context.packageManager
+                .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo
+                ?.packageName
+        }.getOrNull()
+        return home != null && home in packages
     }
 
     override fun query(
