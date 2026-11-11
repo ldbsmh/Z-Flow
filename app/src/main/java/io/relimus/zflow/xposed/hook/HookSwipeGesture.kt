@@ -30,11 +30,11 @@ import io.relimus.zflow.providers.BlacklistProvider
 import io.relimus.zflow.providers.LandscapeAppsProvider
 import io.relimus.zflow.providers.RemoteSettings
 import io.relimus.zflow.utils.cast
+import io.relimus.zflow.xposed.hook.utils.InputPilfer
 import io.relimus.zflow.xposed.hook.utils.XLog
 import io.relimus.zflow.xposed.ui.radial.RadialCorner
 import io.relimus.zflow.xposed.ui.radial.RadialGestureGate
 import io.relimus.zflow.xposed.ui.radial.RadialItem
-import io.relimus.zflow.xposed.ui.radial.RadialLayoutSpec
 import io.relimus.zflow.xposed.ui.radial.RadialMenuController
 import io.relimus.zflow.xposed.ui.radial.RadialTrace
 import java.util.Collections
@@ -87,25 +87,12 @@ object HookSwipeGesture {
     // 诊断日志总开关，默认关闭，避免刷屏
     private const val ENABLE_DIAGNOSTIC_LOGS = false
 
-    /**
-     * 触发热区的半高（dp）。热区总高是它的两倍，以触发点为中心上下各一半。
-     *
-     * 40dp 对应「底部手势条 + 一点余量」：贴底时热区覆盖屏幕最下方约 80dp，
-     * 与系统手势区基本重合；把触发点调高后整条热区跟着上移，厚度不变，
-     * 不会因为调高而把屏幕下半部分的上滑手势全部吃掉。
+    /*
+     * 触发区几何（摆放位置、尺寸、镜像）已经搬到
+     * io.relimus.zflow.providers.RadialTriggerSettings：
+     * 那边是纯函数，可以直接在 JVM 单测里覆盖「命中区随设置移动」，
+     * 不必为一次几何改动跑真机。
      */
-    private const val RADIAL_CORNER_HOTSPOT_DP = 40f
-
-    /**
-     * 底角热区的水平宽度占屏宽的比例。
-     *
-     * 只在最外侧 32dp 内起手太苛刻（1080p 上约 88px），
-     * 用户从底角斜向上滑通常会偏内一些，取 22% 后角落才有足够宽的可起手区。
-     */
-    private const val RADIAL_CORNER_WIDTH_FRACTION = 0.22f
-
-    /** 水平热区宽度的下限（dp），避免窄屏上比例算出来过小。 */
-    private const val RADIAL_CORNER_MIN_WIDTH_DP = 96f
 
     /**
      * 已按下但还没展开时，扣着事件的最长时间（毫秒）。
@@ -274,9 +261,20 @@ object HookSwipeGesture {
      */
     private var radialGate = RadialGestureGate(revealSlopPx = 24f)
 
-    /** 本次手势的触发点上移量（px），展开时原样传给轮盘，保证锚点一致。 */
+    /** 本次手势的圆心内缩量（px）：由触发区的中心决定，展开时原样传给轮盘。 */
     @Volatile
-    private var radialTriggerOffsetY = 0f
+    private var radialOriginInsetX = 0f
+
+    @Volatile
+    private var radialOriginInsetY = 0f
+
+    /** 本次手势是否已经把输入从桌面窗口手里抢过来（只抢一次，UP 时不用重复）。 */
+    @Volatile
+    private var radialPilferedThisGesture = false
+
+    /** 输入回调的 thisObject，抢输入时要用它当反射起点。 */
+    @Volatile
+    private var radialHookTarget: Any? = null
 
     /** 上一次成功读到的触发点配置；Provider 短暂不可用时沿用它，避免触发点跳变。 */
     @Volatile
@@ -583,6 +581,7 @@ object HookSwipeGesture {
             )
 
         hookTouchInteractionService()
+        hookLauncherTouchDispatch()
 
         var initHookCount = 0
         var updateHookCount = 0
@@ -1844,6 +1843,41 @@ object HookSwipeGesture {
     }
 
     /**
+     * 轮盘接管期间，把桌面窗口自己的触摸流挡掉。
+     *
+     * 这条 Hook 是 [InputPilfer] 的兜底：TIS 的输入监视**不影响**桌面窗口照样收到事件，
+     * 只有 `pilferPointers()` 会让 InputDispatcher 给桌面补一个 CANCEL。反射找不到
+     * 那个对象时（ROM 结构变了），桌面就会继续按自己的逻辑处理同一串事件 ——
+     * 典型表现是「在轮盘上滑动选择时，后面的工作区跟着左右翻页」。
+     *
+     * 所以在 `Activity.dispatchTouchEvent` 这一层再挡一次：只要轮盘正在接管，
+     * 就把事件吃掉，不往视图树里派发。放行 ACTION_CANCEL 是有意的 ——
+     * 那是 pilfer 成功后系统补过来的「手势已取消」，让它走完更干净。
+     */
+    private fun hookLauncherTouchDispatch() {
+        val installed = runCatching {
+            XposedHelpers.findAndHookMethod(
+                android.app.Activity::class.java,
+                "dispatchTouchEvent",
+                MotionEvent::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val event = param.args?.getOrNull(0) as? MotionEvent ?: return
+                        if (event.actionMasked == MotionEvent.ACTION_CANCEL) return
+                        // 只在轮盘真的展开之后挡：按下阶段仍然让桌面正常处理，
+                        // 否则触发区里的普通点击（Dock 图标）会被一起吃掉。
+                        if (!radialGate.isRevealed && !RadialMenuController.isShowing) return
+                        // 吃掉事件：桌面视图树收不到 DOWN/MOVE，工作区就不会跟着滑。
+                        param.result = true
+                    }
+                }
+            )
+        }.isSuccess
+
+        RadialTrace.log("launcher touch dispatch hook installed=$installed")
+    }
+
+    /**
      * 触摸输入入口 Hook。
      *
      * Android 17 起 Launcher3/quickstep 重构了输入分发：
@@ -2075,7 +2109,11 @@ object HookSwipeGesture {
         val value = runCatching { RemoteSettings.getRadialTrigger(context) }.getOrNull()
         if (value == null) {
             radialTriggerRetryAt = now + 3_000L
-            RadialTrace.log("trigger config unavailable, keep ${radialTriggerConfig.side}")
+            RadialTrace.log(
+                "trigger config unavailable, keep " +
+                    "${radialTriggerConfig.centerXPercent},${radialTriggerConfig.centerYPercent} " +
+                    "${radialTriggerConfig.widthPercent}x${radialTriggerConfig.heightPercent}"
+            )
             return radialTriggerConfig
         }
         radialTriggerConfig = value
@@ -2099,15 +2137,25 @@ object HookSwipeGesture {
     }
 
     /**
-     * ACTION_DOWN：判断这次按下是否落在底角热区。
+     * ACTION_DOWN：判断这次按下是否落在**触发区域**里。
      *
-     * 只记录，不展开 —— 单纯点一下底角不应该弹轮盘，
-     * 必须再满足「明显上滑 + 落在扇形张开的一侧」。
+     * 触发区是用户在设置页里摆的一块矩形（可镜像到另一侧），命中只说明「这次手势
+     * 可能属于轮盘」；真正展开还要等「明显上滑」这个条件，所以单纯点一下不会弹轮盘。
+     *
+     * 命中之后只记两件事：命中所在的一侧（决定扇形朝哪开），以及圆心位置
+     * （触发区中心）—— 展开时沿用同一份坐标，避免轮盘和手指错位。
+     * 抢输入（[InputPilfer]）不在这里做，理由见函数末尾。
      */
-    private fun armRadialGesture(context: Context?, event: MotionEvent) {
+    private fun armRadialGesture(
+        context: Context?,
+        event: MotionEvent,
+        hookTarget: Any? = null,
+    ) {
         radialUsedThisGesture = false
         radialLaunchedThisGesture = false
         radialRevealAttempted = false
+        radialPilferedThisGesture = false
+        radialHookTarget = hookTarget
         radialGate.reset()
 
         val safeContext = context
@@ -2116,58 +2164,50 @@ object HookSwipeGesture {
             return
         }
         val (width, height) = displayBounds(safeContext)
-        val density = safeContext.resources.displayMetrics.density
-        val hotspotHalf = (RADIAL_CORNER_HOTSPOT_DP * density)
-            .coerceAtMost(height * 0.12f)
-        val hotspotWidth = maxOf(
-            RADIAL_CORNER_MIN_WIDTH_DP * density,
-            width * RADIAL_CORNER_WIDTH_FRACTION,
-        ).coerceAtMost(width * 0.45f)
-
-        // 触发点配置：读不到就按「贴底 + 两侧」处理，并在后台重试（见 remindTriggerConfig）。
         val trigger = triggerConfig(safeContext)
-        val triggerOffsetY = height * trigger.heightPercent / 100f
-        val anchorY = height - RadialLayoutSpec.CORNER_INSET_DP * density - triggerOffsetY
-
-        val corner = RadialGestureGate.cornerAt(
+        val hit = trigger.hit(
             x = event.rawX,
             y = event.rawY,
-            width = width,
-            height = height,
-            hotspotWidth = hotspotWidth,
-            hotspotHalfHeight = hotspotHalf,
-            anchorY = anchorY,
-            sides = trigger.side,
+            widthPx = width.toFloat(),
+            heightPx = height.toFloat(),
         )
+        val corner = when {
+            hit == null -> null
+            hit.leftSide -> RadialCorner.BOTTOM_LEFT
+            else -> RadialCorner.BOTTOM_RIGHT
+        }
         val enabled = radialEnabled(safeContext)
 
         /*
-         * 起手日志不再按「是否靠近底边」筛选，但只记底部那条带（2 倍热区高度内），
-         * 否则日常点击会把日志刷满。一旦屏幕尺寸和指针坐标系不一致，
-         * 这里也会把两者都打出来，避免出现「连一条日志都没有」的死角。
+         * 起手日志只记「离底部 15% 以内」的点，否则桌面上的日常点击会把日志刷满；
+         * 一旦命中触发区则无条件记录。屏幕尺寸和指针坐标系不一致时，
+         * 这行日志同时给出两者，避免出现「连一条日志都没有」的死角。
          */
         val nowAtDown = SystemClock.uptimeMillis()
-        val nearBottom = event.rawY >= anchorY - hotspotHalf * 2f
-        val shouldTrace = corner != null ||
-            (nearBottom && nowAtDown - lastRadialDownTraceAt >= 200L)
+        val nearBottom = event.rawY >= height * 0.85f
+        val shouldTrace = hit != null || (nearBottom && nowAtDown - lastRadialDownTraceAt >= 200L)
         if (shouldTrace) {
             lastRadialDownTraceAt = nowAtDown
             RadialTrace.log(
                 "down raw=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
-                    "screen=${width}x$height hotspot=${hotspotWidth.toInt()}x${(hotspotHalf * 2).toInt()} " +
-                    "anchorY=${anchorY.toInt()} side=${trigger.side} height=${trigger.heightPercent}% " +
+                    "screen=${width}x$height " +
+                    "area=${
+                        trigger.area(width.toFloat(), height.toFloat()).let {
+                            "(${it.left.toInt()},${it.top.toInt()})-(${it.right.toInt()},${it.bottom.toInt()})"
+                        }
+                    } mirror=${trigger.mirror} " +
                     "enabled=$enabled corner=$corner " +
                     "thread=${Thread.currentThread().name} ctx=${safeContext.javaClass.name}"
             )
         }
 
         if (!enabled) {
-            if (corner != null) RadialTrace.log("skip: switch off")
+            if (hit != null) RadialTrace.log("skip: switch off")
             return
         }
 
-        if (corner == null) {
-            // 起手点不在底角热区：上面那行 down 日志已经带上了坐标与热区尺寸。
+        if (hit == null || corner == null) {
+            // 起手点不在触发区：上面那行 down 日志已经带上了坐标与区域尺寸。
             return
         }
 
@@ -2183,14 +2223,24 @@ object HookSwipeGesture {
         val gate = RadialGestureGate(revealSlopPx = slop)
         gate.arm(corner, event.rawX, event.rawY)
         radialGate = gate
-        radialTriggerOffsetY = triggerOffsetY
+        radialOriginInsetX = hit.originInsetX
+        radialOriginInsetY = hit.originInsetY
         RadialTrace.log(
             "armed corner=$corner xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
-                "screen=${width}x$height slop=${slop.toInt()} triggerOffset=${triggerOffsetY.toInt()} " +
+                "screen=${width}x$height slop=${slop.toInt()} " +
+                "origin=(${hit.originInsetX.toInt()},${hit.originInsetY.toInt()}) " +
                 "parent=${parent?.javaClass?.simpleName ?: "none"}"
         )
         // 从这里起事件归我们暂扣，必须有超时兜底：UP 丢失时不能一直扣着。
         armRadialWatchdog()
+
+        /*
+         * 注意：这里**不**抢输入。
+         *
+         * 抢输入（pilfer）会让桌面窗口收到 ACTION_CANCEL，代价是「在触发区里的普通点击」
+         * 也不再生效 —— 桌面底部通常是 Dock 图标，把整条带子变成点不动，比轮盘本身
+         * 更难忍受。所以等真正确认「这是上滑」之后再抢，见 handleRadialMove。
+         */
     }
 
     private fun resolveRadialParent(): ViewGroup? {
@@ -2296,6 +2346,21 @@ object HookSwipeGesture {
         val parent = resolveRadialParent()
         val (width, height) = displayBounds(safeContext)
         val corner = radialGate.corner ?: return false
+
+        /*
+         * 确认是轮盘手势了，现在把输入从桌面窗口手里抢过来。
+         *
+         * 放在这里而不是 DOWN：抢输入会让桌面收到 CANCEL，等于把触发区里的
+         * 「普通点击」一起废掉（底部是 Dock，会很痛）。等位移已经证明这是上滑，
+         * 再抢就不会误伤点击，而桌面此时最多只是跟着挪了几个像素。
+         */
+        if (!radialPilferedThisGesture) {
+            radialPilferedThisGesture = true
+            val pilfered = runCatching { InputPilfer.pilfer(radialHookTarget) }
+                .getOrDefault(false)
+            RadialTrace.log("pilfer=${if (pilfered) "ok" else "unavailable"}")
+        }
+
         val revealStartedAt = SystemClock.uptimeMillis()
         val shown = runCatching {
             RadialMenuController.reveal(
@@ -2304,7 +2369,8 @@ object HookSwipeGesture {
                 corner,
                 width,
                 height,
-                radialTriggerOffsetY,
+                radialOriginInsetX,
+                radialOriginInsetY,
             )
         }.onFailure {
             XLog.e("$DEBUG_TAG radial reveal failed", it)
@@ -2431,6 +2497,8 @@ object HookSwipeGesture {
         radialUsedThisGesture = false
         radialLaunchedThisGesture = false
         radialRevealAttempted = false
+        radialPilferedThisGesture = false
+        radialHookTarget = null
         radialGate.reset()
         disarmRadialWatchdog()
         RadialMenuController.dismiss(immediate = true)
@@ -2538,8 +2606,8 @@ object HookSwipeGesture {
                     gestureDisplayMode = GestureDisplayMode.NONE
                 }
 
-                // 底角轮盘：只记录热区，是否展开留给 MOVE 决定。
-                armRadialGesture(ctx, event)
+                // 底角轮盘：只记录触发区命中，是否展开留给 MOVE 决定。
+                armRadialGesture(ctx, event, param.thisObject)
 
                 /*
                  * 热区命中就地吞掉这条手势。

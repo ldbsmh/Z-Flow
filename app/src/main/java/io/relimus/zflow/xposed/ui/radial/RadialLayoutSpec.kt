@@ -118,8 +118,15 @@ internal object RadialLayoutSpec {
         iconSizeDp: Float = BASE_ICON_DP,
         sweepDegrees: Float = RadialGeometry.DEFAULT_SWEEP_DEGREES,
         hitRadiusDp: Float? = null,
-        /** 触发点相对屏幕底边的抬升（px），圆心跟着一起上移。 */
-        triggerOffsetYPx: Float = 0f,
+        /**
+         * 圆心距「所依附的那条竖直边」的距离（px）。
+         *
+         * 触发区是用户自己摆的，圆心跟着触发区中心走，因此每个手势都可能不同；
+         * 扇形朝屏幕内那一侧张开，可用的水平空间就是「屏宽 - 这个内缩量」。
+         */
+        originInsetXPx: Float = CORNER_INSET_DP * density,
+        /** 圆心距屏幕底边的距离（px）。触发区越靠上，向上可用空间越小。 */
+        originInsetYPx: Float = CORNER_INSET_DP * density,
     ): RadialMetrics {
         val densitySafe = density.takeIf { it.isFinite() && it > 0f } ?: 1f
         val count = itemCount.coerceIn(MIN_ITEMS, MAX_ITEMS)
@@ -130,8 +137,8 @@ internal object RadialLayoutSpec {
         val gap = ICON_GAP_DP * densitySafe
         val outerPadding = OUTER_PADDING_DP * densitySafe
         val screenPadding = SCREEN_PADDING_DP * densitySafe
-        val inset = CORNER_INSET_DP * densitySafe
-        val triggerOffset = triggerOffsetYPx.takeIf { it.isFinite() && it > 0f } ?: 0f
+        val insetX = originInsetXPx.takeIf { it.isFinite() && it >= 0f } ?: (CORNER_INSET_DP * densitySafe)
+        val insetY = originInsetYPx.takeIf { it.isFinite() && it >= 0f } ?: (CORNER_INSET_DP * densitySafe)
 
         val safeSweep = sweepDegrees.takeIf { it.isFinite() && it > 0f }
             ?.coerceIn(30f, 170f) ?: RadialGeometry.DEFAULT_SWEEP_DEGREES
@@ -166,9 +173,9 @@ internal object RadialLayoutSpec {
             return best
         }
 
-        // 圆心到最远圆盘外缘的距离必须落在屏幕内（触发点上移后向上空间会变小）。
-        val allowedX = width - inset - screenPadding
-        val allowedY = height - inset - triggerOffset - screenPadding
+        // 圆心到最远圆盘外缘的距离必须落在屏幕内（触发区越靠上/越靠内，可用空间越小）。
+        val allowedX = width - insetX - screenPadding
+        val allowedY = height - insetY - screenPadding
         val allowed = min(allowedX, allowedY)
 
         val minIcon = MIN_ICON_DP * densitySafe
@@ -210,8 +217,8 @@ internal object RadialLayoutSpec {
             outerRadius = edge,
             enterRadius = enter,
             keepRadius = keep,
-            originInsetX = inset,
-            originInsetY = inset + triggerOffset,
+            originInsetX = insetX,
+            originInsetY = insetY,
             fitScale = fitScale,
             rings = rings,
             ringStep = step,

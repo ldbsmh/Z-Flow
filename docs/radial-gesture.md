@@ -1,23 +1,25 @@
-# 底角上滑轮盘
+# 触发区上滑轮盘
 
-从屏幕左右下角斜向上滑，扇形展开最多 13 个应用（三环 3+4+6），滑到目标松手即以小窗打开。
+从屏幕底角的**触发区域**里按下并斜向上滑，扇形展开最多 13 个应用（三环 3+4+6），
+滑到目标松手即以小窗打开。
 
 ## 交互规则
 
 | 阶段 | 判定 | 说明 |
 |---|---|---|
-| 起手 | 按下点落在左下/右下热区内（以触发点为中心，上下各 40dp，宽 22% 屏宽） | 超出热区一律按原有上滑处理 |
-| 展开 | 位移 > `touchSlop`，**垂直位移朝上且超过半个阈值**，且指针落在扇形张开的一侧（容差 20°） | 只认「斜向内上滑」，沿底边横扫不会触发 |
+| 起手 | 按下点落在用户配置的触发区内（默认左下角 20%×12%，可镜像到右侧） | 超出区域一律按原有手势处理 |
+| 展开 | 位移 > `touchSlop`，**垂直位移朝上且超过半个阈值**，且水平分量不超过垂直分量的 2.5 倍 | 只认「斜向内上滑」，沿底边横扫不会触发 |
 | 选择 | 最近格心 + 进入半径，带 0.62×圆盘直径的迟滞 | 手指滑出弧线外仍可继续选，边界不抖 |
 | 提交 | 松手时取选中项 | 未选中任何一格则不打开，退回 Launcher 原本行为 |
 
 - 开关：设置 → 启动与触发 → 桌面与手势 → 上滑轮盘（默认关闭，见 `settings.xml`）。
-- 触发位置：同页「触发位置」，可选两侧 / 仅左侧 / 仅右侧。只开一侧时另一侧的底角
-  完全不响应，把那个角让回系统手势。
-- 触发点高度：同页「触发点高度」，0%～30%（相对屏高）。热区与轮盘锚点一起上移，
-  **热区厚度不变**，所以调高不会把屏幕下半部分的上滑手势全部吃掉。
-  但要注意：调得越高，那块屏幕区域原本的上滑（滚动列表等）越容易被轮盘接管。
-- 轮盘离指距离：内环半径下限 108dp，白色圆盘整体「浮」在触发点上方一段距离，
+- 触发区域：同页「触发区域」进入编辑页，四个滑杆（横/纵位置、宽、高）都是屏幕百分比，
+  另有「镜像到另一侧」开关。编辑页同时给两层预览：
+  - 页内的手机轮廓预览（任何设备可用，按真实屏幕比例缩放）；
+  - 有悬浮窗权限时，再把这台区域的**真实坐标**叠加显示在屏幕上（一比一）。
+- 圆心跟着触发区中心走：把触发区挪到哪，轮盘就从哪展开；
+  扇形始终朝屏幕内上方张开，靠屏幕中心的哪一半决定开向左侧还是右侧。
+- 轮盘离指距离：内环半径下限 108dp，白色圆盘整体「浮」在触发区上方一段距离，
   而不是挤在手指边上（之前贴得近，手指刚动就压在图标上）。
 - 名单：设置 → 启动与触发 → 桌面与手势 → 轮盘应用（最多 13 个，**勾选顺序即轮盘排列顺序**）。
 - 展开期间不再显示原有的落点提示：两套浮层同时出现会让用户不知道松手会发生什么。
@@ -58,6 +60,32 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 这时替他启动一个应用属于误操作。
 
 
+## 桌面为什么会跟着手指动（输入独占）
+
+TIS（`TouchInteractionService`）和桌面窗口之间是**监视**关系，不是消费关系：
+`InputMonitor` 只是拿到一份事件副本，桌面自己的窗口**同时**也在收同一串事件。
+平时不冲突，因为 TIS 决定处理手势时会调 `pilferPointers()`，由 InputDispatcher
+给桌面补一个 `ACTION_CANCEL`，后续事件独家转给监视方。
+
+我们在 `TouchInteractionHandler.onInputEvent` 入口把方法短路掉，那条 `pilferPointers()`
+就永远不会执行 —— 于是出现了「轮盘正常，但在轮盘上滑动挑选时，后面的工作区跟着左右翻页」。
+
+修法是两层：
+
+| 层 | 做法 | 作用 |
+|---|---|---|
+| 主 | `InputPilfer`：沿对象图按方法名找到 `pilferPointers()`，反射调用 | InputDispatcher 给桌面发 CANCEL，桌面彻底退出这条手势 |
+| 兜 | `Activity.dispatchTouchEvent` Hook：轮盘展开期间直接吞掉事件 | 反射随 ROM 变化失效时，视图树照样收不到 DOWN/MOVE |
+
+时机很关键：**都在「确认是上滑」之后**（`shouldReveal` 通过那一刻），不在 DOWN。
+如果在 DOWN 就抢，触发区里的普通点击（底部 Dock 图标）会一起失效 —— 那比轮盘本身更难忍受。
+
+`InputPilfer` 刻意不写死字段名：`InputConsumerController` 的内部结构在
+Android 版本之间换过好几次，所以从 `thisObject` 出发做 BFS（深度 ≤4、节点 ≤160），
+按方法名找 `pilferPointers` / `notifyPilferPointers`，找到后缓存调用路径。
+日志里会打一行 `pilfer=ok` 或 `pilfer=unavailable`，后者说明反射没找到入口、只靠兜底层在工作。
+
+
 ## 尺寸与排布
 
 视觉基线对齐 GestureEVO 的圆形按钮：圆盘大、间隙均匀、逐层往外铺开。
@@ -66,7 +94,7 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 |---|---|
 | 圆盘（白色圆底）直径 | 56dp，最小不低于 34dp |
 | 相邻圆盘间隙 | 10dp |
-| 内环半径下限 | 108dp（轮盘要浮在触发点上方，不能贴着手指） |
+| 内环半径下限 | 108dp（轮盘要浮在触发区上方，不能贴着手指） |
 | 扇形张角 | 84°（两侧各留 3°，90° 会让最外格贴住屏幕边缘） |
 | ≤3 个 | 单弧排布 |
 | 4～6 个 | 两环 |
@@ -85,19 +113,32 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 同一环内均分可用张角；不同环格数不同，因此**不做跨环角度对齐**（这也是它看起来像
 「沿弧线铺开的三层网格」而不是方格子的原因）。
 
-## 触发点
+## 触发区域
 
 | 项 | 存储键 | 取值 |
 |---|---|---|
-| 起手侧 | `radial_trigger_side` | `both` / `left` / `right`，默认 `both` |
-| 触发点高度 | `radial_trigger_height` | 0～30（百分比），默认 0（贴底） |
+| 横向位置（中心） | `radial_trigger_area_x` | 0～100，默认 9 |
+| 纵向位置（中心） | `radial_trigger_area_y` | 0～100，默认 95 |
+| 宽度 | `radial_trigger_area_width` | 6～60，默认 20 |
+| 高度 | `radial_trigger_area_height` | 4～40，默认 12 |
+| 镜像到另一侧 | `radial_trigger_area_mirror` | 默认 true |
 
-两项都写在 `app_settings` 里，由 `RadialTriggerSettings` 统一读取，
+全部写在 `app_settings` 里，由 `RadialTriggerSettings` 统一读写，
 跨进程通过 `NotificationSettingsProvider.get_radial_trigger` 暴露给 Launcher。
 
-热区是一条以触发点为中心、上下各 40dp 的水平带，宽度 22% 屏宽（下限 96dp）。
-触发点高度直接改变圆心 y：`anchorY = height - 8dp内缩 - height × 百分比`，
-手势探针（只用来算极角）用的是同一个圆心，否则同一个点上算出的角度会差好几度。
+用百分比而不是 dp：触发区是「手指够得着的位置」，跟屏幕尺寸强相关、跟密度无关；
+百分比在 6.1" 和 6.8" 上落在同一个相对位置，dp 会让小屏上的区偏大。
+
+几何是纯函数（`Config.areas()` / `Config.hit()`）：
+
+- `areas()` 算出主区，镜像时再算一块以屏幕中轴线对称的区（两块重合时只留一块）；
+- 主区中心在屏幕左半边 → 依附 `BOTTOM_LEFT`，在右半边 → `BOTTOM_RIGHT`；
+- 圆心内缩量 = 主区中心到「所依附那条竖直边」的距离，以及到屏幕底边的距离 ——
+  `RadialLayoutSpec.fit` 用这两个值算「向上/向内的可用空间」，所以触发区越靠内、
+  越靠上，轮盘会自动缩小，不会顶出屏幕。
+
+早期版本是「底角热区（固定 22% 屏宽 × 上下各 40dp）+ 高度百分比」，
+问题有两个：水平范围写死，用户没法把触发位置挪到顺手的地方；而且完全看不见自己设了什么。
 
 ## 数据来源
 
@@ -118,13 +159,15 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 | 几何 | `xposed/ui/radial/RadialGeometry.kt` | 扇形布局、最近格命中、迟滞 | ✅ |
 | 动画 | `xposed/ui/radial/RadialMotion.kt` | 入场/退场/选中/错峰曲线（纯函数） | ✅ |
 | 尺寸 | `xposed/ui/radial/RadialLayoutSpec.kt` | 弧长间距、舒适半径、圆盘尺寸、1~3 环分配 | ✅ |
-| 状态 | `xposed/ui/radial/RadialGestureGate.kt` | 热区 → 展开 → 提交的状态机 | ✅ |
+| 状态 | `xposed/ui/radial/RadialGestureGate.kt` | 触发区命中 → 展开 → 提交的状态机 | ✅ |
 | 绘制 | `xposed/ui/radial/RadialMenuView.kt` | 单 Canvas 绘制（白色圆盘 + 圆形图标 + 选中环） | — |
 | 装配 | `xposed/ui/radial/RadialMenuController.kt` | 取名单/图标、开悬浮窗、推指针、交出选中项 | — |
 | 接入 | `xposed/hook/HookSwipeGesture.kt` | 复用 Launcher 输入流驱动轮盘 | — |
 | 数据 | `providers/FreeformAppsProvider.kt` | 把两份名单只读暴露给 Launcher 进程 | — |
 | 数据 | `providers/RadialAppsStore.kt` | 轮盘名单的读写（App 进程内） | — |
-| 数据 | `providers/RadialTriggerSettings.kt` | 触发点（左右侧 + 高度）的读写 | — |
+| 数据 | `providers/RadialTriggerSettings.kt` | 触发区域（中心/尺寸/镜像）的读写与命中判定 | ✅ |
+| 输入 | `xposed/hook/utils/InputPilfer.kt` | 找到并调用 `pilferPointers()`，独占输入流 | — |
+| 预览 | `ui/radial_area/*` | 触发区编辑页：滑杆 + 页内预览 + 真实屏幕浮层 | — |
 
 ## 悬浮窗
 
@@ -171,9 +214,11 @@ ColorOS 特定形态上，这里把半径做成按「弧长间距 + 舒适半径
 - `RadialGeometryTest`：左右角镜像、槽位顺序、均匀间距、最近格命中、迟滞、扇区角度；
 - `RadialMotionTest`：端点精确、展开/收拢单调、过冲有界、错峰顺序；
 - `RadialLayoutSpecTest`：弧长间距不小于图标直径、13 个收敛到 3+4+6、4~6 个用两环且内环不孤零零、
-  扇形不出屏、小屏等比缩放、触发点上移让圆心跟着上移、条目数夹取；
-- `RadialGestureGateTest`：热区命中、单侧设置关闭另一角、触发点上移后热区跟着移动、
-  位移不足不展开、横扫不展开、一次手势只提交一次。
+  扇形不出屏、小屏等比缩放、触发区上移让圆心跟着上移、居中时轮盘自动缩小、条目数夹取；
+- `RadialTriggerSettingsTest`：默认区覆盖两个底角、关闭镜像后另一侧不响应、
+  圆心跟着区域中心走、加宽真的扩大命中范围、区域被夹在屏幕内、越界参数被修正；
+- `RadialGestureGateTest`：位移不足不展开、横扫不展开、向下拖不展开、贴边竖直上滑可展开、
+  一次手势只提交一次。
 
 ## 已知限制
 
@@ -185,6 +230,8 @@ ColorOS 特定形态上，这里把半径做成按「弧长间距 + 舒适半径
   统一降透明度。表现是白色圆盘在浅色界面上略微透出背景。
   彻底解决要把绘制搬到 Z-Flow 自己的无障碍浮层（GestureEVO 走的就是那条路），
   当前版本先用「纯白圆盘 + 1.2dp 描边 + 更实的投影」把边界做清楚。
+- 轮盘展开后桌面窗口会收到 `ACTION_CANCEL`（输入被独占），因此**展开期间**对桌面的
+  长按拖动、图标拖拽都不可用；这是刻意取舍 —— 否则工作区会跟着手指翻页。
 - 只按当前用户解析图标（名单里其它用户的应用图标可能不精确）。
 - 图标在**后台线程**异步加载（最多 13 个 drawable），先出白圆盘、图标随后落位；
   位图按 `包名|userId|尺寸` 缓存 24 个，避免每次展开都重新解码。
@@ -205,21 +252,25 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 一次手势的正常链路是这几行：
 
 ```
-[radial] down raw=(1380,3100) screen=1440x3200 hotspot=360x300 anchorY=3170 side=BOTH height=0% enabled=true corner=BOTTOM_RIGHT
-[radial] armed corner=BOTTOM_RIGHT xy=(1380,3100) screen=1440x3200 slop=60 triggerOffset=0 parent=DecorView
+[radial] down raw=(1380,3100) screen=1440x3200 area=(1152,2848)-(1440,3200) mirror=true enabled=true corner=BOTTOM_RIGHT thread=main ctx=...
+[radial] armed corner=BOTTOM_RIGHT xy=(1380,3100) screen=1440x3200 slop=60 origin=(115,102) parent=DecorView
 [radial] reveal try xy=(1350,3010) down=(1380,3100) handler=...LauncherSwipeHandlerV2@...
+[radial] pilfer=ok
 [radial] overlay attached type=2006 alpha=1.0
-[radial] reveal ok corner=BOTTOM_RIGHT count=13 rings=3 shares=[3, 4, 6] screen=1440x3200 radius=598 icon=210 origin=(1410,3170) host=overlay(2006)
+[radial] reveal ok corner=BOTTOM_RIGHT count=13 rings=3 shares=[3, 4, 6] screen=1440x3200 radius=598 icon=210 origin=(1325,3098) host=overlay(2006)
 [radial] commit: pkg=com.tencent.mm user=0
 ```
+
+`origin=` 是圆心（触发区中心），与 `armed` 行里的 `origin=` 内缩量一致：
+`圆心 x = 1440 - 115`、`圆心 y = 3200 - 102`。
 
 对照缺席的那一行：
 
 | 缺哪行 | 含义 | 处理 |
 |---|---|---|
 | `armed` 之前是 `skip: switch off` | 设置里的「上滑轮盘」没开 | 打开开关；若确认已开，看是否 `skip: no context` |
-| `corner=null` 且 `side=LEFT`（或 `RIGHT`） | 当前只允许一侧起手，按到了另一侧 | 正常行为；到「触发位置」改成「两侧」 |
-| `skip: outside corner hotspot` | 起手点不在热区（以触发点为中心上下各 40dp / 22% 屏宽） | 从更靠近触发点的位置起手，或调 `RADIAL_CORNER_HOTSPOT_DP` / `RADIAL_CORNER_WIDTH_FRACTION` |
+| `corner=null` | 按下点不在触发区里（`area=` 给出当前区域的实际像素范围） | 到「触发区域」把方块挪/放大到手指真正落下的位置，编辑页有实时预览 |
+| `down` 之后没有 `armed` | 命中了但开关没开（会先打 `skip: switch off`） | 打开「上滑轮盘」开关 |
 | 只有 `armed`，没有 `reveal try` | `ACTION_MOVE` 没送到输入 Hook，或方向被 `shouldReveal` 挡掉 | 松手时会打 `up: armed but never revealed`；若连松手日志都没有，说明该 ROM 截断了 MOVE 流 |
 | `overlay type=2006 failed` 后仍 `overlay attached` | 系统浮层被拒，退回了 `APPLICATION_OVERLAY` | 属于预期降级；若两种都失败会继续打 `overlay type=... failed` |
 | `reveal abort: empty_favorites` | 三份名单都空（同时会弹一次 Toast） | 到「轮盘应用」里勾几个应用 |
@@ -231,6 +282,7 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 | `down: reap stale gesture` | 上一轮手势没正常收尾，新 DOWN 时清场 | **正常兜底**，若频繁出现说明 UP 一直没送达 |
 | `move: menu showing without gate` | 悬浮窗残留且已无活跃手势 | **正常兜底**，同上 |
 | `watchdog: gesture never finished` | 超时（未展开 2s / 已展开 6s）没有新事件 | **正常兜底**，清场但不提交选择 |
+| `pilfer=unavailable` | 反射没找到 `pilferPointers()`（ROM 内部结构变了），只靠 `dispatchTouchEvent` 兜底 | 功能仍可用；若此时桌面仍在跟手滑，说明兜底层也没装上（启动日志里有 `launcher touch dispatch hook installed=false`） |
 | `reveal slow: Nms` | reveal 在主线程上耗时超过一帧 | N 接近或超过 1000ms 要警惕：那时 `contentResolver.call` 很可能正在冷启动 Z-Flow 进程 |
 
 ### 出现「进程 system 没有响应」

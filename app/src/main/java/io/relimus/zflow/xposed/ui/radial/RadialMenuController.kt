@@ -99,7 +99,8 @@ internal object RadialMenuController {
         corner: RadialCorner,
         widthPx: Int,
         heightPx: Int,
-        triggerOffsetYPx: Float = 0f,
+        originInsetXPx: Float = Float.NaN,
+        originInsetYPx: Float = Float.NaN,
     ): Boolean {
         lastFailureReason = null
         dismiss(immediate = true)
@@ -113,12 +114,22 @@ internal object RadialMenuController {
         }
         val count = favorites.size.coerceAtMost(RadialLayoutSpec.MAX_ITEMS)
 
+        /*
+         * 圆心跟着触发区走：调用方传的是「圆心到依附边 / 到屏幕底边」的距离。
+         * 两个值都没给（NaN）时才退回旧的「贴角」默认值。
+         */
+        val density = context.resources.displayMetrics.density
+        val fallbackInset = RadialLayoutSpec.CORNER_INSET_DP * density
+        val insetX = originInsetXPx.takeIf { it.isFinite() && it >= 0f } ?: fallbackInset
+        val insetY = originInsetYPx.takeIf { it.isFinite() && it >= 0f } ?: fallbackInset
+
         val fitted = RadialLayoutSpec.fit(
             widthPx = widthPx,
             heightPx = heightPx,
-            density = context.resources.displayMetrics.density,
+            density = density,
             itemCount = count,
-            triggerOffsetYPx = triggerOffsetYPx,
+            originInsetXPx = insetX,
+            originInsetYPx = insetY,
         )
         val placed = RadialGeometry.layout(
             corner = corner,

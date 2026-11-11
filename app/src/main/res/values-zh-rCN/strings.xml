@@ -167,10 +167,23 @@
     <string name="label_radial_apps">轮盘应用</string>
     <string name="radial_apps_hint">最多选择 %1$d 个，顺序即轮盘里的排列顺序</string>
     <string name="radial_apps_limit">轮盘最多只能放 %1$d 个应用</string>
-    <string name="radial_trigger_side_title">触发位置</string>
-    <string name="radial_trigger_side_summary">选择从哪一侧起手</string>
-    <string name="radial_trigger_height_title">触发点高度</string>
-    <string name="radial_trigger_height_value">离屏幕底部 %1$d%%</string>
+    <string name="radial_trigger_area_label">触发区域</string>
+    <string name="radial_trigger_area_title">触发区域</string>
+    <string name="radial_trigger_area_summary">调整触发轮盘的区域位置与大小</string>
+    <string name="radial_trigger_area_current">当前：%1$s</string>
+    <string name="radial_trigger_area_desc">手指在这块区域里按下、再向上滑就会展开轮盘。拖动滑杆把它挪到拇指顺手的位置。</string>
+    <string name="radial_trigger_pos_x">横向位置</string>
+    <string name="radial_trigger_pos_y">纵向位置</string>
+    <string name="radial_trigger_width">宽度</string>
+    <string name="radial_trigger_height">高度</string>
+    <string name="radial_trigger_area_value">%1$d%%</string>
+    <string name="radial_trigger_mirror">镜像到另一侧</string>
+    <string name="radial_trigger_mirror_summary">左右对称各一块，两个底角都能起手</string>
+    <string name="radial_trigger_reset">恢复默认</string>
+    <string name="radial_trigger_overlay_hint">授予悬浮窗权限后，编辑时会把这块区域按真实坐标叠加显示在屏幕上。点此开启。</string>
+    <string name="radial_trigger_side_left">左侧</string>
+    <string name="radial_trigger_side_right">右侧</string>
+    <string name="radial_trigger_side_both">双侧</string>
     <string name="popup_bubble_block_title">屏蔽长按消息气泡</string>
     <string name="popup_bubble_block_summary">屏蔽 Android 17 长按图标弹出的消息气泡</string>
 

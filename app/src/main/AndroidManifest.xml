@@ -59,6 +59,7 @@
             android:exported="false" />
         <activity android:name=".ui.floating_apps_sort.FloatingAppsSortActivity" />
         <activity android:name=".ui.choose_apps.ChooseAppsActivity" />
+        <activity android:name=".ui.radial_area.RadialTriggerAreaActivity" />
         <activity
             android:name="io.relimus.zflow.ui.main.FreeformSettingsActivity"
             android:parentActivityName="io.relimus.zflow.ui.main.MainActivity"

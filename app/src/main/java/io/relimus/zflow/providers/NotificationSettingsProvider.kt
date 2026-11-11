@@ -42,10 +42,13 @@ class NotificationSettingsProvider : ContentProvider() {
         const val EXTRA_FLAG_KEY = "flag_key"
         const val EXTRA_FLAG_VALUE = "flag_value"
 
-        /** 读取轮盘的触发点配置（哪一侧 + 离底边多高） */
+        /** 读取轮盘的触发区域（矩形中心 + 尺寸 + 是否镜像到另一侧） */
         const val METHOD_GET_RADIAL_TRIGGER = "get_radial_trigger"
-        const val EXTRA_TRIGGER_SIDE = "trigger_side"
-        const val EXTRA_TRIGGER_HEIGHT = "trigger_height"
+        const val EXTRA_TRIGGER_X = "trigger_x"
+        const val EXTRA_TRIGGER_Y = "trigger_y"
+        const val EXTRA_TRIGGER_W = "trigger_w"
+        const val EXTRA_TRIGGER_H = "trigger_h"
+        const val EXTRA_TRIGGER_MIRROR = "trigger_mirror"
 
         private const val PREFS_NAME = "app_settings"
         private const val KEY_NOTIFY_FREEFORM = "notify_freeform"
@@ -133,8 +136,11 @@ class NotificationSettingsProvider : ContentProvider() {
                 val ctx = context ?: return ProviderAccess.denied("context unavailable")
                 val config = RadialTriggerSettings.read(ctx)
                 Bundle().apply {
-                    putString(EXTRA_TRIGGER_SIDE, config.side.name.lowercase())
-                    putInt(EXTRA_TRIGGER_HEIGHT, config.heightPercent)
+                    putInt(EXTRA_TRIGGER_X, config.centerXPercent)
+                    putInt(EXTRA_TRIGGER_Y, config.centerYPercent)
+                    putInt(EXTRA_TRIGGER_W, config.widthPercent)
+                    putInt(EXTRA_TRIGGER_H, config.heightPercent)
+                    putBoolean(EXTRA_TRIGGER_MIRROR, config.mirror)
                 }
             }
 

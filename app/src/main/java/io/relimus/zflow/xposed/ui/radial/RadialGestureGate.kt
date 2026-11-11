@@ -1,6 +1,5 @@
 package io.relimus.zflow.xposed.ui.radial
 
-import io.relimus.zflow.providers.RadialTriggerSettings
 import kotlin.math.abs
 
 /**
@@ -144,35 +143,5 @@ internal class RadialGestureGate(
          * 再平就属于沿底边横扫（系统返回手势），不该被轮盘截胡。
          */
         private const val MAX_HORIZONTAL_RATIO = 2.5f
-
-        /**
-         * 判断按下点属于哪个底角热区。
-         *
-         * 热区是一条**跟着触发点上移**的水平带：以 [anchorY] 为中心、
-         * 上下各 [hotspotHalfHeight]。这样「把触发点调高」之后，
-         * 起手位置和轮盘锚点一起上移，不会出现「轮盘在上面、手指却在最底部」的错位。
-         *
-         * [sides] 决定允许哪一侧起手：只开左侧时右角完全不响应，
-         * 把右下角让给系统手势 / 用户原有习惯。
-         */
-        fun cornerAt(
-            x: Float,
-            y: Float,
-            width: Int,
-            height: Int,
-            hotspotWidth: Float,
-            hotspotHalfHeight: Float,
-            anchorY: Float,
-            sides: RadialTriggerSettings.Side,
-        ): RadialCorner? {
-            if (width <= 0 || height <= 0) return null
-            if (!x.isFinite() || !y.isFinite()) return null
-            if (y < anchorY - hotspotHalfHeight || y > anchorY + hotspotHalfHeight) return null
-            return when {
-                x <= hotspotWidth && sides.allowsLeft -> RadialCorner.BOTTOM_LEFT
-                x >= width - hotspotWidth && sides.allowsRight -> RadialCorner.BOTTOM_RIGHT
-                else -> null
-            }
-        }
     }
 }

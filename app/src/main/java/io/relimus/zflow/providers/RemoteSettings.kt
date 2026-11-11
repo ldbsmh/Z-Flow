@@ -110,9 +110,9 @@ object RemoteSettings {
         isFeatureEnabledOrNull(context, key) ?: default
 
     /**
-     * 读取轮盘的触发点配置（哪一侧 + 离底边多高）。
+     * 读取轮盘的触发区域（矩形中心 + 尺寸 + 是否镜像）。
      *
-     * 读不到返回 null 而不是默认值：被 hook 的进程需要区分「用户设成了贴底两侧」
+     * 读不到返回 null 而不是默认值：被 hook 的进程需要区分「用户设成了默认区域」
      * 和「Provider 还没起来」，前者可以静默使用，后者要退避重试。
      */
     fun getRadialTrigger(context: Context): RadialTriggerSettings.Config? {
@@ -127,14 +127,27 @@ object RemoteSettings {
                 null
             } else {
                 RadialTriggerSettings.Config(
-                    side = RadialTriggerSettings.Side.from(
-                        result.getString(NotificationSettingsProvider.EXTRA_TRIGGER_SIDE)
+                    centerXPercent = result.getInt(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_X,
+                        RadialTriggerSettings.DEFAULT_CENTER_X,
+                    ),
+                    centerYPercent = result.getInt(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_Y,
+                        RadialTriggerSettings.DEFAULT_CENTER_Y,
+                    ),
+                    widthPercent = result.getInt(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_W,
+                        RadialTriggerSettings.DEFAULT_WIDTH,
                     ),
                     heightPercent = result.getInt(
-                        NotificationSettingsProvider.EXTRA_TRIGGER_HEIGHT,
-                        RadialTriggerSettings.DEFAULT_HEIGHT_PERCENT,
-                    ).coerceIn(0, RadialTriggerSettings.MAX_HEIGHT_PERCENT),
-                )
+                        NotificationSettingsProvider.EXTRA_TRIGGER_H,
+                        RadialTriggerSettings.DEFAULT_HEIGHT,
+                    ),
+                    mirror = result.getBoolean(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_MIRROR,
+                        RadialTriggerSettings.DEFAULT_MIRROR,
+                    ),
+                ).sanitized()
             }
         }.getOrNull()
         if (value != null) cache[cacheKey] = CacheEntry(value, now)

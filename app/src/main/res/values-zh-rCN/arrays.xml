@@ -38,14 +38,4 @@
         <item>Y</item>
         <item>Z</item>
     </array>
-    <string-array name="radial_trigger_side_entries">
-        <item>两侧</item>
-        <item>仅左侧</item>
-        <item>仅右侧</item>
-    </string-array>
-    <string-array name="radial_trigger_side_values">
-        <item>both</item>
-        <item>left</item>
-        <item>right</item>
-    </string-array>
 </resources>

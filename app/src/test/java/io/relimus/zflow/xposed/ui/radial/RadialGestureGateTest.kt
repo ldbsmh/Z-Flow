@@ -1,6 +1,5 @@
 package io.relimus.zflow.xposed.ui.radial
 
-import io.relimus.zflow.providers.RadialTriggerSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -8,89 +7,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 覆盖轮盘手势状态机：热区判定、展开条件、一次手势只提交一次。
+ * 覆盖轮盘手势状态机：展开条件、方向否决、一次手势只提交一次。
+ *
+ * 触发区命中判定在 [io.relimus.zflow.providers.RadialTriggerSettingsTest] 里。
  */
 class RadialGestureGateTest {
 
     private val width = 1080
     private val height = 2400
-    private val hotspotW = 96f
-    private val hotspotH = 96f
-    private val anchorY = height - 8f
-    private val both = RadialTriggerSettings.Side.BOTH
-
-    @Test
-    fun cornerHotspotCoversBothBottomCornersOnly() {
-        assertEquals(
-            RadialCorner.BOTTOM_LEFT,
-            RadialGestureGate.cornerAt(20f, height - 20f, width, height, hotspotW, hotspotH, anchorY, both),
-        )
-        assertEquals(
-            RadialCorner.BOTTOM_RIGHT,
-            RadialGestureGate.cornerAt(width - 20f, height - 20f, width, height, hotspotW, hotspotH, anchorY, both),
-        )
-        assertNull(
-            RadialGestureGate.cornerAt(width / 2f, height - 20f, width, height, hotspotW, hotspotH, anchorY, both)
-        )
-        assertNull(
-            RadialGestureGate.cornerAt(20f, height / 2f, width, height, hotspotW, hotspotH, anchorY, both)
-        )
-    }
-
-    /** 只开左侧：右下角必须完全不响应，把那个角让回系统手势。 */
-    @Test
-    fun sideSettingDisablesTheOtherCorner() {
-        assertEquals(
-            RadialCorner.BOTTOM_LEFT,
-            RadialGestureGate.cornerAt(
-                20f, height - 20f, width, height, hotspotW, hotspotH, anchorY,
-                RadialTriggerSettings.Side.LEFT,
-            ),
-        )
-        assertNull(
-            RadialGestureGate.cornerAt(
-                width - 20f, height - 20f, width, height, hotspotW, hotspotH, anchorY,
-                RadialTriggerSettings.Side.LEFT,
-            )
-        )
-        assertNull(
-            RadialGestureGate.cornerAt(
-                20f, height - 20f, width, height, hotspotW, hotspotH, anchorY,
-                RadialTriggerSettings.Side.RIGHT,
-            )
-        )
-        assertEquals(
-            RadialCorner.BOTTOM_RIGHT,
-            RadialGestureGate.cornerAt(
-                width - 20f, height - 20f, width, height, hotspotW, hotspotH, anchorY,
-                RadialTriggerSettings.Side.RIGHT,
-            ),
-        )
-    }
-
-    /**
-     * 触发点上移后整条热区跟着走：原来贴底的位置失效，新高度的位置生效。
-     *
-     * 热区厚度不变，所以不会因为调高而把屏幕下半部分的上滑手势全部吃掉。
-     */
-    @Test
-    fun raisedTriggerMovesTheHotspotBand() {
-        val raisedAnchor = height * 0.8f
-        assertNull(
-            "贴底位置应当脱离热区",
-            RadialGestureGate.cornerAt(20f, height - 20f, width, height, hotspotW, hotspotH, raisedAnchor, both),
-        )
-        assertEquals(
-            RadialCorner.BOTTOM_LEFT,
-            RadialGestureGate.cornerAt(20f, raisedAnchor, width, height, hotspotW, hotspotH, raisedAnchor, both),
-        )
-        assertNull(
-            "热区带外（更上方）不应命中",
-            RadialGestureGate.cornerAt(
-                20f, raisedAnchor - hotspotH * 2f, width, height, hotspotW, hotspotH, raisedAnchor, both,
-            ),
-        )
-    }
 
     @Test
     fun tapWithoutMovementDoesNotReveal() {

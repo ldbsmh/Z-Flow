@@ -134,7 +134,7 @@ class RadialLayoutSpecTest {
         )
     }
 
-    /** 触发点上移后，圆心跟着上移，向上可用空间变小也不会越界。 */
+    /** 触发区上移后，圆心跟着上移，向上可用空间变小也不会越界。 */
     @Test
     fun raisedTriggerLiftsTheOrigin() {
         val base = RadialLayoutSpec.fit(
@@ -148,10 +148,65 @@ class RadialLayoutSpecTest {
             heightPx = 3200,
             density = 3.75f,
             itemCount = 5,
-            triggerOffsetYPx = 320f,
+            originInsetYPx = base.originInsetY + 320f,
         )
         assertEquals(base.originInsetX, raised.originInsetX, 0.001f)
         assertEquals(base.originInsetY + 320f, raised.originInsetY, 0.001f)
+    }
+
+    /** 触发区往里挪（圆心离依附边更远）时，水平可用空间变小，轮盘必须跟着缩小。 */
+    @Test
+    fun originInsetShrinksTheWheelOnTheCrowdedSide() {
+        val corner = RadialLayoutSpec.fit(
+            widthPx = 1440,
+            heightPx = 3200,
+            density = 3.75f,
+            itemCount = RadialLayoutSpec.MAX_ITEMS,
+        )
+        val inward = RadialLayoutSpec.fit(
+            widthPx = 1440,
+            heightPx = 3200,
+            density = 3.75f,
+            itemCount = RadialLayoutSpec.MAX_ITEMS,
+            originInsetXPx = 720f,
+        )
+        assertTrue(
+            "圆心挪到屏幕中间后外缘必须收进屏幕内，实际 ${inward.outerRadius}",
+            inward.outerRadius <= 720f + 1f,
+        )
+        assertTrue(
+            "角落布局应当比居中布局更大，corner=${corner.outerRadius} inward=${inward.outerRadius}",
+            corner.outerRadius >= inward.outerRadius,
+        )
+    }
+
+    /**
+     * 默认触发区（左下角 20%×12%、镜像）下，轮盘必须还是「大圆盘、不缩放」的原样。
+     *
+     * 这条把「触发区几何」和「尺寸预算」钉在一起：只要有人改了默认区域的位置或大小，
+     * 导致圆心被推得离屏幕边太远、可用空间骤减，这里就会先炸，而不是等真机上
+     * 看到一个缩成一小团的轮盘才发现。
+     */
+    @Test
+    fun defaultTriggerAreaStillLeavesARoomyWheel() {
+        val config = io.relimus.zflow.providers.RadialTriggerSettings.Config()
+        val hit = config.hit(40f, 3150f, 1440f, 3200f)
+        assertTrue("默认触发区必须能命中左下角", hit != null)
+
+        val metrics = RadialLayoutSpec.fit(
+            widthPx = 1440,
+            heightPx = 3200,
+            density = 3.75f,
+            itemCount = RadialLayoutSpec.MAX_ITEMS,
+            originInsetXPx = hit!!.originInsetX,
+            originInsetYPx = hit.originInsetY,
+        )
+        assertEquals("默认触发区不应触发等比缩放", 1f, metrics.fitScale, 0.001f)
+        assertTrue(
+            "圆盘应保持 56dp，实际 ${metrics.iconDiameter / 3.75f}dp",
+            metrics.iconDiameter / 3.75f >= 50f,
+        )
+        assertTrue("外缘不应超出屏幕宽", metrics.outerRadius <= 1440f)
     }
 
     @Test
