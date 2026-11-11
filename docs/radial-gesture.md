@@ -224,6 +224,7 @@ TouchInteractionHandler
 | 数据 | `providers/RadialAppsStore.kt` | 轮盘名单的读写（App 进程内） | — |
 | 数据 | `providers/RadialTriggerSettings.kt` | 触发区域（中心/尺寸/镜像）的读写与命中判定 | ✅ |
 | 输入 | `xposed/hook/utils/InputPilfer.kt` | 取 `InputResource.inputMonitorCompat` 并调 `pilferPointers()`，独占输入流 | ✅ |
+| 背景 | `xposed/ui/radial/RadialBackdrop.kt` | 对桌面视图树套 `RenderEffect` 高斯模糊，把图标糊掉 | — |
 | 预览 | `ui/radial_area/*` | 触发区编辑页：滑杆 + 页内预览 + 真实屏幕浮层 | — |
 
 ## 悬浮窗
@@ -236,6 +237,33 @@ TouchInteractionHandler
 都失败才退回 Launcher 的 DecorView。参数固定为
 `FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCHABLE | FLAG_LAYOUT_IN_SCREEN | FLAG_LAYOUT_NO_LIMITS`，
 坐标仍由输入 Hook 推进来，窗口本身不参与触摸分发。
+像素格式用 `RGBA_8888` 而不是 `TRANSLUCENT`：后者在部分 ROM 上会把整窗按半透明处理，
+白圆盘会透出底下的文字。
+
+### 背景：为什么压暗挡不住图标
+
+桌面图标本身就是**白圆底**，和轮盘里的白圆盘长得一模一样。所以只压暗是挡不住的 ——
+压到 0.45 图标还认得出来，两者同屏就是「分不清哪个是桌面、哪个是轮盘」；
+压到 0.85 又变成一块黑板（实测 0.85 时白图标仍有 15% 亮度透过）。
+
+现在的做法分两半：
+
+| 手段 | 实现 | 作用 |
+|---|---|---|
+| 高斯模糊 | `RadialBackdrop`：对桌面**根视图**套 `RenderEffect.createBlurEffect`（API 31+，半径 12dp） | 图标糊成色块，彻底失去辨识度 |
+| 径向渐变 | `RadialMenuView.drawScrim`：圆心实色 → 边缘透明的 `RadialGradient` | 轮盘区域再压一层，边缘保持通透 |
+
+模糊直接作用在桌面自己的视图树上，有三个好处：糊的是图标**本身**而不是盖上去的一层膜
+（不会出现膜和图标边缘对不齐）；轮盘在**另一个窗口**里，不参与这次离屏渲染，圆盘始终锐利；
+不需要任何权限。
+
+> 也试过窗口级 `FLAG_BLUR_BEHIND`（GestureEVO 用的是这个）。它在 Launcher 进程里
+> **不生效**：`TYPE_SYSTEM_OVERLAY` 能挂上、日志 `alpha=1.0`，但画面一点都不糊。
+> 理论上 `TYPE_ACCESSIBILITY_OVERLAY` 可以，但那要求把浮层搬进 Z-Flow 的无障碍服务，
+> 而 Z-Flow 平时并不常驻（`pidof io.relimus.zflow` 为空），每次手势都要冷启动它 —— 不可接受。
+
+模糊的释放有三道保险：退场动画结束、窗口被摘掉（`View.onDetachedFromWindow`）、
+以及 12 秒的兜底超时。任何一条走到都会 `setRenderEffect(null)`，桌面不会一直糊着。
 
 
 ## 与两个参考实现的关系
@@ -248,6 +276,7 @@ TouchInteractionHandler
 | 动画 | 多段手写贝塞尔，可单测 | `AnimatorSet` + Overshoot 交错，参数写死 | 进度曲线纯函数，可单测 |
 | 容量 | 固定 84°、≤7 格 | 网格列 × 行 | 84°、≤13 格（单弧 / 双环 / 三环 3+4+6） |
 | 可测性 | 11 个纯函数单测 | 2 个几何单测 | 4 个测试类覆盖几何/动画/尺寸/状态机 |
+| 背景 | 纯压暗 | 窗口 blur-behind + 圆心径向渐变 | 桌面视图 `RenderEffect` 模糊 + 圆心径向渐变（同观感，避开对常驻进程的依赖） |
 
 刻意**没有**沿用 GestureEVO 的两处做法：
 

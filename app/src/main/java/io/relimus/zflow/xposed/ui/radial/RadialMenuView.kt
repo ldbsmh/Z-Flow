@@ -75,6 +75,43 @@ internal class RadialMenuView(context: Context) : View(context) {
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val iconDestination = RectF()
 
+    /**
+     * 轮盘背景层。
+     *
+     * 画的是**以圆心为中心、向外衰减到完全透明的径向渐变**（抄 GestureEVO 的做法，
+     * 它用 `GradientDrawable` 的 `RADIAL_GRADIENT` 加在窗口背景上）。渐变本身缓存成
+     * shader，换格时只改 alpha，不重建。
+     */
+    private val scrimPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** 渐变 shader 的缓存 key：圆心 + 半径没变就不重建。 */
+    private var scrimShader: android.graphics.RadialGradient? = null
+    private var scrimKey: Triple<Float, Float, Float>? = null
+
+    /** 桌面有没有真的被高斯模糊，决定渐变画多重。 */
+    private var backdropBlurred = false
+
+    /** 预览圆的白底、投影与描边，和格子上的圆盘同一套观感。 */
+    private val previewPlatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val previewShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(56, 0, 0, 0)
+    }
+    private val previewStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f * density
+        color = Color.argb(38, 0, 0, 0)
+    }
+    private val previewIconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val previewIconDestination = RectF()
+
+    private val previewLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        textSize = PREVIEW_LABEL_SP * resources.displayMetrics.scaledDensity
+        color = Color.WHITE
+        // 背景被压暗后白字本来就清楚，投影只是防止压在亮色壁纸/图标上时糊掉。
+        setShadowLayer(6f * density, 0f, 2f * density, Color.argb(170, 0, 0, 0))
+    }
+
     private var layout: RadialLayout? = null
     private var items: List<RadialItem> = emptyList()
 
@@ -83,6 +120,9 @@ internal class RadialMenuView(context: Context) : View(context) {
 
     /** 图标在位图里的半径（圆盘内缩一圈，形成白色描边） */
     private var iconRadius = 0f
+
+    /** 圆心到最外缘的距离（含格子半径），预览圆要摆在它上面。 */
+    private var outerRadius = 0f
 
     private var enterRadius = 0f
     private var keepRadius = 0f
@@ -116,8 +156,24 @@ internal class RadialMenuView(context: Context) : View(context) {
         selectedIndex = null
         chipRadius = metrics.iconDiameter / 2f
         iconRadius = chipRadius * RadialLayoutSpec.ICON_INSET_RATIO
+        outerRadius = metrics.outerRadius
         enterRadius = metrics.enterRadius
         keepRadius = metrics.keepRadius
+        invalidate()
+    }
+
+    /**
+     * 告诉视图「桌面到底有没有被真的模糊」。
+     *
+     * 模糊在的时候渐变只需轻压（否则把模糊自己盖掉了，看起来还是一块板）；
+     * 不在的时候得压重，靠遮罩保证桌面图标不会和轮盘里的图标混在一起。
+     */
+    fun setBackdropBlurred(blurred: Boolean) {
+        if (backdropBlurred == blurred) return
+        backdropBlurred = blurred
+        // 颜色变了，shader 必须重建。
+        scrimShader = null
+        scrimKey = null
         invalidate()
     }
 
@@ -234,6 +290,12 @@ internal class RadialMenuView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         stopMotion()
+        /*
+         * 最后一道保险：模糊挂在桌面视图树上，与轮盘窗口不是同一个对象。
+         * 只要窗口是被外部摘掉的（退场动画被打断、进程状态异常），这里就得负责恢复，
+         * 否则桌面会一直糊着，而且用户没有任何入口能让它恢复。
+         */
+        RadialBackdrop.clear("view detached")
         super.onDetachedFromWindow()
     }
 
@@ -247,6 +309,50 @@ internal class RadialMenuView(context: Context) : View(context) {
         if (contentAlpha <= 0.01f) return
         val iconScale = entry.iconScale * (exit?.plateScale ?: 1f)
 
+        drawScrim(canvas, currentLayout, contentAlpha)
+        drawChips(canvas, currentLayout, contentAlpha, iconScale)
+        drawPreview(canvas, currentLayout, contentAlpha)
+    }
+
+    /**
+     * 轮盘背景：圆心实色、向外衰减到完全透明的径向渐变（抄 GestureEVO）。
+     *
+     * 为什么不是「整屏压一层」：均匀压暗没有中间档位可用 ——
+     * 压到 0.45 桌面图标还认得出来，和轮盘里的图标同屏打架；压到 0.85 又变成一块黑板，
+     * 整个屏幕闷住。渐变把这两件事分开了：**圆心附近不透明**，轮盘底下的桌面图标
+     * 被彻底遮住；**越往外越透**，屏幕上部仍能看到桌面，观感是一团围着轮盘的雾。
+     *
+     * 半径取屏幕长边、圆心跟着轮盘走，和 GestureEVO 的
+     * `gradientRadius = max(width, height)` + `setGradientCenter()` 完全一致。
+     */
+    private fun drawScrim(canvas: Canvas, currentLayout: RadialLayout, contentAlpha: Float) {
+        val radius = maxOf(width, height).toFloat()
+        if (radius <= 0f) return
+        val origin = currentLayout.origin
+        val key = Triple(origin.x, origin.y, radius)
+        if (scrimShader == null || scrimKey != key) {
+            scrimShader = android.graphics.RadialGradient(
+                origin.x,
+                origin.y,
+                radius,
+                if (backdropBlurred) SCRIM_CENTER_BLURRED else SCRIM_CENTER_SOLID,
+                Color.TRANSPARENT,
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+            scrimPaint.shader = scrimShader
+            scrimKey = key
+        }
+        scrimPaint.alpha = (contentAlpha * 255f).toInt().coerceIn(0, 255)
+        if (scrimPaint.alpha <= 0) return
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), scrimPaint)
+    }
+
+    private fun drawChips(
+        canvas: Canvas,
+        currentLayout: RadialLayout,
+        contentAlpha: Float,
+        iconScale: Float,
+    ) {
         val count = items.size
         val shadowOffset = 4f * density
         for (index in items.indices) {
@@ -290,5 +396,110 @@ internal class RadialMenuView(context: Context) : View(context) {
                 canvas.drawBitmap(icon, null, iconDestination, iconPaint)
             }
         }
+    }
+
+    /**
+     * 轮盘上方的放大预览（对齐 GestureEVO）。
+     *
+     * 位置取「轮盘最外缘之上 + 一段间距」，水平居中于屏幕：轮盘贴着左右下角，
+     * 若跟着圆心走，左角触发时预览会贴左、右角触发时贴右，位置来回跳。
+     * 居中则两次触发的预览落在同一处，扫一眼就能读到当前选中的是哪个应用。
+     */
+    private fun drawPreview(
+        canvas: Canvas,
+        currentLayout: RadialLayout,
+        contentAlpha: Float,
+    ) {
+        val index = selectedIndex ?: return
+        val item = items.getOrNull(index) ?: return
+        if (width <= 0 || height <= 0) return
+
+        val previewRadius = PREVIEW_RADIUS_DP * density
+        val margin = 24f * density
+        val centerX = (width / 2f).coerceIn(previewRadius + margin, width - previewRadius - margin)
+        val aboveEdge = currentLayout.origin.y - outerRadius - previewRadius - PREVIEW_GAP_DP * density
+        // 触发区被限制在下半屏，正常不会越界；小屏 + 大轮盘时兜一下。
+        val centerY = aboveEdge.coerceAtLeast(previewRadius + margin)
+
+        // 只在换格的那一下轻微缩放，读起来像「被按下去又弹起来」。
+        val scale = 0.88f + 0.12f * selectionProgress
+        val radius = previewRadius * scale
+        val alpha = (contentAlpha * 255f).toInt().coerceIn(0, 255)
+        if (alpha <= 4) return
+
+        previewShadowPaint.alpha = (alpha * 0.22f).toInt()
+        canvas.drawCircle(centerX, centerY + 5f * density * scale, radius * 1.05f, previewShadowPaint)
+
+        previewPlatePaint.alpha = alpha
+        canvas.drawCircle(centerX, centerY, radius, previewPlatePaint)
+
+        previewStrokePaint.alpha = (alpha * 0.15f).toInt()
+        canvas.drawCircle(centerX, centerY, radius, previewStrokePaint)
+
+        val icon = item.icon
+        if (icon != null && !icon.isRecycled) {
+            val iconR = radius * PREVIEW_ICON_RATIO
+            previewIconDestination.set(
+                centerX - iconR,
+                centerY - iconR,
+                centerX + iconR,
+                centerY + iconR,
+            )
+            previewIconPaint.alpha = alpha
+            canvas.drawBitmap(icon, null, previewIconDestination, previewIconPaint)
+        }
+
+        val label = item.label
+        if (label.isNotEmpty()) {
+            previewLabelPaint.alpha = (alpha * 0.95f).toInt()
+            val maxWidth = width - 2f * margin
+            canvas.drawText(
+                ellipsize(label, previewLabelPaint, maxWidth),
+                centerX,
+                centerY + radius + PREVIEW_LABEL_GAP_DP * density + previewLabelPaint.textSize,
+                previewLabelPaint,
+            )
+        }
+    }
+
+    /** 应用名过长时截断成「前面一段…」，避免长名字横穿整个屏幕。 */
+    private fun ellipsize(text: String, paint: Paint, maxWidth: Float): String {
+        if (paint.measureText(text) <= maxWidth) return text
+        val suffix = "…"
+        val suffixWidth = paint.measureText(suffix)
+        var end = text.length
+        while (end > 0 && paint.measureText(text, 0, end) + suffixWidth > maxWidth) {
+            end -= 1
+        }
+        return if (end <= 0) suffix else text.substring(0, end) + suffix
+    }
+
+    companion object {
+        /** 预览圆半径（dp）。92dp 直径，约为格子上的圆盘 1.6 倍。 */
+        internal const val PREVIEW_RADIUS_DP = 46f
+
+        /** 图标在预览圆里的占比。 */
+        internal const val PREVIEW_ICON_RATIO = 0.80f
+
+        /** 预览圆与轮盘最外缘之间的间距。 */
+        private const val PREVIEW_GAP_DP = 18f
+
+        private const val PREVIEW_LABEL_SP = 14f
+        private const val PREVIEW_LABEL_GAP_DP = 10f
+
+        /**
+         * 桌面被真的模糊时，圆心处的颜色。
+         *
+         * 只需轻压一下让白圆盘浮起来 —— 压重了会把刚花代价糊出来的效果重新盖回去。
+         */
+        private const val SCRIM_CENTER_BLURRED = 0x8C0E0E12.toInt()
+
+        /**
+         * 模糊不可用时，圆心处的颜色。
+         *
+         * 近黑、几乎不透明：这种时候只能靠遮罩让桌面图标「看不见」，
+         * 否则它会和轮盘里的图标互相干扰（两者都是白圆底）。
+         */
+        private const val SCRIM_CENTER_SOLID = 0xEB0E0E12.toInt()
     }
 }

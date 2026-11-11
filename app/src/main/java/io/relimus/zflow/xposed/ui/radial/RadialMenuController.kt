@@ -171,6 +171,20 @@ internal object RadialMenuController {
         val menu = RadialMenuView(context)
         menu.configure(placed, fitted, placeholders)
         if (!attach(menu, parent)) return false
+
+        /*
+         * 模糊桌面（GestureEVO 那套观感）。
+         *
+         * 只在 overlay 模式下做：如果轮盘退回挂到桌面视图树里（attach 的兜底分支），
+         * 模糊根视图会把轮盘自己也一起糊掉。
+         */
+        val blurred = if (windowRef != null) {
+            RadialBackdrop.apply(context.resources.displayMetrics.density, parent)
+        } else {
+            false
+        }
+        menu.setBackdropBlurred(blurred)
+
         menu.isClickable = false
         menu.isFocusable = false
         menu.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -334,6 +348,8 @@ internal object RadialMenuController {
         windowRef = null
         items = emptyList()
         if (menu == null) {
+            // 没有窗口却可能留着模糊（状态被外部打断）：一并恢复，不能让桌面糊着。
+            RadialBackdrop.clear("no_view")
             onFinished?.invoke()
             return
         }
@@ -343,6 +359,9 @@ internal object RadialMenuController {
             } else {
                 (menu.parent as? ViewGroup)?.removeView(menu)
             }
+            // 模糊和窗口同生共死：退场动画期间保持（否则会看到「桌面突然变清晰、
+            // 圆盘还在慢慢淡出」），窗口一摘掉立刻恢复。
+            RadialBackdrop.clear(if (immediate) "immediate" else "dismiss")
             Unit
         }
         if (immediate || !menu.isAttachedToWindow) {
