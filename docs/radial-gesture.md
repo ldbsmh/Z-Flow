@@ -60,6 +60,40 @@ am_anr: [0,<pid>,system,...,Input dispatching timed out
 这时替他启动一个应用属于误操作。
 
 
+### 第二个坑：吞事件只能吞在 `finishInputEvent` 之下
+
+上面四条出口管的是「状态别悬着」，但还有一条更隐蔽的路径：
+**如果 hook 的入口本身就负责给事件收尾，那么「跳过方法体」等于把事件永远扣在手里。**
+
+真机上就是这个原因。`InputConsumerController$InputEventReceiver.onInputEvent` 的字节码是：
+
+```
+invoke-interface listener.onInputEvent(ev)
+const/4 v0, #1
+invoke-virtual BatchedInputEventReceiver.finishInputEvent(ev, v0)   // ← 事件在这里才被 ack
+```
+
+它一度在候选名单里（被当成「更靠前的入口」），于是我们 `param.result = null`
+跳过方法体 → `finishInputEvent` 也一起被跳过 → InputDispatcher 等满 5 秒 →
+`recents_animation_input_consumer is not responding`。而 `recents_animation_input_consumer`
+正是这个接收器当时的名字，所以 ANR 名字永远一模一样。
+
+现象上的特点是「**轮盘完全正常，用完几秒后弹 system 无响应**」，而且一条手势里
+`down` 日志会出现 2～3 行（同一个方法被 `hookAll` 在子类与父类上各挂了一遍）。
+
+所以现在有三道约束：
+
+| 约束 | 实现 |
+|---|---|
+| 只挂「单参数 InputEvent/MotionEvent」的精确方法 | `isSingleInputEventParam` + `HookRegistry.hookMethod`（不再用 `hookAll`） |
+| `InputEventReceiver` 家族一律禁挂 | 安装期 `isEventReceiverClass`，运行期 `isEventReceiverOwner` 双保险 |
+| 同一事件只跑一次状态机 | `lastProcessedEventKey`（`eventTime/downTime/action`） |
+
+第三条同时修掉了另一个隐患：同一事件被第二个入口再处理一遍时，会把刚设好的 `ARMED`
+当成「上一轮残留」清掉（日志里的 `down: reap stale gesture state=ARMED`），
+顺手 `dismiss` 掉刚建的悬浮窗。
+
+
 ## 桌面为什么会跟着手指动（输入独占）
 
 TIS（`TouchInteractionService`）和桌面窗口之间是**监视**关系，不是消费关系：
@@ -252,6 +286,7 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 一次手势的正常链路是这几行：
 
 ```
+[radial] hook owner=com.android.quickstep.TouchInteractionHandler method=onInputEvent
 [radial] down raw=(1380,3100) screen=1440x3200 area=(1152,2848)-(1440,3200) mirror=true enabled=true corner=BOTTOM_RIGHT thread=main ctx=...
 [radial] armed corner=BOTTOM_RIGHT xy=(1380,3100) screen=1440x3200 slop=60 origin=(115,102) parent=DecorView
 [radial] reveal try xy=(1350,3010) down=(1380,3100) handler=...LauncherSwipeHandlerV2@...
@@ -260,6 +295,10 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 [radial] reveal ok corner=BOTTOM_RIGHT count=13 rings=3 shares=[3, 4, 6] screen=1440x3200 radius=598 icon=210 origin=(1325,3098) host=overlay(2006)
 [radial] commit: pkg=com.tencent.mm user=0
 ```
+
+`hook owner=` 每个进程每种入口只打一次，用来确认「事件到底从哪一层进来」：
+它必须是 `TouchInteractionHandler`（`ContextWrapper` 子类，所以能直接当 Context 用）。
+出现 `...InputEventReceiver` 就说明吞错层了，见上文「吞事件只能吞在 finishInputEvent 之下」。
 
 `origin=` 是圆心（触发区中心），与 `armed` 行里的 `origin=` 内缩量一致：
 `圆心 x = 1440 - 115`、`圆心 y = 3200 - 102`。
@@ -299,7 +338,9 @@ adb logcat -b events -d | grep am_anr
 看到这条就先查 `adb logcat -s ZFlowRadial` 里有没有上面表格中的四个兜底日志。
 四条出口都正常时不会再出现该 ANR；若仍出现，按顺序怀疑：
 
-1. `reveal slow` 动辄上千毫秒 —— reveal 在主线程上做跨进程调用，事件堆积；
-2. 兜底日志一条都没有 —— 该 ROM 上 `ACTION_UP` 与看门狗都被绕过，需要重新确认 hook 点；
-3. 有 `armed` 但之后长时间空白 —— 主线程被别的东西卡住，看 `dumpsys` 里的主线程栈。
+1. **吞事件的那一层是否自己负责 `finishInputEvent`**（最常见）：`hook owner=` 日志里
+   若出现 `...InputEventReceiver`，说明吞错了层 —— 见「吞事件只能吞在 finishInputEvent 之下」；
+2. `reveal slow` 动辄上千毫秒 —— reveal 在主线程上做跨进程调用，事件堆积；
+3. 兜底日志一条都没有 —— 该 ROM 上 `ACTION_UP` 与看门狗都被绕过，需要重新确认 hook 点；
+4. 有 `armed` 但之后长时间空白 —— 主线程被别的东西卡住，看 `dumpsys` 里的主线程栈。
 

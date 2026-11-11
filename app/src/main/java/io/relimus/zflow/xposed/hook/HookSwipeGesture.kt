@@ -276,6 +276,23 @@ object HookSwipeGesture {
     @Volatile
     private var radialHookTarget: Any? = null
 
+    /**
+     * 上一条已处理事件的身份，用于「同一事件被多个 hook 各投递一次」时只跑一遍状态机。
+     * 键由 eventTime/downTime/action 组成，够区分不同事件。
+     */
+    @Volatile
+    private var lastProcessedEventKey = 0L
+
+    @Volatile
+    private var lastProcessedEventHandled = false
+
+    /** 「因为入口是事件接收器而拒绝吞事件」只记一次日志，避免每个事件都刷屏。 */
+    @Volatile
+    private var receiverSwallowBlockedLogged = false
+
+    /** 已经打印过日志的入口类名（每个进程每种入口一行）。 */
+    private val loggedHookOwners = HashSet<String>()
+
     /** 上一次成功读到的触发点配置；Provider 短暂不可用时沿用它，避免触发点跳变。 */
     @Volatile
     private var radialTriggerConfig = io.relimus.zflow.providers.RadialTriggerSettings.Config()
@@ -1912,8 +1929,25 @@ object HookSwipeGesture {
                 "com.android.quickstep.inputconsumers.TouchInteractionInputConsumer",
                 "com.android.quickstep.TouchInteractionInputConsumer",
                 "com.android.quickstep.InputConsumerController",
-                // 手势事件的接收器（InputConsumerController 内部类），部分 ROM 直接从它进入
-                "com.android.systemui.shared.system.InputConsumerController\$InputEventReceiver",
+                /*
+                 * ⚠️ 这里**不能**再列出 `InputConsumerController$InputEventReceiver`。
+                 *
+                 * 之前它被当成「更靠前的入口」加了进来，而它的 onInputEvent 方法体是：
+                 *
+                 *     listener.onInputEvent(ev);
+                 *     finishInputEvent(ev, true);   // ← 事件在这里才算被 ack
+                 *
+                 * 我们用 `param.result = null` 跳过方法体来吞事件，于是 finish 也被一起跳过：
+                 * 这条事件永远不 ack，InputDispatcher 等满 5 秒就会抛出
+                 *
+                 *     Input dispatching timed out (recents_animation_input_consumer is
+                 *     not responding. Waited 5001ms for MotionEvent)
+                 *
+                 * 因为连接建在 system_server 侧（gesture monitor），ANR 记在 system 进程上，
+                 * 用户看到的就是「进程 system 没有响应」。吞事件必须吞在
+                 * `finishInputEvent` 之下的那一层（TouchInteractionHandler.onInputEvent），
+                 * 接收器那一层只允许放行。
+                 */
             )
 
         val candidateMethodNames =
@@ -1946,26 +1980,33 @@ object HookSwipeGesture {
 
         var installed = 0
         val hookedDescriptions = mutableListOf<String>()
+        // 同一个方法可能从「子类精确匹配」和「父类遍历」两条路各命中一次，
+        // 重复挂载会让每条事件都被处理多遍（日志里一段 down 出现三行就是这么来的）。
+        val hookedSignatures = HashSet<String>()
 
         // 1) 按已知方法名精确匹配（含父类：onInputEvent 有时声明在基类上）
         for (className in candidateClassNames) {
+            if (isEventReceiverClass(className)) continue
             var clazz: Class<*>? = loadOptionalClass(className)
             var depth = 0
             while (clazz != null && depth < 4) {
-                for (methodName in candidateMethodNames) {
-                    val unhooks =
-                        runCatching {
-                            HookRegistry.hookAll(
-                                clazz,
-                                methodName,
-                                callback
-                            )
-                        }.getOrNull() ?: continue
+                val methods =
+                    runCatching {
+                        clazz!!.declaredMethods.filter { method ->
+                            method.name in candidateMethodNames &&
+                                isSingleInputEventParam(method)
+                        }
+                    }.getOrNull().orEmpty()
 
-                    if (unhooks > 0) {
-                        installed += unhooks
+                for (method in methods) {
+                    val signature = signatureOf(method)
+                    if (!hookedSignatures.add(signature)) continue
+                    val ok = runCatching { HookRegistry.hookMethod(method, callback) }.isSuccess
+                    if (ok) {
+                        installed += 1
                         hookedDescriptions +=
-                            "${clazz.name}.$methodName($unhooks)"
+                            "${method.declaringClass.simpleName}.${method.name}" +
+                                "(${method.parameterTypes[0].simpleName})"
                     }
                 }
                 clazz = runCatching { clazz?.superclass }.getOrNull()
@@ -1988,25 +2029,22 @@ object HookSwipeGesture {
                 ) {
                     continue
                 }
+                // 接收器同样是禁区，理由见候选名单上的注释（吞它 = 吞掉 finishInputEvent）。
+                if (isEventReceiverClass(className)) continue
                 val clazz = loadOptionalClass(className) ?: continue
 
                 val methods =
                     runCatching {
                         clazz.declaredMethods.filter { method ->
-                            val params = method.parameterTypes
-                            params.size == 1 &&
-                                (
-                                    InputEvent::class.java
-                                        .isAssignableFrom(params[0]) ||
-                                        MotionEvent::class.java
-                                            .isAssignableFrom(params[0])
-                                    )
+                            isSingleInputEventParam(method)
                         }
                     }.getOrNull().orEmpty()
 
                 for (method in methods) {
+                    val signature = signatureOf(method)
+                    if (!hookedSignatures.add(signature)) continue
                     runCatching {
-                        XposedBridge.hookMethod(method, callback)
+                        HookRegistry.hookMethod(method, callback)
                     }.onSuccess {
                         installed += 1
                         hookedDescriptions +=
@@ -2047,6 +2085,41 @@ object HookSwipeGesture {
             "INPUT_HOOKS_INSTALLED count=$installed " +
                 hookedDescriptions.joinToString(",")
         )
+    }
+
+    /** 只认「单个 InputEvent / MotionEvent 参数」的方法，避免挂到 `(ev, displayId)` 这类重载。 */
+    private fun isSingleInputEventParam(method: java.lang.reflect.Method): Boolean {
+        val params = method.parameterTypes
+        if (params.size != 1) return false
+        return InputEvent::class.java.isAssignableFrom(params[0]) ||
+            MotionEvent::class.java.isAssignableFrom(params[0])
+    }
+
+    private fun signatureOf(method: java.lang.reflect.Method): String =
+        "${method.declaringClass.name}#${method.name}(${method.parameterTypes[0].name})"
+
+    /**
+     * 事件接收器（`InputEventReceiver` 家族）是禁挂区。
+     *
+     * 它们的 `onInputEvent` 方法体末尾就是 `finishInputEvent(ev, handled)`：
+     * 一旦用 `param.result = null` 跳过方法体，这条事件就永远不被 ack，
+     * InputDispatcher 等满 5 秒会把 ANR 记到 system 进程上
+     * （`recents_animation_input_consumer is not responding`）。
+     */
+    private fun isEventReceiverClass(className: String): Boolean =
+        className.endsWith("InputEventReceiver") ||
+            className.contains("InputEventReceiver\$")
+
+    /** [isEventReceiverClass] 的运行时版本：按 thisObject 的继承链判断。 */
+    private fun isEventReceiverOwner(target: Any?): Boolean {
+        var clazz: Class<*>? = target?.javaClass ?: return false
+        var depth = 0
+        while (clazz != null && clazz != Any::class.java && depth < 6) {
+            if (isEventReceiverClass(clazz.name)) return true
+            clazz = runCatching { clazz.superclass }.getOrNull()
+            depth += 1
+        }
+        return false
     }
 
     // ===== 底角轮盘 =====
@@ -2524,7 +2597,12 @@ object HookSwipeGesture {
         runCatching { radialWatchdogHandler.removeCallbacks(radialWatchdog) }
     }
 
-    /** @return true 表示事件已被轮盘消费，调用方必须阻止 Launcher 继续处理。 */
+    /**
+     * 输入事件的统一入口：先做「只处理一次」与「绝不在接收器上吞事件」两道闸，
+     * 再交给 [processInputEvent] 跑轮盘状态机。
+     *
+     * @return true 表示事件已被轮盘消费，调用方必须阻止 Launcher 继续处理。
+     */
     private fun handleInputEvent(
         param: XC_MethodHook.MethodHookParam
     ): Boolean {
@@ -2536,8 +2614,7 @@ object HookSwipeGesture {
                 as? MotionEvent
                 ?: return false
 
-        val action =
-            event.actionMasked
+        val action = event.actionMasked
 
         if (
             action != MotionEvent.ACTION_DOWN &&
@@ -2548,6 +2625,48 @@ object HookSwipeGesture {
             return false
         }
 
+        /*
+         * 同一个物理事件会被多个入口各投递一次（TIS 的 handler、输入接收器…）。
+         * 状态机只能跑一次：跑第二次时，第一条回调刚设好的 ARMED 会被当成
+         * 「上一轮的残留」清掉（日志里的 "down: reap stale gesture state=ARMED" 就是它），
+         * 顺手还会 dismiss 掉刚建好的悬浮窗。
+         */
+        val eventKey = event.eventTime * 31L + event.downTime * 7L + action
+        if (eventKey == lastProcessedEventKey) return lastProcessedEventHandled
+
+        /*
+         * 兜底闸：即便候选名单里又混进了事件接收器，这里也绝不吞。
+         * 吞掉它的方法体等于吞掉 `finishInputEvent`，5 秒后就是
+         * 「进程 system 没有响应（recents_animation_input_consumer）」。
+         */
+        if (isEventReceiverOwner(param.thisObject)) {
+            if (!receiverSwallowBlockedLogged) {
+                receiverSwallowBlockedLogged = true
+                RadialTrace.log(
+                    "skip swallow: hook owner ${param.thisObject?.javaClass?.name} " +
+                        "owns finishInputEvent"
+                )
+            }
+            return false
+        }
+
+        // 首次见到某个入口时记一行，方便对照「到底是哪一层在收事件」。
+        val owner = param.thisObject?.javaClass?.name ?: param.method?.declaringClass?.name
+        if (owner != null && loggedHookOwners.add(owner)) {
+            RadialTrace.log("hook owner=$owner method=${param.method?.name}")
+        }
+
+        val handled = processInputEvent(param, event, action)
+        lastProcessedEventKey = eventKey
+        lastProcessedEventHandled = handled
+        return handled
+    }
+
+    private fun processInputEvent(
+        param: XC_MethodHook.MethodHookParam,
+        event: MotionEvent,
+        action: Int,
+    ): Boolean {
         // thisObject 不再保证是 TouchInteractionService 本身
         // （可能是 TISBinder / InputConsumer 等内部对象），
         // 因此从多个来源解析可用的 Context。
