@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Display
 import android.view.InputEvent
 import android.view.MotionEvent
 import android.view.View
@@ -2429,9 +2430,12 @@ object HookSwipeGesture {
          */
         if (!radialPilferedThisGesture) {
             radialPilferedThisGesture = true
-            val pilfered = runCatching { InputPilfer.pilfer(radialHookTarget) }
+            // SparseArray 以 displayId 为下标取 InputResource，取错就找不到 monitor。
+            val displayId = runCatching { safeContext.display?.displayId }
+                .getOrNull() ?: Display.DEFAULT_DISPLAY
+            val pilfered = runCatching { InputPilfer.pilfer(radialHookTarget, displayId) }
                 .getOrDefault(false)
-            RadialTrace.log("pilfer=${if (pilfered) "ok" else "unavailable"}")
+            RadialTrace.log("pilfer=${if (pilfered) "ok" else "unavailable"} display=$displayId")
         }
 
         val revealStartedAt = SystemClock.uptimeMillis()

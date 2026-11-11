@@ -104,20 +104,43 @@ TIS（`TouchInteractionService`）和桌面窗口之间是**监视**关系，不
 我们在 `TouchInteractionHandler.onInputEvent` 入口把方法短路掉，那条 `pilferPointers()`
 就永远不会执行 —— 于是出现了「轮盘正常，但在轮盘上滑动挑选时，后面的工作区跟着左右翻页」。
 
+**入口在哪**（Android 17 桌面 dex 实测）：
+
+```
+TouchInteractionHandler
+  └─ mInputResourceDisplayModel : DisplayModel
+       └─ displayResourceArray : SparseArray
+            └─ [displayId] : TouchInteractionHandler$InputResource
+                 └─ inputMonitorCompat : InputMonitorCompat
+                      └─ pilferPointers() → android.view.InputMonitor.pilferPointers()
+```
+
+`InputConsumerController` **没有** `pilferPointers()`（它只有 `mToken` / `mWindowManager`
+/ `registerInputConsumer`），所以早期「沿对象图按方法名找 pilferPointers」永远找不到，
+日志一直是 `pilfer=unavailable`。真正的入口在 `InputMonitorCompat` 上。
+
 修法是两层：
 
 | 层 | 做法 | 作用 |
 |---|---|---|
-| 主 | `InputPilfer`：沿对象图按方法名找到 `pilferPointers()`，反射调用 | InputDispatcher 给桌面发 CANCEL，桌面彻底退出这条手势 |
+| 主 | `InputPilfer`：反射 `getInputResource(displayId)` 取 `InputResource`，读 `inputMonitorCompat`，调 `pilferPointers()` | InputDispatcher 给桌面发 CANCEL，桌面彻底退出这条手势 |
 | 兜 | `Activity.dispatchTouchEvent` Hook：轮盘展开期间直接吞掉事件 | 反射随 ROM 变化失效时，视图树照样收不到 DOWN/MOVE |
 
 时机很关键：**都在「确认是上滑」之后**（`shouldReveal` 通过那一刻），不在 DOWN。
 如果在 DOWN 就抢，触发区里的普通点击（底部 Dock 图标）会一起失效 —— 那比轮盘本身更难忍受。
 
-`InputPilfer` 刻意不写死字段名：`InputConsumerController` 的内部结构在
-Android 版本之间换过好几次，所以从 `thisObject` 出发做 BFS（深度 ≤4、节点 ≤160），
-按方法名找 `pilferPointers` / `notifyPilferPointers`，找到后缓存调用路径。
-日志里会打一行 `pilfer=ok` 或 `pilfer=unavailable`，后者说明反射没找到入口、只靠兜底层在工作。
+`InputPilfer` 的解析顺序：
+
+1. 精确路径：`getInputResource(displayId)` → `InputResource` → 类型为
+   `InputMonitorCompat` / `android.view.InputMonitor` 的字段；
+2. 全图 BFS（深度 ≤5、节点 ≤1200）找同类型的对象，能穿透 `SparseArray` 内部的
+   `Object[]`，否则会被卡在 `displayResourceArray` 这一层；
+3. 最后才退回「任何带无参 `pilferPointers()` 的对象」。
+
+解析结果（含 monitor 实例）会缓存，后续手势直接调用，只有 monitor 被 dispose
+（抛异常）才重新解析。日志里打 `pilfer=ok via <类>#pilferPointers depth=N display=N`
+或 `pilfer=unavailable`；成功时系统侧还能看到一行
+`D/InputManagerService: pilferPointers`，那是 InputDispatcher 真的执行了独占。
 
 
 ## 尺寸与排布
@@ -200,7 +223,7 @@ Android 版本之间换过好几次，所以从 `thisObject` 出发做 BFS（深
 | 数据 | `providers/FreeformAppsProvider.kt` | 把两份名单只读暴露给 Launcher 进程 | — |
 | 数据 | `providers/RadialAppsStore.kt` | 轮盘名单的读写（App 进程内） | — |
 | 数据 | `providers/RadialTriggerSettings.kt` | 触发区域（中心/尺寸/镜像）的读写与命中判定 | ✅ |
-| 输入 | `xposed/hook/utils/InputPilfer.kt` | 找到并调用 `pilferPointers()`，独占输入流 | — |
+| 输入 | `xposed/hook/utils/InputPilfer.kt` | 取 `InputResource.inputMonitorCompat` 并调 `pilferPointers()`，独占输入流 | ✅ |
 | 预览 | `ui/radial_area/*` | 触发区编辑页：滑杆 + 页内预览 + 真实屏幕浮层 | — |
 
 ## 悬浮窗
@@ -290,7 +313,8 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 [radial] down raw=(1380,3100) screen=1440x3200 area=(1152,2848)-(1440,3200) mirror=true enabled=true corner=BOTTOM_RIGHT thread=main ctx=...
 [radial] armed corner=BOTTOM_RIGHT xy=(1380,3100) screen=1440x3200 slop=60 origin=(115,102) parent=DecorView
 [radial] reveal try xy=(1350,3010) down=(1380,3100) handler=...LauncherSwipeHandlerV2@...
-[radial] pilfer=ok
+[radial] pilfer ok via com.android.systemui.shared.system.InputMonitorCompat#pilferPointers depth=2
+[radial] pilfer=ok display=0
 [radial] overlay attached type=2006 alpha=1.0
 [radial] reveal ok corner=BOTTOM_RIGHT count=13 rings=3 shares=[3, 4, 6] screen=1440x3200 radius=598 icon=210 origin=(1325,3098) host=overlay(2006)
 [radial] commit: pkg=com.tencent.mm user=0
@@ -321,7 +345,7 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 | `down: reap stale gesture` | 上一轮手势没正常收尾，新 DOWN 时清场 | **正常兜底**，若频繁出现说明 UP 一直没送达 |
 | `move: menu showing without gate` | 悬浮窗残留且已无活跃手势 | **正常兜底**，同上 |
 | `watchdog: gesture never finished` | 超时（未展开 2s / 已展开 6s）没有新事件 | **正常兜底**，清场但不提交选择 |
-| `pilfer=unavailable` | 反射没找到 `pilferPointers()`（ROM 内部结构变了），只靠 `dispatchTouchEvent` 兜底 | 功能仍可用；若此时桌面仍在跟手滑，说明兜底层也没装上（启动日志里有 `launcher touch dispatch hook installed=false`） |
+| `pilfer=unavailable` | 既没拿到 `InputResource.inputMonitorCompat`，全图 BFS 也没撞到 monitor（ROM 结构又变了），只靠 `dispatchTouchEvent` 兜底 | 功能仍可用；若此时桌面仍在跟手滑，说明兜底层也没装上（启动日志里有 `launcher touch dispatch hook installed=false`） |
 | `reveal slow: Nms` | reveal 在主线程上耗时超过一帧 | N 接近或超过 1000ms 要警惕：那时 `contentResolver.call` 很可能正在冷启动 Z-Flow 进程 |
 
 ### 出现「进程 system 没有响应」
