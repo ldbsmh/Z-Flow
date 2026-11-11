@@ -311,7 +311,12 @@ internal object RadialMenuController {
                 android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-            android.graphics.PixelFormat.TRANSLUCENT,
+            /*
+             * 用 RGBA_8888 而不是 TRANSLUCENT：后者在部分 ROM 上会把整个窗口
+             * 按半透明合成，轮盘的白圆盘会透出底下的桌面图标，看起来像一层毛玻璃
+             * （就是「图标半透明、和桌面图标重叠」的来源）。
+             */
+            android.graphics.PixelFormat.RGBA_8888,
         ).apply {
             gravity = android.view.Gravity.TOP or android.view.Gravity.START
             x = 0

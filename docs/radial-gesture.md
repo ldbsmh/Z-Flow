@@ -326,14 +326,19 @@ ColorOS 特定形态上，这里把半径做成按「弧长间距 + 舒适半径
 
 ## 排查：上滑没反应时看哪里
 
-轮盘的每条失败路径都会**静默退回原本手势**，所以它自带一条常开的诊断链路
-（不受 `HookSwipeGesture.ENABLE_DIAGNOSTIC_LOGS` 控制，见 `RadialTrace`）：
+轮盘的每条失败路径都会**静默退回原本手势**，所以它自带一条诊断链路
+（独立于 `HookSwipeGesture.ENABLE_DIAGNOSTIC_LOGS`，见 `RadialTrace`）。
+
+这条链路**默认关闭**：它跑在输入回调里，写 LSPosed 日志是同步文件 IO，
+一次手势十几条，日常使用只会拖慢手势。需要定位问题时，把
+`RadialTrace.ENABLED` 改成 `true`（同时可开 `WRITE_LSPOSED`）重新安装、重启桌面进程，然后：
 
 ```bash
 adb logcat -s ZFlowRadial
 ```
 
 LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
+`log()` 是 inline 函数，关闭时连实参的字符串拼接都会被打包成死代码消除，热路径零开销。
 
 一次手势的正常链路是这几行：
 
@@ -388,7 +393,8 @@ adb logcat -b events -d | grep am_anr
 #         (recents_animation_input_consumer is not responding. Waited 5001ms for MotionEvent).]
 ```
 
-看到这条就先查 `adb logcat -s ZFlowRadial` 里有没有上面表格中的四个兜底日志。
+看到这条先打开 `RadialTrace.ENABLED`（见上文），再查 `adb logcat -s ZFlowRadial`
+里有没有上面表格中的四个兜底日志。
 四条出口都正常时不会再出现该 ANR；若仍出现，按顺序怀疑：
 
 1. **吞事件的那一层是否自己负责 `finishInputEvent`**（最常见）：`hook owner=` 日志里

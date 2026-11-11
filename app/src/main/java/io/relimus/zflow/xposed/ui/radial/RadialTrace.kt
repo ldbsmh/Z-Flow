@@ -6,26 +6,31 @@ import de.robv.android.xposed.XposedBridge
 /**
  * 轮盘诊断日志。
  *
- * 故意**不**受 HookSwipeGesture 的 ENABLE_DIAGNOSTIC_LOGS 控制：
- * 轮盘的每条失败路径都是「静默退回原本手势」，如果日志也能被关掉，
- * 用户侧就只能观察到「没反应」，无法区分是热区没命中、设置没读到、
- * 名单为空、父视图找不到，还是提交失败。
+ * **默认关闭**。轮盘的每条失败路径都是「静默退回原本手势」，排查时确实需要日志；
+ * 但它跑在输入回调里，同步写 LSPosed 日志（`XposedBridge.log` 是文件 IO），
+ * 一次手势十几条，日常使用纯属浪费，所以只在定位问题时临时打开。
  *
- * 因此这里固定输出，但只挂在状态迁移点上（一次手势最多几行），不会刷屏：
+ * 打开方式：把 [ENABLED] 改成 `true`，重新编译安装模块并重启桌面进程。
  * - logcat：`adb logcat -s ZFlowRadial`
  * - LSPosed 日志：前缀 `ZFlowRadial`
+ *
+ * [log] 是 inline 函数、[ENABLED] 是 `const`，关闭时编译器会把整段调用
+ * （含实参里的字符串拼接）当死代码消除，热路径上不留任何开销。
  */
 internal object RadialTrace {
 
     const val TAG = "ZFlowRadial"
 
-    /** 常开。真机上排查完可以改成 false，但保留 logcat 一路通常没必要关。 */
-    private const val ENABLED = true
+    /** 轮盘日志总开关，见类注释。 */
+    @PublishedApi
+    internal const val ENABLED = false
 
-    /** 同步写 LSPosed 日志，方便没有 adb 的用户直接看模块日志。 */
-    private const val WRITE_LSPOSED = true
+    /** 是否同时写 LSPosed 日志（没有 adb 时看模块日志用）。 */
+    @PublishedApi
+    internal const val WRITE_LSPOSED = false
 
-    fun log(message: String) {
+    @Suppress("NOTHING_TO_INLINE")
+    inline fun log(message: String) {
         if (!ENABLED) return
         val line = "[radial] $message"
         runCatching { Log.i(TAG, line) }
