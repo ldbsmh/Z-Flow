@@ -30,6 +30,10 @@ internal class TriggerAreaOverlay(context: Context) {
     val available: Boolean
         get() = windowManager != null && Settings.canDrawOverlays(appContext)
 
+    /** 浮层当前是否真的挂上去了（有权限也可能 addView 失败）。 */
+    val isAttached: Boolean
+        get() = attached
+
     /** 真实屏幕尺寸（含状态栏/导航栏），与 hook 侧 currentWindowMetrics 对齐。 */
     fun screenSize(): Pair<Float, Float>? = runCatching {
         val bounds = windowManager?.maximumWindowMetrics?.bounds ?: return@runCatching null

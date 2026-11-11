@@ -97,8 +97,8 @@ class RadialTriggerAreaActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // 从系统权限页回来后悬浮窗可能刚被允许，这里重新判断一次。
-        updateOverlayHint()
         overlay?.show(config)
+        updateOverlayHint()
     }
 
     override fun onPause() {
@@ -167,9 +167,10 @@ class RadialTriggerAreaActivity : AppCompatActivity() {
         updateOverlayHint()
     }
 
+    /** 只有浮层真的挂上去才隐藏提示：有权限但 addView 失败时也得让用户知道没显示。 */
     private fun updateOverlayHint() {
-        val canOverlay = overlay?.available == true
-        binding.textOverlayHint.visibility = if (canOverlay) {
+        val showing = overlay?.isAttached == true
+        binding.textOverlayHint.visibility = if (showing) {
             android.view.View.GONE
         } else {
             android.view.View.VISIBLE
