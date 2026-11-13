@@ -134,6 +134,19 @@ internal class RadialMenuView(context: Context) : View(context) {
     private var motionAnimator: ValueAnimator? = null
     private var selectionAnimator: ValueAnimator? = null
 
+    /**
+     * 入场动画是否已经落地。
+     *
+     * 落地之前不接受选择 —— 这是「先把轮盘完整唤出来，再选择，最后才打开应用」的
+     * 第一道闸。轮盘还在从圆心往外长的时候，格子位置一直在动，这时候按手指位置
+     * 判定选中，等于「上滑路过哪一格就选中哪一格」，松手就打开，误触全从这里来。
+     */
+    private var entrySettled = false
+
+    /** 入场期间最后一条指针位置，等动画落地后补算一次选中。 */
+    private var pendingPointerX = Float.NaN
+    private var pendingPointerY = Float.NaN
+
     var selectedIndex: Int? = null
         private set
 
@@ -154,6 +167,9 @@ internal class RadialMenuView(context: Context) : View(context) {
         exitProgress = 0f
         selectionProgress = 0f
         selectedIndex = null
+        entrySettled = false
+        pendingPointerX = Float.NaN
+        pendingPointerY = Float.NaN
         chipRadius = metrics.iconDiameter / 2f
         iconRadius = chipRadius * RadialLayoutSpec.ICON_INSET_RATIO
         outerRadius = metrics.outerRadius
@@ -194,10 +210,14 @@ internal class RadialMenuView(context: Context) : View(context) {
 
     fun animateIn() {
         stopMotion()
+        entrySettled = false
+        pendingPointerX = Float.NaN
+        pendingPointerY = Float.NaN
         if (!ValueAnimator.areAnimatorsEnabled()) {
             entryProgress = 1f
             exitProgress = 0f
             invalidate()
+            settleEntry()
             return
         }
         exitProgress = 0f
@@ -208,8 +228,37 @@ internal class RadialMenuView(context: Context) : View(context) {
                 entryProgress = it.animatedValue as Float
                 invalidate()
             }
+            addListener(object : AnimatorListenerAdapter() {
+                private var canceled = false
+
+                override fun onAnimationCancel(animation: Animator) {
+                    canceled = true
+                }
+
+                override fun onAnimationEnd(animation: Animator) {
+                    // 被 animateOut / detach 打断时不能「补算选中」，
+                    // 否则收起动画的开头会跳出一个高亮。
+                    if (!canceled) settleEntry()
+                }
+            })
             start()
         }
+    }
+
+    /**
+     * 入场动画落地：从这里起才允许选择。
+     *
+     * 用入场期间缓存的最后一条指针位置补算一次，让「手指已经停在哪一格」的
+     * 用户不必再抖一下手指；手指停在轮盘外面（快速上滑直接穿过去）就没有选中，
+     * 松手时什么都不打开 —— 这正是误触要挡掉的情况。
+     */
+    private fun settleEntry() {
+        entrySettled = true
+        val x = pendingPointerX
+        val y = pendingPointerY
+        pendingPointerX = Float.NaN
+        pendingPointerY = Float.NaN
+        if (x.isFinite() && y.isFinite()) applyPointer(x, y)
     }
 
     fun animateOut(onFinished: (() -> Unit)? = null) {
@@ -239,9 +288,17 @@ internal class RadialMenuView(context: Context) : View(context) {
 
     /** 推入手指坐标（与 View 同一坐标系，调用方负责换算）。 */
     fun updatePointer(x: Float, y: Float) {
+        if (!entrySettled) {
+            // 轮盘还在长出来：只记住位置，别急着判定选中（见 [entrySettled]）。
+            pendingPointerX = x
+            pendingPointerY = y
+            return
+        }
+        applyPointer(x, y)
+    }
+
+    private fun applyPointer(x: Float, y: Float) {
         val currentLayout = layout ?: return
-        // 不能因为入场动画还没开始（entryProgress == 0）就丢掉指针：
-        // 展开那一帧 pointer 会先到，丢了就要用户再动一下才有选中。
         val next = RadialGeometry.selection(
             layout = currentLayout,
             x = x,

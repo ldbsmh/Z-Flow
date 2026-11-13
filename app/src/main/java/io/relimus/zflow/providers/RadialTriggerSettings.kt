@@ -26,8 +26,22 @@ object RadialTriggerSettings {
     const val KEY_HEIGHT = "radial_trigger_area_height"
     const val KEY_MIRROR = "radial_trigger_area_mirror"
 
-    /** 默认落在左下角：与系统手势条的起手区大致重合，用户不需要重新学起手位置。 */
-    const val DEFAULT_CENTER_X = 9
+    /**
+     * 默认落在**右下角**：右手单手握持时拇指的自然落点。
+     *
+     * 镜像打开后左下角同样可用，所以左手用户不需要改任何设置。
+     */
+    const val DEFAULT_CENTER_X = 91
+
+    /**
+     * 旧版本的默认值（左下角）。
+     *
+     * 老用户机器上已经存了 9，仅改 [DEFAULT_CENTER_X] 对他们不生效，
+     * 因此 [read] 会把「还停在旧默认值」的配置迁移到新默认值；
+     * 手动把触发区摆回 9 的极少数人会被一起迁走，再拖一次即可。
+     */
+    const val LEGACY_DEFAULT_CENTER_X = 9
+
     const val DEFAULT_CENTER_Y = 95
     const val DEFAULT_WIDTH = 20
     const val DEFAULT_HEIGHT = 12
@@ -157,8 +171,11 @@ object RadialTriggerSettings {
     /** 进程内读取（App 进程用）。被 hook 的进程请走 [RemoteSettings]。 */
     fun read(context: Context): Config {
         val prefs = context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+        val storedX = prefs.getInt(KEY_CENTER_X, DEFAULT_CENTER_X)
         return Config(
-            centerXPercent = prefs.getInt(KEY_CENTER_X, DEFAULT_CENTER_X),
+            // 老用户存的是旧默认值（左下角）：跟着新默认值一起换到右侧，
+            // 否则「改了默认值」只对新装用户生效，升级上来的人毫无变化。
+            centerXPercent = if (storedX == LEGACY_DEFAULT_CENTER_X) DEFAULT_CENTER_X else storedX,
             centerYPercent = prefs.getInt(KEY_CENTER_Y, DEFAULT_CENTER_Y),
             widthPercent = prefs.getInt(KEY_WIDTH, DEFAULT_WIDTH),
             heightPercent = prefs.getInt(KEY_HEIGHT, DEFAULT_HEIGHT),

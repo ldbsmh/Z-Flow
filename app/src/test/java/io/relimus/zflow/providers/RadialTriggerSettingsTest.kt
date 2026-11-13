@@ -22,17 +22,30 @@ class RadialTriggerSettingsTest {
     fun defaultAreaCoversBothBottomCorners() {
         val config = RadialTriggerSettings.Config()
         assertNotNull(
-            "左下角必须命中",
+            "左下角必须命中（默认镜像）",
             config.hit(40f, height - 40f, width, height),
         )
         assertNotNull(
-            "右下角必须命中（默认镜像）",
+            "右下角必须命中",
             config.hit(width - 40f, height - 40f, width, height),
         )
         assertNull(
             "屏幕中间不该命中",
             config.hit(width / 2f, height * 0.6f, width, height),
         )
+    }
+
+    /** 默认主区落在**右侧**：镜像只是把另一侧补齐，不该反过来。 */
+    @Test
+    fun defaultAreaSitsOnTheRightSide() {
+        val config = RadialTriggerSettings.Config()
+        assertTrue(
+            "默认触发区中心应当在右半边，实际 ${config.area(width, height).centerX}",
+            config.area(width, height).centerX > width / 2f,
+        )
+        val hit = config.hit(width - 40f, height - 40f, width, height)
+        assertNotNull(hit)
+        assertFalse("右下角命中时扇形依附右侧", hit!!.leftSide)
     }
 
     /** 关掉镜像、挪到右侧后，左侧必须完全不响应（把左边让给系统手势）。 */
