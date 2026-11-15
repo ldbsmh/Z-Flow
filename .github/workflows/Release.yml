@@ -2,14 +2,15 @@ name: Build Z-Flow Release
 
 on:
   # master 是正式发布分支；import 是当前的默认开发分支（推送到此即编译，便于验证修复）。
+  # feat/nativecomplements-window-* 是小窗实现切换的验证分支。
   push:
-    branches: [ master, import ]
+    branches: [ master, import, 'feat/nativecomplements-window-*' ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - '**.txt'
   pull_request:
-    branches: [ master, import ]
+    branches: [ master, import, 'feat/nativecomplements-window-*' ]
     paths-ignore:
       - '**.md'
       - 'docs/**'

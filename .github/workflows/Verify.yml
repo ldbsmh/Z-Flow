@@ -2,9 +2,9 @@ name: Verify security and lifecycle fixes
 
 on:
   push:
-    branches: [import, master]
+    branches: [import, master, 'feat/nativecomplements-window-*']
   pull_request:
-    branches: [import, master]
+    branches: [import, master, 'feat/nativecomplements-window-*']
   workflow_dispatch:
 
 permissions:
