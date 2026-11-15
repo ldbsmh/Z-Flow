@@ -17,11 +17,12 @@ import android.os.RemoteException;
  */
 final class OpenPort extends Binder {
     static final String DESCRIPTOR = "io.relimus.zflow.nativewin.OPEN";
-    private static final int OPEN = IBinder.FIRST_CALL_TRANSACTION;
-    private static final int OPEN_PENDING = IBinder.FIRST_CALL_TRANSACTION + 1;
-    private static final int CLOSE = IBinder.FIRST_CALL_TRANSACTION + 2;
-    private static final int STATUS = IBinder.FIRST_CALL_TRANSACTION + 3;
-    private static final int OPEN_PENDING_INTENT = IBinder.FIRST_CALL_TRANSACTION + 4;
+    private static final int FIRST = IBinder.FIRST_CALL_TRANSACTION;
+    private static final int OPEN = FIRST;
+    private static final int OPEN_PENDING = FIRST + 1;
+    private static final int CLOSE = FIRST + 2;
+    private static final int STATUS = FIRST + 3;
+    private static final int OPEN_PENDING_INTENT = FIRST + 4;
 
     private final WindowEngine engine;
     private volatile int clientUid = -1;

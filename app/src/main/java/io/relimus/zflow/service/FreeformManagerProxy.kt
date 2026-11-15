@@ -24,11 +24,12 @@ object FreeformManagerProxy : IBinder.DeathRecipient {
 
     private const val TAG = "FreeformManagerProxy"
     private const val DESCRIPTOR = "io.relimus.zflow.nativewin.OPEN"
-    private const val OPEN = IBinder.FIRST_CALL_TRANSACTION
-    private const val OPEN_PENDING = IBinder.FIRST_CALL_TRANSACTION + 1
-    private const val CLOSE = IBinder.FIRST_CALL_TRANSACTION + 2
-    private const val STATUS = IBinder.FIRST_CALL_TRANSACTION + 3
-    private const val OPEN_PENDING_INTENT = IBinder.FIRST_CALL_TRANSACTION + 4
+    private const val FIRST = IBinder.FIRST_CALL_TRANSACTION
+    private const val OPEN = FIRST
+    private const val OPEN_PENDING = FIRST + 1
+    private const val CLOSE = FIRST + 2
+    private const val STATUS = FIRST + 3
+    private const val OPEN_PENDING_INTENT = FIRST + 4
 
     @Volatile
     private var port: IBinder? = null
