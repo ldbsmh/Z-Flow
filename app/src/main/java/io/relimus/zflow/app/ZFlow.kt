@@ -10,13 +10,13 @@ import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 /**
  * Application class for Z-Flow
- * Now uses Xposed-based FreeformManager instead of Shizuku.
+ * 小窗由 system_server 侧的 libxposed 模块接管真实任务实现（不再使用 VirtualDisplay）。
  */
 class ZFlow : Application() {
     val isRunning = MutableLiveData(false)
 
     /**
-     * Client-side proxy for FreeformManager service running in system_server.
+     * 应用侧的小窗后端入口（system_server 的 OpenPort binder 代理）。
      */
     val freeformManagerProxy: FreeformManagerProxy
         get() = FreeformManagerProxy
@@ -44,7 +44,7 @@ class ZFlow : Application() {
 
         DynamicColors.applyToActivitiesIfAvailable(this)
 
-        // Check if FreeformManager is connected
+        // 检查小窗后端 binder 是否已投递
         checkServiceConnection()
     }
 

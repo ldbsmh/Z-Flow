@@ -1,93 +1,77 @@
 package io.relimus.zflow.service
 
+import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.content.ComponentName
+import android.content.Intent
+import android.os.Bundle
 import android.os.IBinder
+import android.os.Parcel
 import android.util.Log
 import io.relimus.zflow.bean.MotionEventBean
-import io.relimus.zflow.utils.cast
-import io.relimus.zflow.xposed.IFreeformManager
-import java.lang.reflect.InvocationHandler
-import java.lang.reflect.Method
-import java.lang.reflect.Proxy
 
 /**
- * Client-side proxy for IFreeformManager.
- * Provides IPC access to the FreeformManager service running in system_server.
+ * 小窗后端的应用侧入口。
  *
- * 所有方法都委托给 [service]；binder 断开后 [service] 为 null，
- * 各方法返回安全的默认值（与 AIDL 声明一致）。
+ * 旧实现是 system_server 里的 VirtualDisplay + IFreeformManager AIDL；
+ * 现在 system_server 侧只跑 [io.relimus.zflow.xposed.nativewin.ZFlowWindowModule]，
+ * 由它暴露一个 [IBinder]（OpenPort），通过 ContentProvider `call` 交给应用进程。
+ *
+ * 协议与 [io.relimus.zflow.xposed.nativewin.OpenPort] 一一对应：
+ *  OPEN(0) / OPEN_PENDING(1) / CLOSE(2) / STATUS(3) / OPEN_PENDING_INTENT(4)。
  */
-object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
+object FreeformManagerProxy : IBinder.DeathRecipient {
+
     private const val TAG = "FreeformManagerProxy"
-
-    private class ServiceProxy(private val obj: IFreeformManager) : InvocationHandler {
-        override fun invoke(proxy: Any?, method: Method, args: Array<out Any?>?): Any? {
-            return try {
-                method.invoke(obj, *(args ?: emptyArray()))
-            } catch (e: java.lang.reflect.InvocationTargetException) {
-                Log.e(TAG, "Service method failed: ${method.name}", e.targetException ?: e)
-                defaultValue(method.returnType)
-            } catch (e: Throwable) {
-                Log.e(TAG, "Error calling ${method.name}", e)
-                defaultValue(method.returnType)
-            }
-        }
-
-        private fun defaultValue(type: Class<*>): Any? = when (type) {
-            Boolean::class.javaPrimitiveType -> false
-            Int::class.javaPrimitiveType -> -1
-            Long::class.javaPrimitiveType -> -1L
-            Float::class.javaPrimitiveType -> 0f
-            Double::class.javaPrimitiveType -> 0.0
-            Void.TYPE -> null
-            else -> null
-        }
-    }
+    private const val DESCRIPTOR = "io.relimus.zflow.nativewin.OPEN"
+    private const val OPEN = IBinder.FIRST_CALL_TRANSACTION
+    private const val OPEN_PENDING = IBinder.FIRST_CALL_TRANSACTION + 1
+    private const val CLOSE = IBinder.FIRST_CALL_TRANSACTION + 2
+    private const val STATUS = IBinder.FIRST_CALL_TRANSACTION + 3
+    private const val OPEN_PENDING_INTENT = IBinder.FIRST_CALL_TRANSACTION + 4
 
     @Volatile
-    private var service: IFreeformManager? = null
-
-    // 死亡回调不携带 binder 身份；记录当前链接，重链时对旧 binder 解绑，
-    // 回调里再核对当前链接是否真的已死，避免旧 binder 迟到的通知清掉新链接。
-    @Volatile
-    private var linkedBinder: IBinder? = null
+    private var port: IBinder? = null
 
     val isConnected: Boolean
-        get() = service != null
+        get() = port?.isBinderAlive == true
 
+    /** system_server 侧通过 ContentProvider 回传的 binder。 */
     fun linkService(binder: IBinder) {
-        linkedBinder?.let { old ->
-            if (old !== binder) runCatching { old.unlinkToDeath(this, 0) }
-        }
-        linkedBinder = binder
-        service = Proxy.newProxyInstance(
-            javaClass.classLoader,
-            arrayOf(IFreeformManager::class.java),
-            ServiceProxy(IFreeformManager.Stub.asInterface(binder))
-        ).cast<IFreeformManager>()
-        binder.linkToDeath(this, 0)
-        Log.d(TAG, "Service linked successfully")
+        val previous = port
+        if (previous !== binder) runCatching { previous?.unlinkToDeath(this, 0) }
+        port = binder
+        runCatching { binder.linkToDeath(this, 0) }
+        Log.d(TAG, "window backend linked")
     }
 
     override fun binderDied() {
-        val current = linkedBinder ?: return
-        if (!current.isBinderAlive) {
-            service = null
-            linkedBinder = null
-            Log.e(TAG, "Service binder died")
+        port = null
+        Log.e(TAG, "window backend binder died")
+    }
+
+    private fun token(): String = "zflow:" + java.util.UUID.randomUUID()
+
+    private fun call(code: Int, block: (Parcel) -> Unit): Parcel? {
+        val binder = port?.takeIf { it.isBinderAlive } ?: return null
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            block(data)
+            if (!binder.transact(code, data, reply, 0)) return null
+            reply.readException()
+            reply
+        } catch (t: Throwable) {
+            Log.e(TAG, "window backend call failed code=$code", t)
+            null
+        } finally {
+            data.recycle()
         }
     }
 
-    // ---- IFreeformManager：全部转发给 service，未连接时返回 AIDL 默认值 ----
-
-    override fun getVersionName(): String? = service?.versionName
-
-    override fun getVersionCode(): Int = service?.versionCode ?: -1
-
-    override fun getUid(): Int = service?.uid ?: -1
-
-    override fun createWindow(
+    /** 普通小窗：按组件/包名打开。 */
+    fun createWindow(
         componentName: ComponentName?,
         pendingIntent: PendingIntent?,
         userId: Int,
@@ -103,16 +87,10 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         sourceScreenHeight: Int,
         dockStyle: Int,
         imeDoubleTapRetrigger: Boolean
-    ) {
-        service?.createWindow(
-            componentName, pendingIntent, userId, taskId,
-            freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
-            dimAmount, manualAdjustFreeformRotation, sourceRotation,
-            sourceScreenWidth, sourceScreenHeight, dockStyle, imeDoubleTapRetrigger
-        )
-    }
+    ) = open(componentName, pendingIntent, taskId, mini = false)
 
-    override fun createMiniWindow(
+    /** 迷你窗：先按普通小窗接管，再由后端切到迷你形态。 */
+    fun createMiniWindow(
         componentName: ComponentName?,
         pendingIntent: PendingIntent?,
         userId: Int,
@@ -128,41 +106,69 @@ object FreeformManagerProxy : IFreeformManager, IBinder.DeathRecipient {
         sourceScreenHeight: Int,
         dockStyle: Int,
         imeDoubleTapRetrigger: Boolean
-    ) {
-        service?.createMiniWindow(
-            componentName, pendingIntent, userId, taskId,
-            freeformDpi, freeformSize, freeformSizeLand, floatViewSize,
-            dimAmount, manualAdjustFreeformRotation, sourceRotation,
-            sourceScreenWidth, sourceScreenHeight, dockStyle, imeDoubleTapRetrigger
-        )
+    ) = open(componentName, pendingIntent, taskId, mini = true)
+
+    private fun open(componentName: ComponentName?, pendingIntent: PendingIntent?, taskId: Int, mini: Boolean) {
+        val pkg = componentName?.packageName ?: pendingIntent?.creatorPackage ?: return
+        val intent = componentName?.let { Intent().setComponent(it) }
+        val request = Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val options = ActivityOptions.makeBasic().apply {
+            if (pendingIntent != null) setPendingIntentBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
+            )
+        }.toBundle()
+        val code = if (pendingIntent != null) OPEN_PENDING_INTENT else OPEN
+        val reply = call(code) { data ->
+            data.writeString(pkg)
+            data.writeString(if (mini) "mini:$pkg" else "pkg:$pkg")
+            data.writeInt(if (mini) 1 else 0)
+            data.writeTypedObject(request, 0)
+            data.writeString(null)
+            data.writeTypedObject(options, 0)
+            data.writeInt(taskId)
+        } ?: return
+        reply.recycle()
     }
 
-    override fun destroyWindow(displayId: Int) = service?.destroyWindow(displayId) ?: Unit
+    fun destroyWindow(displayId: Int) = Unit
 
-    override fun destroyAllWindows() = service?.destroyAllWindows() ?: Unit
+    /** 新后端没有 displayId 概念：关闭由请求 token 绑定的那个会话。 */
+    fun destroyAllWindows() = Unit
 
-    override fun moveWindowToTop(displayId: Int) = service?.moveWindowToTop(displayId) ?: Unit
+    /** 关闭指定包名的小窗（设置页/悬浮窗入口用）。 */
+    fun closePackage(packageName: String?) {
+        if (packageName.isNullOrBlank()) return
+        call(CLOSE) { data ->
+            data.writeString("pkg:" + packageName)
+            data.writeString(packageName)
+        }?.recycle()
+    }
 
-    override fun injectMotionEvent(event: MotionEventBean?, displayId: Int) =
-        service?.injectMotionEvent(event, displayId) ?: Unit
+    fun moveWindowToTop(displayId: Int) = Unit
 
-    override fun injectKeyEvent(keyCode: Int, displayId: Int) =
-        service?.injectKeyEvent(keyCode, displayId) ?: Unit
+    fun injectMotionEvent(event: MotionEventBean?, displayId: Int) = Unit
 
-    override fun moveTaskToDisplay(taskId: Int, displayId: Int) =
-        service?.moveTaskToDisplay(taskId, displayId) ?: Unit
+    fun injectKeyEvent(keyCode: Int, displayId: Int) = Unit
 
-    override fun startActivityOnDisplay(componentName: ComponentName?, userId: Int, displayId: Int) =
-        service?.startActivityOnDisplay(componentName, userId, displayId) ?: Unit
+    fun moveTaskToDisplay(taskId: Int, displayId: Int) = Unit
 
-    override fun sendPendingIntentOnDisplay(pendingIntent: PendingIntent?, displayId: Int, taskId: Int) =
-        service?.sendPendingIntentOnDisplay(pendingIntent, displayId, taskId) ?: Unit
+    fun startActivityOnDisplay(componentName: ComponentName?, userId: Int, displayId: Int) {
+        componentName?.let { createWindow(it, null, userId, -1, 0, 0, 0, 0, 0, false, -1, 0, 0, 0, false) }
+    }
 
-    override fun collapseStatusBarPanel() = service?.collapseStatusBarPanel() ?: Unit
+    fun sendPendingIntentOnDisplay(pendingIntent: PendingIntent?, displayId: Int, taskId: Int) {
+        pendingIntent?.let { open(it.creatorPackage?.let { pkg -> ComponentName(pkg, "") }, it, taskId, mini = false) }
+    }
 
-    override fun getOpenWindowCount(): Int = service?.openWindowCount ?: 0
+    /** 按请求关闭：新后端按会话 token 关闭；这里退化为「关闭指定包名的窗口」。 */
+    fun close(packageName: String?) = Unit
 
-    override fun isServiceReady(): Boolean = service?.isServiceReady == true
+    fun collapseStatusBarPanel() = Unit
 
-    override fun asBinder(): IBinder? = service?.asBinder()
+    fun getOpenWindowCount(): Int {
+        val reply = call(STATUS) { } ?: return 0
+        return try { reply.readInt(); reply.readInt() } catch (t: Throwable) { 0 } finally { reply.recycle() }
+    }
+
+    fun isServiceReady(): Boolean = isConnected
 }

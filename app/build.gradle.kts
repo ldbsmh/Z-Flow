@@ -107,6 +107,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
 
     compileOnly(libs.xposed.api)
+    // system_server 侧小窗后端使用新版 libxposed API 101（onSystemServerStarting）
+    compileOnly(files("libs/libxposed-api-101.0.1.jar"))
     implementation(libs.ezxhelper.core)
     implementation(libs.ezxhelper.api)
 

@@ -35,6 +35,11 @@ object FreeformRequestHandler {
 
     private const val TAG = "FreeformRequest"
 
+    /** 与旧 FreeformService 保持一致的 Intent 形状，供通知钩子等内部调用方复用。 */
+    const val ACTION_START_INTENT = "io.relimus.zflow.action.start.intent"
+    const val ACTION_DESTROY_FREEFORM = "io.relimus.zflow.action.destroy.freeform"
+    const val EXTRA_DISPLAY_ID = "io.relimus.zflow.action.intent.display.id"
+
     /** 队列上限：正常用户操作远达不到，只有异常连发才会触发丢弃。 */
     private const val MAX_PENDING = 16
 
@@ -156,18 +161,15 @@ object FreeformRequestHandler {
 
     /**
      * 从已构造好的 startService Intent 中解析参数并创建窗口。
-     * `action` 只认 [io.relimus.zflow.xposed.services.FreeformService.ACTION_START_INTENT]。
+     * `action` 只认 [ACTION_START_INTENT]。
      */
     fun handleIntent(context: Context, intent: Intent): Boolean {
         val action = intent.action
         val proxy = FreeformManagerProxy
 
-        if (action == io.relimus.zflow.xposed.services.FreeformService.ACTION_DESTROY_FREEFORM) {
+        if (action == ACTION_DESTROY_FREEFORM) {
             if (!proxy.isConnected) return false
-            val displayId = intent.getIntExtra(
-                io.relimus.zflow.xposed.services.FreeformService.EXTRA_DISPLAY_ID, -1
-            )
-            if (displayId >= 0) proxy.destroyWindow(displayId) else proxy.destroyAllWindows()
+            proxy.destroyAllWindows()
             return true
         }
 
@@ -181,12 +183,12 @@ object FreeformRequestHandler {
             context = context,
             componentName = componentName,
             pendingIntent = intent.getParcelableExtra(
-                io.relimus.zflow.xposed.services.FreeformService.EXTRA_PENDING_INTENT,
+                StartFreeformReceiver.EXTRA_PENDING_INTENT,
                 PendingIntent::class.java
             ),
             userId = intent.getIntExtra(Intent.EXTRA_USER, 0),
             taskId = intent.getIntExtra(
-                io.relimus.zflow.xposed.services.FreeformService.EXTRA_TASK_ID, -1
+                StartFreeformReceiver.EXTRA_TASK_ID, -1
             ),
             miniMode = intent.getBooleanExtra(StartFreeformReceiver.EXTRA_MINI_MODE, false),
             sourceRotation = intent.getIntExtra(
@@ -322,7 +324,7 @@ object FreeformRequestHandler {
         }
 
         val sp = context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
-        // 与 system_server 侧一致：DPI 实际跟随物理屏幕，这里仅作占位传递。
+        // 新后端使用系统 freeform 规格；这些值仅保留给设置页展示，不再参与创建。
         val freeformDpi = sp.getInt("freeform_scale", context.resources.displayMetrics.densityDpi)
         val freeformSize = sp.getInt("freeform_size", 75)
         val freeformSizeLand = sp.getInt("freeform_size_land", 90)

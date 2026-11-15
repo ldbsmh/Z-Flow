@@ -1,32 +1,18 @@
 package io.relimus.zflow.service
 
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.service.quicksettings.TileService
-import io.relimus.zflow.ui.floating.FloatingActivity
-import kotlinx.coroutines.DelicateCoroutinesApi
 
 /**
- * @author sunshine
- * @date 2021/2/27
- * 通知栏快捷磁贴服务
+ * 快捷设置磁贴。
+ *
+ * 旧实现由 system_server 里的 FreeformManager 折叠通知面板；新后端不再提供该能力，
+ * 磁贴保留为入口占位（点击无系统级副作用），真正的开窗入口是悬浮窗/手势/桌面长按。
  */
-@DelicateCoroutinesApi
 class QuickStartTileService : TileService() {
 
+    @SuppressLint("WrongConstant")
     override fun onClick() {
         super.onClick()
-        startActivity(
-            Intent(
-                this,
-                FloatingActivity::class.java
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-        collapseStatusBar()
-    }
-
-    @SuppressLint("WrongConstant")
-    private fun collapseStatusBar() {
-        FreeformManagerProxy.collapseStatusBarPanel()
     }
 }

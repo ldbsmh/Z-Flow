@@ -31,18 +31,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 
                 runCatching { HookSystem.init() }
                     .onFailure { XLog.e("HookSystem.init failed", it) }
-
-                runCatching { HookImeInsetsBridge.init() }
-                    .onFailure { XLog.e("HookImeInsetsBridge.init failed", it) }
-
-                runCatching { HookImeAdjustResize.init() }
-                    .onFailure { XLog.e("HookImeAdjustResize.init failed", it) }
-
-                runCatching { HookReload.init() }
-                    .onFailure { XLog.e("HookReload.init failed", it) }
-
-                runCatching { HookPredictiveBack.init() }
-                    .onFailure { XLog.e("HookPredictiveBack.init failed", it) }
             }
 
             "io.relimus.zflow" -> {
@@ -51,28 +39,6 @@ class MainHook : IXposedHookLoadPackage, IXposedHookZygoteInit {
 
             "com.android.systemui" -> {
                 HookSystemUI.init()
-                HookNotificationAction.init()
-            }
-
-            else -> {
-                // Match supported package identities, not arbitrary name substrings.
-                // A separate process still has the same packageName.
-                val pkg = lpparam.packageName
-                val isLauncherLike =
-                    pkg == "com.android.launcher3" ||
-                        pkg == "com.google.android.apps.nexuslauncher"
-
-                if (isLauncherLike) {
-                    runCatching { HookLauncher.init(lpparam.classLoader) }
-                        .onFailure {
-                            XLog.e("HookLauncher.init failed", it)
-                        }
-
-                    runCatching { HookSwipeGesture.init() }
-                        .onFailure {
-                            XLog.e("HookSwipeGesture.init failed", it)
-                        }
-                }
             }
         }
     }

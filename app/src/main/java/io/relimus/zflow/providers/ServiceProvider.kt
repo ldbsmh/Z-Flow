@@ -9,12 +9,14 @@ import android.util.Log
 import io.relimus.zflow.service.FreeformManagerProxy
 
 /**
- * ContentProvider that receives the FreeformManager binder from system_server.
- * Only accepts calls from the "android" package (system_server).
+ * 接收 system_server 投递过来的「小窗后端」binder。
+ *
+ * 新后端的 binder 是 [io.relimus.zflow.xposed.nativewin.OpenPort]：
+ * 只负责打开 / 关闭 / 状态查询，窗口由 system_server 直接把真实任务接管成 freeform 小窗。
  */
 class ServiceProvider : ContentProvider() {
     companion object {
-        private const val TAG = "FreeformServiceProvider"
+        private const val TAG = "ZFlowServiceProvider"
     }
 
     override fun onCreate(): Boolean = false
@@ -41,7 +43,7 @@ class ServiceProvider : ContentProvider() {
     ): Int = 0
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
-        // Only accept calls from android system package
+        // 只接受 system_server 的投递
         if (callingPackage != "android" || extras == null) {
             Log.w(TAG, "Rejected call from package: $callingPackage")
             return null
@@ -54,7 +56,7 @@ class ServiceProvider : ContentProvider() {
         }
 
         FreeformManagerProxy.linkService(binder)
-        Log.d(TAG, "FreeformManager binder linked successfully")
+        Log.d(TAG, "window backend binder linked")
         return Bundle()
     }
 }

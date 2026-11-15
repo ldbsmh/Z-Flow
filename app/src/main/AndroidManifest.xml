@@ -96,11 +96,6 @@
             去掉原来的 exported=true + intent-filter，避免第三方应用伪造
             taskId/component 驱动 system_server 的窗口管理。
         -->
-        <service
-            android:name=".xposed.services.FreeformService"
-            android:enabled="true"
-            android:exported="false" />
-
         <!--
             前台服务：specialUse（悬浮窗保活）。
             stopWithTask=false：用户划掉最近任务后保活，符合悬浮窗类应用预期；
