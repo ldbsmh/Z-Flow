@@ -406,7 +406,7 @@ final class WindowEngine {
 
     int openWindowCount(){
         java.util.List<Session> snapshot=sessions;int count=0;
-        for(Session s:snapshot)if(!s.closing&&live(s))count++;
+        for(Session s:snapshot){try{if(!s.closing&&live(s))count++;}catch(Exception ignored){}}
         return count;
     }
 
@@ -421,7 +421,9 @@ final class WindowEngine {
         if(handler==null||context==null)throw new IllegalStateException("小窗后端尚未就绪");
         if(pkg==null||!Wire.allowedPackage(pkg)||Wire.PKG.equals(pkg)||ZFlowWindowModule.SYSTEMUI_PACKAGE.equals(pkg))return false;
         final String sessionToken=token==null||token.isEmpty()?Wire.token():token;
+        final ActivityOptions launchOptions=options;
         handler.post(()->{
+            ActivityOptions options2=launchOptions;
             try{
                 synchronized(lock){
                     Session retained=null;
@@ -442,11 +444,11 @@ final class WindowEngine {
                     if(launch==null)throw new IllegalStateException("没有启动入口");
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 }
-                if(options==null)options=ActivityOptions.makeBasic();
-                options.setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS);
+                if(options2==null)options2=ActivityOptions.makeBasic();
+                options2.setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS);
                 pendingFrontRequest=new FrontRequest(pkg,sessionToken,mini,++openGeneration);
                 trace.arm(pkg,openGeneration);
-                context.startActivity(launch,options.toBundle());
+                context.startActivity(launch,options2.toBundle());
                 log.accept("FRONT_OPEN package="+pkg+" token="+sessionToken+" mini="+mini+" sourceTask="+sourceTask);
             }catch(Throwable error){log.accept("FRONT_OPEN_FAILED "+FrameworkAccess.reason(error));}
         });

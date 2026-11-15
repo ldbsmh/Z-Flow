@@ -53,8 +53,8 @@ final class OpenPort extends Binder {
                     int taskId = data.readInt();
                     boolean accepted = false;
                     try {
-                        accepted = engine.launchPackage(pkg, token, mini, intent,
-                                options == null ? null : ActivityOptions.fromBundle(options), taskId);
+                        ActivityOptions launchOptions = options == null ? null : ActivityOptions.fromBundle(options);
+                        accepted = engine.launchPackage(pkg, token, mini, intent, launchOptions, taskId);
                     } catch (Throwable error) {
                         android.util.Log.e("ZFlowWindow", "OPEN_PORT_FAILED " + FrameworkAccess.reason(error), error);
                     }
