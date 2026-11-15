@@ -94,22 +94,24 @@ jobs:
             echo "::warning::签名信息不完整，产物为未签名 APK。"
           fi
           set +e
-          ./gradlew assembleRelease --stacktrace -x lintVitalRelease > /tmp/build.log 2>&1
-          STATUS=$?
-          echo "BUILD_LOG_MIRROR build exit=$STATUS"
-          grep -E "^e: |error:|^> Task .* FAILED|What went wrong|Execution failed" /tmp/build.log | head -120
-          if [ "$STATUS" -ne 0 ]; then
-            {
-              echo "### 编译失败摘要"
-              echo '```'
-              grep -E "^e: |error:|^> Task .* FAILED|Execution failed" /tmp/build.log | head -120
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit "$STATUS"
-          fi
           ./gradlew assembleRelease --stacktrace -x lintVitalRelease \
             -PzflowVersionCode=${{ steps.ver.outputs.build_number }} \
-            -PzflowVersionName=${{ steps.ver.outputs.version_name }}
+            -PzflowVersionName=${{ steps.ver.outputs.version_name }} > /tmp/build.log 2>&1
+          STATUS=$?
+          echo "BUILD_LOG_MIRROR build exit=$STATUS"
+          grep -E "^e: |error:|^> Task .* FAILED" /tmp/build.log | head -80
+          if [ "$STATUS" -ne 0 ]; then
+            grep -E "^e: |error:|^> Task .* FAILED" /tmp/build.log | head -80 > compile-errors.txt || true
+            exit "$STATUS"
+          fi
+
+      - name: Upload compile errors
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-errors
+          path: compile-errors.txt
+          if-no-files-found: ignore
 
       # 构建后立即清理解码出的密钥，避免留在 runner 工作区
       - name: Cleanup keystore
