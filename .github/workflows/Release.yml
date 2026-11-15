@@ -102,7 +102,8 @@ jobs:
           sed -n "1,400p" /tmp/build.log | tail -120
           grep -E "^e: |error:|^> Task .* FAILED" /tmp/build.log | head -80
           if [ "$STATUS" -ne 0 ]; then
-            sed -n "1,400p" /tmp/build.log | tail -120 > compile-errors.txt || true
+            grep -n -E "^/(home|Users)/.*\.java:[0-9]+: error|^[^ ]+\.java:[0-9]+: error|symbol:|location:|^e: " /tmp/build.log > compile-errors.txt || true
+          sed -n "1,400p" /tmp/build.log | tail -40 >> compile-errors.txt || true
             exit "$STATUS"
           fi
 
