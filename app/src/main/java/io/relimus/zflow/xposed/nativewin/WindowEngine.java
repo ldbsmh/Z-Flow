@@ -417,7 +417,7 @@ final class WindowEngine {
      * 用启动 Intent 打开目标应用，随后由 activityStarting / activityStartResult 接管成小窗。
      * 会话登记在启动确认后完成，所以这里只负责「拉起 + 记录前端上下文」。
      */
-    boolean launchPackage(String pkg,String token,boolean mini,Intent intent,ActivityOptions options,int sourceTask){
+    public boolean launchPackage(String pkg,String token,boolean mini,Intent intent,ActivityOptions options,int sourceTask){
         if(handler==null||context==null)throw new IllegalStateException("小窗后端尚未就绪");
         if(pkg==null||!Wire.allowedPackage(pkg)||Wire.PKG.equals(pkg)||ZFlowWindowModule.SYSTEMUI_PACKAGE.equals(pkg))return false;
         final String sessionToken=token==null||token.isEmpty()?Wire.token():token;
