@@ -93,6 +93,20 @@ jobs:
             || [ -z "${SIGNING_STORE_PASSWORD:-}" ] || [ -z "${SIGNING_KEY_PASSWORD:-}" ]; then
             echo "::warning::签名信息不完整，产物为未签名 APK。"
           fi
+          set +e
+          ./gradlew assembleRelease --stacktrace -x lintVitalRelease > /tmp/build.log 2>&1
+          STATUS=$?
+          echo "BUILD_LOG_MIRROR build exit=$STATUS"
+          grep -E "^e: |error:|^> Task .* FAILED|What went wrong|Execution failed" /tmp/build.log | head -120
+          if [ "$STATUS" -ne 0 ]; then
+            {
+              echo "### 编译失败摘要"
+              echo '```'
+              grep -E "^e: |error:|^> Task .* FAILED|Execution failed" /tmp/build.log | head -120
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$STATUS"
+          fi
           ./gradlew assembleRelease --stacktrace -x lintVitalRelease \
             -PzflowVersionCode=${{ steps.ver.outputs.build_number }} \
             -PzflowVersionName=${{ steps.ver.outputs.version_name }}
