@@ -99,9 +99,10 @@ jobs:
             -PzflowVersionName=${{ steps.ver.outputs.version_name }} > /tmp/build.log 2>&1
           STATUS=$?
           echo "BUILD_LOG_MIRROR build exit=$STATUS"
+          sed -n "1,400p" /tmp/build.log | tail -120
           grep -E "^e: |error:|^> Task .* FAILED" /tmp/build.log | head -80
           if [ "$STATUS" -ne 0 ]; then
-            grep -E "^e: |error:|^> Task .* FAILED" /tmp/build.log | head -80 > compile-errors.txt || true
+            sed -n "1,400p" /tmp/build.log | tail -120 > compile-errors.txt || true
             exit "$STATUS"
           fi
 
