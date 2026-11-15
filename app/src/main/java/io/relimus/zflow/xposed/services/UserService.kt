@@ -47,7 +47,13 @@ object UserService {
         val binder = windowBackend ?: return
         lastDeliverAt = android.os.SystemClock.elapsedRealtime()
         try {
-            val provider = ActivityManagerApis.getContentProviderExternal(PROVIDER_AUTHORITY, 0, null)
+            // 4 个参数：authority、userId、taskId、processName
+            val provider = ActivityManagerApis.getContentProviderExternal(
+                PROVIDER_AUTHORITY,
+                0,
+                null,
+                null,
+            )
             if (provider == null) {
                 XLog.e("$TAG: Failed to get content provider")
                 return
@@ -90,9 +96,12 @@ object UserService {
         waitActivityService()
         ActivityManagerApis.registerUidObserver(
             uidObserver,
+            // ACTIVE 覆盖首次变活跃；PROCSTATE 覆盖进程状态每次变化——
+            // app 强停后重启时 UID 一直"活跃"，只有状态变化能再次触发投递。
             ActivityManagerHidden.UID_OBSERVER_ACTIVE or
                 ActivityManagerHidden.UID_OBSERVER_PROCSTATE,
             ActivityManagerHidden.PROCESS_STATE_UNKNOWN,
+            null,
         )
         XLog.d("$TAG: UID observer registered, appUid=$appUid")
     }
