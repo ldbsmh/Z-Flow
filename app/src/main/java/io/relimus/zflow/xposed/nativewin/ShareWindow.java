@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 import android.app.ActivityOptions;
 import android.content.Intent;

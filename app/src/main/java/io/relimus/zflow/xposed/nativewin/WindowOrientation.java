@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 import android.util.AtomicFile;
 import java.io.*;

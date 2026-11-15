@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 import android.content.Context;
 import android.os.*;

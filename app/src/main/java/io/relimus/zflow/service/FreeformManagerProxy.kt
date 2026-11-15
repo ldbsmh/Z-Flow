@@ -132,7 +132,7 @@ object FreeformManagerProxy : IBinder.DeathRecipient {
 
     fun destroyWindow(displayId: Int) = Unit
 
-    /** 新后端没有 displayId 概念：关闭由请求 token 绑定的那个会话。 */
+    /** 新后端没有 displayId 概念，全部关闭留给进程重启回收。 */
     fun destroyAllWindows() = Unit
 
     /** 关闭指定包名的小窗（设置页/悬浮窗入口用）。 */

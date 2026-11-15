@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 /** Presentation timing only: this gate never changes a task, focus or Activity lifecycle. */
 final class RotationGate {

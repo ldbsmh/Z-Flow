@@ -2,7 +2,6 @@ package io.relimus.zflow.xposed.nativewin;
 /* Copyright (C) 2023-2024 The Nameless-AOSP Project
  * SPDX-License-Identifier: Apache-2.0
  * Adapted thresholds; new Android-independent input/output helpers. */
-package io.relimus.zflow.xposed.nativewin;
 
 /** SunOS thresholds, separated from Android input so rotation/threshold cases can be checked. */
 final class GestureMath {

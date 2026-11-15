@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 /** Pure geometry and validation, shared by UI and JVM checks. */
 public final class Rules {

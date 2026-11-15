@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 /** SPDX-License-Identifier: Apache-2.0
  * Geometry adapted from Nameless/SunOS WindowResizingAlgorithm.

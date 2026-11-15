@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 /** Shared, framework-independent geometry and orientation decisions. */
 final class WindowPolicy {

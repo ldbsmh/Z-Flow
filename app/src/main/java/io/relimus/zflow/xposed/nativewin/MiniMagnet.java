@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 /** Drag-only dismiss animation; progress always scales the original mini placement. */
 final class MiniMagnet {

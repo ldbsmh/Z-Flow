@@ -1,5 +1,4 @@
 package io.relimus.zflow.xposed.nativewin;
-package io.relimus.zflow.xposed.nativewin;
 
 /** Display-independent geometry; SunOS bar dimensions, adapted radius normalization. */
 final class MotionStyle {
