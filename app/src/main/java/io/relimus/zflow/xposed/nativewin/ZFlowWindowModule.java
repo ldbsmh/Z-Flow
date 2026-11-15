@@ -15,7 +15,7 @@ public final class ZFlowWindowModule extends XposedModule {
     private boolean eligible, attempted;
     @Override public void onModuleLoaded(ModuleLoadedParam p) {
         eligible = p.isSystemServer();
-        note("MODULE_LOADED process=" + p.getProcessName() + " systemServer=" + eligible + " version=" + BuildConfig.VERSION_NAME);
+        note("MODULE_LOADED process=" + p.getProcessName() + " systemServer=" + eligible + ");
     }
     /** system_server：建立小窗后端（FrameworkAccess + WindowEngine + 打开端口）。 */
     /** 新版 API 入口：Android 12+ 的 system_server 在此挂 Hook。 */

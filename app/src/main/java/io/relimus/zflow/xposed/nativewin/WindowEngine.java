@@ -479,8 +479,9 @@ final class WindowEngine {
             if ("STATUS".equals(op)) { pushHistory(false);report("STATUS"); return; }
             if(i.getIntExtra("protocol",0)!=Wire.PROTOCOL) throw new IllegalStateException("请重启加载 0.2.0 后端");
             if ("OTP_INPUT".equals(op)) {
-                if(suggestionInput!=null)suggestionInput.start(i);
-                else{ResultReceiver receiver=i.getParcelableExtra("inputReply",ResultReceiver.class);if(receiver!=null)receiver.send(0,null);}
+                // 验证码逐位输入属于原模块的「快捷建议」，新后端不提供该能力，直接回空结果。
+                ResultReceiver receiver=i.getParcelableExtra("inputReply",ResultReceiver.class);
+                if(receiver!=null)receiver.send(0,null);
                 return;
             }
             if ("CANCEL_OPEN".equals(op)) { cancelRecoveryOpen(i.getStringExtra("token"));return; }

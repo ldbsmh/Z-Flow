@@ -116,18 +116,6 @@ final class Wire {
         endpoint=null;
         c.sendBroadcast(i,null,BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle());
     }
-    static void notification(Context c, boolean active) {
-        NotificationManager nm = c.getSystemService(NotificationManager.class);
-        if (!active) { nm.cancel(5); return; }
-        nm.createNotificationChannel(new NotificationChannel("test", "小窗测试恢复", NotificationManager.IMPORTANCE_LOW));
-        Intent i = new Intent(c, MainActivity.class).setAction("recover")
-            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent p = PendingIntent.getActivity(c, 5, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        try {
-            nm.notify(5, new Notification.Builder(c, "test")
-                .setSmallIcon(android.R.drawable.ic_menu_revert).setContentTitle("小窗承载测试进行中")
-                .setContentText("点击恢复原窗口；小窗无定时退出")
-                .setContentIntent(p).setOngoing(true).build());
-        } catch (SecurityException ignored) { /* The launcher entry still provides recovery. */ }
-    }
+    // 原「小窗承载测试」通知依赖 Demo 入口 Activity，新后端不提供。
+
 }
