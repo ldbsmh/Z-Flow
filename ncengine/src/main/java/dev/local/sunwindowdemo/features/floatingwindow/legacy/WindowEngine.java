@@ -223,9 +223,26 @@ final class WindowEngine {
     private void completeEntryInput(Session s)throws Exception{
         if(!visible(s)||s.restoring||s.closing||s.fullTransition||s.prioritySuspended||s.screenSuspended||entryInputPending(s))return;
         if("normal".equals(s.frame))focusExpanded(s);
+        else settleAsMini(s);
         Intent pending=s.entryControl;s.entryControl=null;
         frameReport("ENTRY_INPUT_READY");
         if(pending!=null)handler.post(()->{if(visible(s)&&!s.restoring&&!s.closing)command(pending);});
+    }
+    /**
+     * 出生即迷你的会话（卡片上滑）：补上 {@code state("mini")} 原本由 animate() 收尾做的那几步。
+     *
+     * 迷你窗不该持有焦点，否则桌面/最近任务会被它抢走，返回键也跟着乱；
+     * 这几步失败不影响窗口本身，只记一条日志。
+     */
+    private void settleAsMini(Session s){
+        try{
+            synchronized(lock){
+                a.call(s.task,"setFocusable",new Class<?>[]{boolean.class},false);
+                a.call(wms,"updateFocusedWindowLocked",new Class<?>[]{int.class,boolean.class},0,true);
+                a.call(root,"resumeFocusedTasksTopActivities");
+                a.call(wms,"requestTraversal");
+            }
+        }catch(Throwable error){log.accept("MINI_SETTLE_FAILED "+FrameworkAccess.reason(error));}
     }
     private Session controlled(Intent i){
         int id=i.getIntExtra("taskId",-1);
@@ -504,6 +521,15 @@ final class WindowEngine {
                     validate(s.task);
                     a.call(atm,"deferWindowLayout");
                     try {
+                        /*
+                         * 卡片上滑：一开始就按迷你窗布局。
+                         *
+                         * 之前是「按默认窗入场，入场结束后再发一条 MINI」，用户看到的是
+                         * 一个完整默认窗先出来、约 1 秒后缩成迷你窗。现在把形态在第一次
+                         * 布局之前就定好，入场动画直接长到迷你尺寸，没有二次变形。
+                         */
+                        boolean startMini=i.getBooleanExtra("mini",false);
+                        if(startMini)s.frame="mini";
                         prepareGeometry(s); // Bounds hook must know the canvas before switching mode.
                         s.decoration=new TaskDecoration(a);
                         s.entering=true;s.transitioning=true;s.opacity=0;s.barAlpha=0;
@@ -514,10 +540,6 @@ final class WindowEngine {
                                 if(previous.decoration!=null)previous.decoration.hide(previous.task);}
                         }
                         active = s;
-                        // 多任务卡片上滑：目标窗口直接以迷你窗形态出现。
-                        // 入场动画期间 state() 会拒绝切换，所以先挂成待执行的控制指令，
-                        // 由 completeEntryInput() 在入场结束后执行。
-                        if(i.getBooleanExtra("mini",false))queueMini(s);
                         frameReport("ENTRY_TOUCH_GUARD");
                         a.call(a.field(s.task,"mTransitionController"),"setNoAnimation",new Class<?>[]{a.wc},s.task);
                         BackPreparation prepared=backPreparation;
@@ -550,8 +572,6 @@ final class WindowEngine {
                 settleNewDefault(displaced,s);
                 completeOpen(i,true);
                 note("ACTIVE：小窗已开启，无定时退出");
-                // 入场已经结束（极快的窗口）时待执行指令不会再被消费，这里补一次。
-                if(i.getBooleanExtra("mini",false))queueMini(s);
                 if(SystemClock.elapsedRealtime()>=s.nextStatus) {s.nextStatus=SystemClock.elapsedRealtime()+1000;report("TICK");}
             handler.postDelayed(() -> tick(s), WindowLifecycle.Pause.LIVE.delay);
             } catch (Throwable e) {

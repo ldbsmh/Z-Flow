@@ -309,6 +309,11 @@ object FreeformRequestHandler {
 
         val proxy = FreeformManagerProxy
         val ncBackend = NcWindowBackend.isNc(context)
+        android.util.Log.i(
+            "ZFlowMini",
+            "create component=$componentName taskId=$taskId mini=$miniMode " +
+                "nc=$ncBackend proxyConnected=${proxy.isConnected}"
+        )
         if (!ncBackend && !proxy.isConnected) {
             XLog.w("$TAG create: FreeformManager not connected (LSPosed 未激活或系统服务未就绪)")
             return false

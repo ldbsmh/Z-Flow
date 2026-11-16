@@ -107,6 +107,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
 
     compileOnly(libs.xposed.api)
+    // libxposed API 101：新入口（ZFlowModule）需要实现 XposedModule。
+    // 与 ncengine 共用同一份 jar，运行时由 LSPosed 注入，不打包。
+    compileOnly(files("../ncengine/libs/libxposed-api-101.0.1.jar"))
     implementation(libs.ezxhelper.core)
     implementation(libs.ezxhelper.api)
 

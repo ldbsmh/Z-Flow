@@ -78,6 +78,36 @@ adb logcat -s ZFlowMini SunWindowDemo5
 前两行有、后面没有，说明卡在准入（`AndroidWindowAdmission`）；一行都没有，说明手势
 hook 没触发，与内核无关。
 
+## 一个必须知道的坑：`java_init.list` 会顶掉 `assets/xposed_init`
+
+并入 ncengine 后，APK 里多了 `META-INF/xposed/module.prop` + `java_init.list`
+（libxposed API 101 的新模块元信息）。**LSPosed 看到 `module.prop` 就按新版模块处理，
+只读 `java_init.list`，完全忽略 `assets/xposed_init`。**
+
+于是出现过一次「什么都没坏，但什么都不工作」：
+
+| 现象 | 真相 |
+|---|---|
+| 小窗引擎正常（`SunWindowDemo5 MODULE_LOADED` / `GUARD_READY`） | ncengine 的三个入口在 `java_init.list` 里，照常加载 |
+| 上滑卡片没有提示、松手不开小窗 | `MainHook` 在 `assets/xposed_init` 里，**函数根本没被调用** |
+| `adb logcat` 一行 `ZFlow*` 都没有 | 连报错都没有，因为入口没执行 |
+
+修法是给 Z-Flow 也加一个 API 101 入口 `io.relimus.zflow.xposed.hook.ZFlowModule`
+（同样写进 `java_init.list`），生命周期回调转调共用的 `MainHook.dispatch(pkg, classLoader)`：
+
+| 经典入口 | API 101 入口 |
+|---|---|
+| `initZygote(startupParam)` | `onModuleLoaded` + `XposedModule` 自身 |
+| `handleLoadPackage(lpparam)`，`packageName == "android"` | `onSystemServerStarting(param)` |
+| `handleLoadPackage(lpparam)`，其他包 | `onPackageLoaded(param)` |
+
+`ZFlowModule` 还顺带补了 ezxhelper 的 `ClassLoaderProvider.classLoader`：
+hook 代码里用 `ClassUtil.loadClass(name)` 解析 ROM 内部类，不设置就回退到系统
+ClassLoader，桌面里的类一个都找不到。
+
+`scope.list` 里补了 `io.relimus.zflow`：否则 Z-Flow 自己进程里不挂 `HookMyself`，
+首页会一直显示「LSPosed 没有激活」。
+
 ## 开关
 
 设置 → 启动与触发 → 桌面手势 → **小窗内核**

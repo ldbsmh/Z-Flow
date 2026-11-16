@@ -55,6 +55,9 @@ object HookSwipeGesture {
     private const val DEBUG_TAG =
         "ZFlowSwipe-Diag"
 
+    /** 卡片上滑开小窗链路的 logcat 锚点标签，跨进程统一用它过滤。 */
+    private const val MINI_TAG = "ZFlowMini"
+
     /*
      * 父类与子类的同一次 initStateCallbacks 调用可能均被 Hook。
      * 同一个 Handler 在该时间内只初始化一次。
@@ -237,6 +240,20 @@ object HookSwipeGesture {
         XposedBridge.log("[$DEBUG_TAG][LIFECYCLE] $message")
     }
 
+    /**
+     * 「上滑卡片开小窗」链路的 logcat 锚点（`adb logcat -s ZFlowMini`）。
+     *
+     * 这条链路横跨三个进程：桌面（hook）→ Z-Flow 应用进程（接收器 + 后端）→ 引擎宿主。
+     * 原先唯一的诊断是 [debugLog]/[lifecycleLog]，两者都受 [ENABLE_DIAGNOSTIC_LOGS]
+     * 控制且写进 LSPosed 日志（要 root 才能读），于是「松手没反应」时在 logcat 里
+     * 一行线索都没有 —— 分不清是没装 hook、没显示提示、没发广播，还是后端拒绝。
+     *
+     * 每次手势最多三行，开销可以忽略，所以常开。
+     */
+    private fun miniLog(message: String) {
+        runCatching { android.util.Log.i(MINI_TAG, message) }
+    }
+
     private fun reportUnavailable(
         operation: String,
         throwable: Throwable
@@ -391,12 +408,17 @@ object HookSwipeGesture {
             hookSwipeGesture()
             inited = true
             lifecycleLog("init() SUCCESS")
+            miniLog("hook ready classes=${hookedClassNames.size} ${hookedClassNames}")
         } catch (throwable: Throwable) {
             inited = false
 
             lifecycleLog(
                 "init() FAILED: ${throwable.javaClass.name}: " +
                     throwable.message.orEmpty()
+            )
+
+            miniLog(
+                "hook init failed: ${throwable.javaClass.simpleName}:${throwable.message}"
             )
 
             reportUnavailable(
@@ -1112,6 +1134,11 @@ object HookSwipeGesture {
         hintCommittedThisGesture = false
         releaseInDropTarget = false
 
+        miniLog(
+            "gesture_end shouldLaunch=$shouldLaunch commitByHint=$commitByHint " +
+                "hintShowing=$dropTargetShowing releaseInDropTarget=$releaseInDropTarget"
+        )
+
         lifecycleLog(
             "GESTURE_END " +
                 "shouldLaunch=$shouldLaunch " +
@@ -1425,6 +1452,8 @@ object HookSwipeGesture {
         gestureDisplayMode = requiredMode
         dropTargetShowing = true
         hintCommittedThisGesture = true
+
+        miniLog("hint shown")
 
         debugLog(
             "SHOW_HINT_ADDED " +
@@ -2361,6 +2390,11 @@ object HookSwipeGesture {
         }
         lastMiniLaunchAt = now
 
+        miniLog(
+            "schedule launch component=$topComponent taskId=$taskId userId=$userId " +
+                "delay=${MINI_LAUNCH_DELAY_MS}ms"
+        )
+
         pendingMiniLaunch?.let {
             mainHandler.removeCallbacks(it)
         }
@@ -2384,6 +2418,11 @@ object HookSwipeGesture {
                     )
 
                     context.sendBroadcast(intent)
+
+                    miniLog(
+                        "broadcast sent pkg=${topComponent.packageName} " +
+                            "taskId=$taskId userId=$userId"
+                    )
 
                     XLog.d(
                         "[ZFlowSwipe] broadcast sent component=$topComponent userId=$userId taskId=$taskId"

@@ -88,6 +88,11 @@ class StartFreeformReceiver private constructor() {
                 val height = intent.getIntExtra(EXTRA_SOURCE_SCREEN_HEIGHT, 0)
                 require(userId >= 0 && taskId >= -1 && rotation in -1..3)
                 require(width in 0..32768 && height in 0..32768 && source.length <= 64)
+                Log.i(
+                    "ZFlowMini",
+                    "received pkg=$packageName taskId=$taskId userId=$userId " +
+                        "mini=${intent.getBooleanExtra(EXTRA_MINI_MODE, false)} source=$source"
+                )
                 return FreeformRequestHandler.enqueueFromBroadcast(
                     context = appContext, target = target, packageName = packageName,
                     userId = userId, taskId = taskId,
@@ -101,6 +106,7 @@ class StartFreeformReceiver private constructor() {
                 // Includes malformed parcels, type mismatches and failed auth/PM/key access.
                 // Do not log attacker-controlled extras or capability contents.
                 Log.w(TAG, "Rejected malformed or unavailable-auth freeform request")
+                Log.w("ZFlowMini", "rejected: malformed or auth/PM failure")
                 return false
             }
         }
