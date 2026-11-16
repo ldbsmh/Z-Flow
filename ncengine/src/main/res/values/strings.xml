@@ -1,0 +1,4 @@
+<resources>
+    <string name="shortcut_window">当前应用小窗</string>
+    <string name="shortcut_window_long">将当前应用变成小窗</string>
+</resources>

@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 rootProject.name = "Z-Flow"
 include(":app")
 include(":hidden-api")
+include(":ncengine")

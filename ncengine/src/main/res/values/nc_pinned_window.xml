@@ -1,0 +1,6 @@
+<resources>
+    <color name="nc_pinned_window_button_background_color">#F2F0F2F2</color>
+    <color name="nc_pinned_window_button_color">#CC06080A</color>
+    <color name="nc_pinned_window_dim_color">#3306080A</color>
+    <dimen name="nc_pinned_window_menu_corner_radius_large">8dp</dimen>
+</resources>

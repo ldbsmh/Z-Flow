@@ -136,4 +136,7 @@ dependencies {
     implementation(libs.rikka.hidden.compat)
 
     compileOnly(project(":hidden-api"))
+
+    // NativeComplements 小窗内核（libxposed API 101 入口随库一起打包）
+    implementation(project(":ncengine"))
 }

@@ -308,7 +308,8 @@ object FreeformRequestHandler {
         }
 
         val proxy = FreeformManagerProxy
-        if (!proxy.isConnected) {
+        val ncBackend = NcWindowBackend.isNc(context)
+        if (!ncBackend && !proxy.isConnected) {
             XLog.w("$TAG create: FreeformManager not connected (LSPosed 未激活或系统服务未就绪)")
             return false
         }
@@ -319,6 +320,17 @@ object FreeformRequestHandler {
         if (DatabaseRepository(context).isBlacklistedOrBlock(packageName, userId)) {
             XLog.w("$TAG create: $packageName user=$userId blacklisted or db unavailable")
             return false
+        }
+
+        if (ncBackend) {
+            // 新内核：真实 freeform 任务 + SystemUI 控件层，不再创建 VirtualDisplay。
+            val routed = if (pendingIntent != null) {
+                NcWindowBackend.openNotification(context, packageName, pendingIntent, null)
+            } else {
+                NcWindowBackend.openApp(context, packageName, miniMode, taskId)
+            }
+            if (routed) return true
+            XLog.w("$TAG create: nc engine unavailable, falling back to legacy window for $packageName")
         }
 
         val sp = context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)

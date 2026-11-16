@@ -52,6 +52,14 @@
                 android:summary="@string/popup_freeform_enable_summary"
                 android:defaultValue="true"
                 app:iconSpaceReserved="false"/>
+            <ListPreference
+                android:key="window_engine"
+                android:title="小窗内核"
+                android:summary="%s"
+                android:entries="@array/window_engine_entries"
+                android:entryValues="@array/window_engine_values"
+                android:defaultValue="nc"
+                app:iconSpaceReserved="false"/>
             <Preference
                 android:key="trusted_callers"
                 app:title="@string/preference_trusted_callers"

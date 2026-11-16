@@ -9,6 +9,7 @@ import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.room.DatabaseRepository
 import io.relimus.zflow.service.FreeformManagerProxy
+import io.relimus.zflow.service.NcWindowBackend
 import io.relimus.zflow.xposed.hook.utils.XLog
 
 /**
@@ -37,7 +38,8 @@ class FreeformService : Service() {
         }
 
         val proxy = ZFlow.me.freeformManagerProxy
-        if (!proxy.isConnected) {
+        // 新内核不依赖 Z-Flow 在 system_server 的 AIDL 服务，只有回退旧路径时才检查连接。
+        if (!NcWindowBackend.isNc(this) && !proxy.isConnected) {
             // system_server 侧尚未连上（Xposed 未激活或开机未完成），
             // 直接丢弃请求，避免后续 NPE。
             XLog.w("FreeformService: FreeformManager not connected, drop action=${intent.action}")
@@ -97,6 +99,17 @@ class FreeformService : Service() {
         if (DatabaseRepository(this).isBlacklisted(packageName, userId) != false) {
             XLog.d("FreeformService: $packageName user=$userId is blacklisted")
             return
+        }
+
+        if (NcWindowBackend.isNc(this)) {
+            // 新内核：交给 ncengine 以真实 freeform 任务开窗，其余尺寸/停靠由它自己管理。
+            val routed = if (pendingIntent != null) {
+                NcWindowBackend.openNotification(this, packageName, pendingIntent, null)
+            } else {
+                NcWindowBackend.openApp(this, packageName, miniMode, taskId)
+            }
+            if (routed) return
+            XLog.w("FreeformService: nc engine unavailable, fallback to legacy for $packageName")
         }
 
         val sp = getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
