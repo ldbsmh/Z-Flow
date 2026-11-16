@@ -163,6 +163,27 @@ ClassLoader，桌面里的类一个都找不到。
 - 弹幕通知、快捷建议、边缘防误触、图标适配、来电拦截、壁纸等非小窗功能。
 - 上游 Compose 设置页（`features/floatingwindow/ui/**`）——设置界面仍用 Z-Flow 的 Preference 页。
 
+## 贴边把手与关闭方式（对齐 Z-Flow）
+
+这两处原本是 NativeComplements 自己的形态，并入后按 Z-Flow 的习惯改了：
+
+| 位置 | 原实现 | 现实现 |
+|---|---|---|
+| 贴边后的把手 | 屏幕边一条 4dp×48dp 白条（`WindowControls` 里手绘） | Z-Flow 的把手外观：60dp 白色圆角底衬（`#F2FFFFFF`，圆角近半）+ 居中应用图标（占 80%）。图标按 `package` 缓存，在 SystemUI 进程用 `PackageManager.getApplicationIcon` 加载；失败只记 `EDGE_ICON_UNAVAILABLE`，退化成纯白底衬，不影响点击/拖动/还原 |
+| 拖到底部关闭 | 复用 SystemUI 消息气泡的 `floating_dismiss_*` 圆形取消按钮，要把窗口拖进那个圆 | Z-Flow 的“滑到底部渐变消失”：关闭区是屏幕底部 15%，不画任何图标；窗口底边越进关闭区，`MiniMagnet` 进度越深，窗口渐隐（1→0.15）并缩到 35%，松手即关闭 |
+
+`MiniMagnet` 从“圆形命中 + 二值”改成了“跟随一个连续目标值”：
+
+```java
+miniMagnet.follow((窗口底边 - 关闭区顶部) / 关闭区高度);  // 0..1
+```
+
+`progress()` 仍是 120ms 的平滑逼近，`latched()` 取 `progress >= 0.5`，所以“松手是否关闭”的
+阈值语义与原来的按钮命中一致，只是不再需要瞄准。
+
+拖动时窗口位置完全跟随手指，不再往关闭区中心吸附；因此补了 `clampMiniX/Y`，
+保证窗口不会被拖出屏幕。
+
 ## 已知缺口（待后续阶段）
 
 1. Z-Flow「小窗外观与尺寸 / 运行规则」里的尺寸比例、贴边样式、数量上限 1~5、黑名单、
