@@ -50,8 +50,10 @@ final class WindowControls {
     private Runnable edgeHoldCallback;
     private int imeTop=Integer.MAX_VALUE;
     private WindowMetrics layoutMetrics;
-    private View dismiss;
     private final Rect dismissBounds=new Rect();
+    /** 贴边把手的应用图标，按包名缓存；换应用或首次加载时更新。 */
+    private android.graphics.drawable.Drawable appIcon;
+    private String appIconPkg;
     private boolean dismissEntered;
     private View menu;
     private LinearLayout menuActions;
@@ -87,6 +89,19 @@ final class WindowControls {
         wm=c.getSystemService(WindowManager.class);
     }
     private int dp(float n){return Math.round(n*c.getResources().getDisplayMetrics().density);}
+    /**
+     * 贴边把手要显示应用自己的图标（Z-Flow 的样式）。
+     * SystemUI 进程取不到就退回纯白底衬：只是外观缺失，不能影响把手功能。
+     */
+    private android.graphics.drawable.Drawable loadAppIcon(String packageName){
+        try{
+            android.graphics.drawable.Drawable icon=c.getPackageManager().getApplicationIcon(packageName);
+            return icon==null?null:icon.mutate();
+        }catch(Throwable unavailable){
+            android.util.Log.w("NativeComplements","EDGE_ICON_UNAVAILABLE "+packageName+" "+unavailable);
+            return null;
+        }
+    }
     void update(Intent i){
         if(i.getIntExtra("protocol",0)!=Wire.PROTOCOL)return;
         long serial=i.getLongExtra("sequence",0);if(serial<=sequence)return;sequence=serial;
@@ -95,6 +110,12 @@ final class WindowControls {
         if(!i.getBooleanExtra("presented",false)&&!inputPending){hide();return;}
         nativeHandle=i.getBooleanExtra("nativeHandle",false);
         barColor=i.getIntExtra("barColor",0xfff0f2f2);
+        String appPackage=i.getStringExtra("package");
+        if(appPackage!=null&&!appPackage.equals(appIconPkg)){
+            appIconPkg=appPackage;
+            appIcon=loadAppIcon(appPackage);
+            if(!views.isEmpty())views.get(0).invalidate();
+        }
         String next=i.getStringExtra("frame"),key=i.getStringExtra("token");
         if(!Wire.validToken(key))return;
         float nx=i.getFloatExtra("x",0),ny=i.getFloatExtra("y",0),nw=i.getFloatExtra("width",0),nh=i.getFloatExtra("height",0);
@@ -138,13 +159,23 @@ final class WindowControls {
                 final Paint edgePaint=new Paint(Paint.ANTI_ALIAS_FLAG);
                 @Override protected void onDraw(Canvas cv){
                     super.onDraw(cv);
-                    if(edgeHidden&&edgeGesture!=1){
-                        edgePaint.setColor(0xfff0f2f2);
-                        float left=edgeBarDragging?(getWidth()-dp(4))/2f:edgeSide<0?dp(12):getWidth()-dp(16),top=(getHeight()-dp(48))/2f;
-                        cv.drawRoundRect(left,top,left+dp(4),top+dp(48),dp(2),dp(2),edgePaint);
-                    }
+                    if(!edgeHidden||edgeGesture==1)return;
+                    // Z-Flow 的贴边把手：白色圆角底衬（#F2FFFFFF、圆角近半）+ 应用图标，
+                    // 不再是原来那条 4dp 白条。
+                    float size=Math.min(getWidth(),getHeight());
+                    if(size<=0)return;
+                    float left=(getWidth()-size)/2f,top=(getHeight()-size)/2f;
+                    edgePaint.setStyle(Paint.Style.FILL);
+                    edgePaint.setColor(0xf2ffffff);
+                    cv.drawRoundRect(left,top,left+size,top+size,size*.45f,size*.45f,edgePaint);
+                    android.graphics.drawable.Drawable icon=appIcon;
+                    if(icon==null)return;
+                    float iconSize=size*.8f,inset=(size-iconSize)/2f;
+                    icon.setBounds(Math.round(left+inset),Math.round(top+inset),
+                        Math.round(left+inset+iconSize),Math.round(top+inset+iconSize));
+                    icon.draw(cv);
                 }
-            };mini.setContentDescription("迷你窗：单击还原，双击全屏，长按调整大小或静音，拖出侧边隐藏；侧边白条点击或向内拖动还原");
+            };mini.setContentDescription("迷你窗：单击还原，双击全屏，长按调整大小或静音，拖出侧边隐藏；贴边图标点击或向内拖动还原");
             GestureDetector taps=new GestureDetector(c,new GestureDetector.SimpleOnGestureListener(){
                 @Override public boolean onDown(MotionEvent e){return true;}
                 @Override public boolean onSingleTapConfirmed(MotionEvent e){if(Objects.equals(boundToken,token)&&"mini".equals(frame)){if(menu!=null)hideMenu();else send("NORMAL",0,0,0);}return true;}
@@ -216,13 +247,13 @@ final class WindowControls {
                             moving=true;dragging=true;MotionEvent cancel=MotionEvent.obtain(e);cancel.setAction(MotionEvent.ACTION_CANCEL);taps.onTouchEvent(cancel);cancel.recycle();hideMenu();showDismiss();
                             miniDragBase=basePlacement;miniMagnet.reset();miniFrameTime=System.nanoTime();hideHapticSide=0;
                         }
-                        if(moving){endX=baseX+e.getRawX()-downX;endY=baseY+e.getRawY()-downY;updateMiniDrag(v,e.getRawX(),e.getRawY(),endX,endY);}else taps.onTouchEvent(e);
+                        if(moving){endX=clampMiniX(baseX+e.getRawX()-downX);endY=clampMiniY(baseY+e.getRawY()-downY);updateMiniDrag(v,e.getRawX(),e.getRawY(),endX,endY);}else taps.onTouchEvent(e);
                         return true;
                     }
                     if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){
                         if(moving){
                             boolean up=e.getActionMasked()==MotionEvent.ACTION_UP;
-                            if(up){endX=baseX+e.getRawX()-downX;endY=baseY+e.getRawY()-downY;updateMiniDrag(v,e.getRawX(),e.getRawY(),endX,endY);}
+                            if(up){endX=clampMiniX(baseX+e.getRawX()-downX);endY=clampMiniY(baseY+e.getRawY()-downY);updateMiniDrag(v,e.getRawX(),e.getRawY(),endX,endY);}
                             boolean close=up&&miniMagnet.latched();
                             if(close){prepareMiniMotion();flushMotion();}
                             stopMiniDrag();send(close?"CLOSE":up?"DOCK":"MINI_DRAG_CANCEL",0,endX,endY);
@@ -288,10 +319,25 @@ final class WindowControls {
     private void scheduleMotion(String op,float value,float px,float py){
         motionOp=op;motionScale=value;motionX=px;motionY=py;postMotion();
     }
+    /** 关闭区不再吸附窗口，所以拖动必须自己保证窗口不跑到屏幕外。 */
+    private float clampMiniX(float value){
+        if(miniDragBase==null)return value;
+        float width=miniDragBase.width()*miniDragBase.scale();
+        return Math.max(0,Math.min(Math.max(0,displayW-width),value));
+    }
+    private float clampMiniY(float value){
+        if(miniDragBase==null)return value;
+        float height=miniDragBase.height()*miniDragBase.scale();
+        return Math.max(0,Math.min(Math.max(0,displayH-height),value));
+    }
     private void updateMiniDrag(View v,float px,float py,float rawX,float rawY){
         miniDragX=rawX;miniDragY=rawY;
-        miniMagnet.target(dismissBounds.left,dismissBounds.top,dismissBounds.right,dismissBounds.bottom,px,py);
-        highlight(miniMagnet.latched());
+        // Z-Flow：窗口底边滑进底部关闭区就开始淡出，越深越淡；没有要瞄准的按钮。
+        float closeTop=dismissBounds.isEmpty()?Float.MAX_VALUE:dismissBounds.top;
+        float span=Math.max(1,dismissBounds.isEmpty()?1:dismissBounds.height());
+        float windowBottom=rawY+miniDragBase.height()*miniDragBase.scale();
+        miniMagnet.follow((windowBottom-closeTop)/span);
+        highlight(v,miniMagnet.latched());
         if(miniMagnet.latched())hideHapticSide=0;else hideFeedback(v,miniDragBase,rawX);
         postMotion();
     }
@@ -305,8 +351,8 @@ final class WindowControls {
         float progress=miniMagnet.progress();
         float cx=miniDragX+miniDragBase.width()*miniDragBase.scale()/2,cy=miniDragY+miniDragBase.height()*miniDragBase.scale()/2;
         motionOp="MINI_DRAG";motionScale=progress;
-        motionX=cx+(dismissBounds.exactCenterX()-cx)*progress;
-        motionY=cy+(dismissBounds.exactCenterY()-cy)*progress;
+        // 位置完全跟随手指，不再把窗口吸向某个关闭按钮的中心。
+        motionX=cx;motionY=cy;
     }
     private void clearMotion(){frames.removeFrameCallback(motionFrame);motionPosted=false;motionOp=null;}
     private void stopMiniDrag(){
@@ -478,7 +524,7 @@ final class WindowControls {
             for(int n=1;n<views.size();n++)views.get(n).setVisibility(View.GONE);
             if(edgeHidden){
                 Insets insets=landscape?Insets.NONE:layoutMetrics.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars());
-                int width=dp(48),height=dp(104);
+                int width=dp(60),height=dp(60);
                 if(edgeBarDragging)rect(0,edgeBarCenterX-width/2f,edgeBarCenterY-height/2f,width,height);
                 else rect(0,edgeSide<0?insets.left:d.width()-insets.right-width,
                     Math.max(insets.top,Math.min(edgeCenterY-height/2,d.height()-insets.bottom-height)),width,height);
@@ -603,63 +649,23 @@ final class WindowControls {
             dragging=false;hideMenu();hideDismiss();for(View v:views)v.setVisibility(View.GONE);changed();
         }else if(!views.isEmpty()&&(!transitioning||inputPending))layout();
     }
-    static boolean dismissContains(int left,int top,int right,int bottom,float px,float py){
-        return MiniMagnet.contains(left,top,right,bottom,px,py,1);
-    }
-    private int dismissDimension(String name,float fallbackDp){
-        int id=c.getResources().getIdentifier(name,"dimen","com.android.systemui");
-        try{if(id!=0)return c.getResources().getDimensionPixelSize(id);}catch(android.content.res.Resources.NotFoundException ignored){}
-        return dp(fallbackDp);
-    }
-    private android.graphics.drawable.Drawable dismissDrawable(String name){
-        int id=c.getResources().getIdentifier(name,"drawable","com.android.systemui");
-        try{return id==0?null:c.getResources().getDrawable(id,c.getTheme()).mutate();}
-        catch(android.content.res.Resources.NotFoundException ignored){return null;}
-    }
+    /**
+     * Z-Flow 的关闭方式：屏幕底部 15% 是关闭区，没有任何图标或按钮。
+     * 窗口底边越进这块区域越淡，松手即关闭。
+     */
+    private static final float CLOSE_AREA_THRESHOLD=.85f;
     private void showDismiss(){
-        if(dismiss!=null)return;
-        // Target SystemUI Bubble DismissView: 96dp circle, 32dp icon, 50dp + nav bottom.
-        int size=dismissDimension("floating_dismiss_background_size",96);
-        int iconSize=dismissDimension("floating_dismiss_icon_size",32);
         WindowMetrics metrics=wm.getCurrentWindowMetrics();
-        Insets nav=metrics.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars());
-        int left=(metrics.getBounds().width()-size)/2;
-        int top=metrics.getBounds().height()-nav.bottom-dismissDimension("floating_dismiss_bottom_margin",50)-size;
-        dismissBounds.set(left,top,left+size,top+size);dismissEntered=false;
-        android.graphics.drawable.Drawable background=dismissDrawable("floating_dismiss_background");
-        android.graphics.drawable.Drawable icon=dismissDrawable("floating_dismiss_ic_close");
-        dismiss=new View(c){
-            final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
-            @Override protected void onDraw(Canvas cv){
-                float cx=getWidth()/2f,cy=getHeight()/2f,radius=Math.min(getWidth(),getHeight())/2f;
-                if(background!=null){background.setBounds(0,0,getWidth(),getHeight());background.draw(cv);}
-                else{paint.setStyle(Paint.Style.FILL);paint.setColor(0xee34303a);cv.drawCircle(cx,cy,radius,paint);}
-                if(dismissEntered){paint.setStyle(Paint.Style.FILL);paint.setColor(0x338b3d46);cv.drawCircle(cx,cy,radius,paint);}
-                if(icon!=null){int l=(getWidth()-iconSize)/2,t=(getHeight()-iconSize)/2;icon.setBounds(l,t,l+iconSize,t+iconSize);icon.draw(cv);}
-                else{
-                    float half=iconSize*7f/24;paint.setColor(Color.WHITE);paint.setStrokeWidth(iconSize*2f/24);
-                    cv.drawLine(cx-half,cy-half,cx+half,cy+half,paint);cv.drawLine(cx-half,cy+half,cx+half,cy-half,paint);
-                }
-            }
-        };
-        dismiss.setContentDescription("松手关闭小窗");
-        dismiss.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{
-            if(v!=dismiss)return;
-            int[] xy=new int[2];v.getLocationOnScreen(xy);
-            dismissBounds.set(xy[0],xy[1],xy[0]+v.getWidth(),xy[1]+v.getHeight());
-        });
-        WindowManager.LayoutParams p=new WindowManager.LayoutParams(size,size,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT);
-        p.gravity=Gravity.TOP|Gravity.LEFT;p.x=left;p.y=top;p.setFitInsetsTypes(0);p.setTitle("NativeComplements-dismiss");p.windowAnimations=0;
-        try{SystemUiHost.trust(p);wm.addView(dismiss,p);}catch(RuntimeException e){dismiss=null;dismissBounds.setEmpty();}
+        Rect bounds=metrics.getBounds();
+        dismissBounds.set(bounds.left,Math.round(bounds.height()*CLOSE_AREA_THRESHOLD),bounds.right,bounds.bottom);
+        dismissEntered=false;
     }
-    private void highlight(boolean entered){
-        if(dismiss==null)return;
-        if(entered&&!dismissEntered)dismiss.performHapticFeedback(HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE);
-        if(entered!=dismissEntered){dismissEntered=entered;dismiss.invalidate();}
+    private void highlight(View anchor,boolean entered){
+        if(entered&&!dismissEntered&&anchor!=null)
+            anchor.performHapticFeedback(HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE);
+        dismissEntered=entered;
     }
     private void hideDismiss(){
-        if(dismiss!=null){try{wm.removeViewImmediate(dismiss);}catch(RuntimeException ignored){}dismiss=null;}
         dismissEntered=false;dismissBounds.setEmpty();
     }
     private void hideViews(){

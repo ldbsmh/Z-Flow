@@ -1,29 +1,32 @@
 package dev.local.sunwindowdemo;
 
-/** Drag-only dismiss animation; progress always scales the original mini placement. */
+/**
+ * 拖动关闭的渐隐进度。
+ *
+ * 这里不再有「关闭按钮」这种要瞄准的目标：只要把迷你窗拖进屏幕底部那条关闭区，
+ * 就按越过的比例一路淡下去，松手即关闭（Z-Flow 的滑动到底部渐变消失）。
+ * 进度是连续量，所以用一条平滑过渡把外部算出的目标值追上，避免数值抖动。
+ */
 final class MiniMagnet {
     private static final float DURATION_NANOS=120_000_000f;
     private boolean latched;
-    private float phase;
+    private float phase,target;
 
-    void target(int left,int top,int right,int bottom,float px,float py){
-        latched=contains(left,top,right,bottom,px,py,latched?2:1.5f);
+    /** @param desired 0=不在关闭区，1=完全进入底部关闭区。 */
+    void follow(float desired){
+        target=clamp(desired);
+        latched=target>=.5f;
     }
     boolean latched(){return latched;}
-    boolean animating(){return phase!=(latched?1:0);}
+    boolean animating(){return Math.abs(phase-target)>.001f;}
     void advance(long elapsedNanos){
         float step=Math.max(0,elapsedNanos)/DURATION_NANOS;
-        phase=latched?Math.min(1,phase+step):Math.max(0,phase-step);
+        phase=phase<target?Math.min(target,phase+step):Math.max(target,phase-step);
     }
     float progress(){return phase*phase*(3-2*phase);}
-    void reset(){latched=false;phase=0;}
+    void reset(){latched=false;phase=0;target=0;}
     static float scaleFactor(float progress){return 1-.65f*clamp(progress);}
-    static float alphaFactor(float progress){return 1-.75f*clamp(progress);}
+    /** 滑到底部时几乎看不见了，避免用户误以为窗口还在。 */
+    static float alphaFactor(float progress){return 1-.85f*clamp(progress);}
     private static float clamp(float p){return Float.isFinite(p)?Math.max(0,Math.min(1,p)):0;}
-    static boolean contains(int left,int top,int right,int bottom,float px,float py,float radiusFactor){
-        if(right<=left||bottom<=top||!Float.isFinite(px)||!Float.isFinite(py))return false;
-        float radius=Math.min(right-left,bottom-top)*.5f*radiusFactor;
-        float dx=px-(left+(right-left)/2f),dy=py-(top+(bottom-top)/2f);
-        return dx*dx+dy*dy<=radius*radius;
-    }
 }
