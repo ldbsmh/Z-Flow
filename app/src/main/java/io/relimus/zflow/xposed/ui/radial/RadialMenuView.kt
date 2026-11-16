@@ -9,6 +9,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.Handler
+import android.os.Looper
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.animation.LinearInterpolator
@@ -88,9 +90,6 @@ internal class RadialMenuView(context: Context) : View(context) {
     private var scrimShader: android.graphics.RadialGradient? = null
     private var scrimKey: Triple<Float, Float, Float>? = null
 
-    /** 桌面有没有真的被高斯模糊，决定渐变画多重。 */
-    private var backdropBlurred = false
-
     /** 预览圆的白底、投影与描边，和格子上的圆盘同一套观感。 */
     private val previewPlatePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val previewShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -135,17 +134,24 @@ internal class RadialMenuView(context: Context) : View(context) {
     private var selectionAnimator: ValueAnimator? = null
 
     /**
-     * 入场动画是否已经落地。
+     * 入场是否已经落地。
      *
      * 落地之前不接受选择 —— 这是「先把轮盘完整唤出来，再选择，最后才打开应用」的
      * 第一道闸。轮盘还在从圆心往外长的时候，格子位置一直在动，这时候按手指位置
      * 判定选中，等于「上滑路过哪一格就选中哪一格」，松手就打开，误触全从这里来。
+     *
+     * 闸门用的是**固定延时**，不是「动画播完」回调：系统可以把动画时长缩放成 0
+     * （开发者选项 / 无障碍里关掉动画），那时 `ValueAnimator` 会瞬间 end，
+     * 绑在动画结束上的闸门等于不存在 —— 新时序在那些机器上会完全失效。
      */
     private var entrySettled = false
 
-    /** 入场期间最后一条指针位置，等动画落地后补算一次选中。 */
+    /** 入场期间最后一条指针位置，等闸门打开后补算一次选中。 */
     private var pendingPointerX = Float.NaN
     private var pendingPointerY = Float.NaN
+
+    private val settleHandler = Handler(Looper.getMainLooper())
+    private val settleRunnable = Runnable { settleEntry() }
 
     var selectedIndex: Int? = null
         private set
@@ -179,21 +185,6 @@ internal class RadialMenuView(context: Context) : View(context) {
     }
 
     /**
-     * 告诉视图「桌面到底有没有被真的模糊」。
-     *
-     * 模糊在的时候渐变只需轻压（否则把模糊自己盖掉了，看起来还是一块板）；
-     * 不在的时候得压重，靠遮罩保证桌面图标不会和轮盘里的图标混在一起。
-     */
-    fun setBackdropBlurred(blurred: Boolean) {
-        if (backdropBlurred == blurred) return
-        backdropBlurred = blurred
-        // 颜色变了，shader 必须重建。
-        scrimShader = null
-        scrimKey = null
-        invalidate()
-    }
-
-    /**
      * 后台线程算好的图标落位。
      *
      * 只在数量一致时生效：数量对不上说明这是上一轮窗口的结果，
@@ -210,43 +201,32 @@ internal class RadialMenuView(context: Context) : View(context) {
 
     fun animateIn() {
         stopMotion()
+        settleHandler.removeCallbacks(settleRunnable)
         entrySettled = false
         pendingPointerX = Float.NaN
         pendingPointerY = Float.NaN
-        if (!ValueAnimator.areAnimatorsEnabled()) {
-            entryProgress = 1f
-            exitProgress = 0f
-            invalidate()
-            settleEntry()
-            return
-        }
         exitProgress = 0f
-        motionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = RadialMotion.ENTRY_DURATION_MS
-            interpolator = LinearInterpolator()
-            addUpdateListener {
-                entryProgress = it.animatedValue as Float
-                invalidate()
+        if (ValueAnimator.areAnimatorsEnabled()) {
+            motionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = RadialMotion.ENTRY_DURATION_MS
+                interpolator = LinearInterpolator()
+                addUpdateListener {
+                    entryProgress = it.animatedValue as Float
+                    invalidate()
+                }
+                start()
             }
-            addListener(object : AnimatorListenerAdapter() {
-                private var canceled = false
-
-                override fun onAnimationCancel(animation: Animator) {
-                    canceled = true
-                }
-
-                override fun onAnimationEnd(animation: Animator) {
-                    // 被 animateOut / detach 打断时不能「补算选中」，
-                    // 否则收起动画的开头会跳出一个高亮。
-                    if (!canceled) settleEntry()
-                }
-            })
-            start()
+        } else {
+            // 系统把动画时长缩放成 0：视觉上直接给最终状态，但闸门仍按固定时长开，
+            // 否则「关掉动画」的机器会退化成「触发即选中」。
+            entryProgress = 1f
+            invalidate()
         }
+        settleHandler.postDelayed(settleRunnable, RadialMotion.ENTRY_DURATION_MS)
     }
 
     /**
-     * 入场动画落地：从这里起才允许选择。
+     * 入场闸门打开：从这里起才允许选择。
      *
      * 用入场期间缓存的最后一条指针位置补算一次，让「手指已经停在哪一格」的
      * 用户不必再抖一下手指；手指停在轮盘外面（快速上滑直接穿过去）就没有选中，
@@ -262,6 +242,8 @@ internal class RadialMenuView(context: Context) : View(context) {
     }
 
     fun animateOut(onFinished: (() -> Unit)? = null) {
+        // 收起时闸门不能再开：那会在退场动画开头补出一个高亮。
+        settleHandler.removeCallbacks(settleRunnable)
         stopMotion()
         if (!ValueAnimator.areAnimatorsEnabled()) {
             exitProgress = 1f
@@ -346,6 +328,7 @@ internal class RadialMenuView(context: Context) : View(context) {
     }
 
     override fun onDetachedFromWindow() {
+        settleHandler.removeCallbacks(settleRunnable)
         stopMotion()
         /*
          * 最后一道保险：模糊挂在桌面视图树上，与轮盘窗口不是同一个对象。
@@ -381,6 +364,11 @@ internal class RadialMenuView(context: Context) : View(context) {
      *
      * 半径取屏幕长边、圆心跟着轮盘走，和 GestureEVO 的
      * `gradientRadius = max(width, height)` + `setGradientCenter()` 完全一致。
+     *
+     * 这里**只有一种浓度**，不再按「模糊到底生效没有」切换：以前模糊失败会退到
+     * 近黑的重压暗，画面看着也「能用」，于是永远发现不了模糊其实没挂上。
+     * 现在浓度固定成轻压 —— 模糊生效时是一团糊掉的雾，没生效时桌面图标清晰可见，
+     * 一眼就能判断。
      */
     private fun drawScrim(canvas: Canvas, currentLayout: RadialLayout, contentAlpha: Float) {
         val radius = maxOf(width, height).toFloat()
@@ -392,7 +380,7 @@ internal class RadialMenuView(context: Context) : View(context) {
                 origin.x,
                 origin.y,
                 radius,
-                if (backdropBlurred) SCRIM_CENTER_BLURRED else SCRIM_CENTER_SOLID,
+                SCRIM_CENTER,
                 Color.TRANSPARENT,
                 android.graphics.Shader.TileMode.CLAMP,
             )
@@ -545,18 +533,11 @@ internal class RadialMenuView(context: Context) : View(context) {
         private const val PREVIEW_LABEL_GAP_DP = 10f
 
         /**
-         * 桌面被真的模糊时，圆心处的颜色。
+         * 圆心处的颜色：只轻压一下，让白圆盘浮起来。
          *
-         * 只需轻压一下让白圆盘浮起来 —— 压重了会把刚花代价糊出来的效果重新盖回去。
+         * 不随「模糊是否生效」变化 —— 重压暗会把模糊失败这件事盖住，
+         * 让人误以为模糊在工作。
          */
-        private const val SCRIM_CENTER_BLURRED = 0x8C0E0E12.toInt()
-
-        /**
-         * 模糊不可用时，圆心处的颜色。
-         *
-         * 近黑、几乎不透明：这种时候只能靠遮罩让桌面图标「看不见」，
-         * 否则它会和轮盘里的图标互相干扰（两者都是白圆底）。
-         */
-        private const val SCRIM_CENTER_SOLID = 0xEB0E0E12.toInt()
+        private const val SCRIM_CENTER = 0x8C0E0E12.toInt()
     }
 }

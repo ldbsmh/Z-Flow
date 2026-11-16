@@ -599,7 +599,6 @@ object HookSwipeGesture {
             )
 
         hookTouchInteractionService()
-        hookLauncherTouchDispatch()
 
         var initHookCount = 0
         var updateHookCount = 0
@@ -1860,40 +1859,6 @@ object HookSwipeGesture {
             .start()
     }
 
-    /**
-     * 轮盘接管期间，把桌面窗口自己的触摸流挡掉。
-     *
-     * 这条 Hook 是 [InputPilfer] 的兜底：TIS 的输入监视**不影响**桌面窗口照样收到事件，
-     * 只有 `pilferPointers()` 会让 InputDispatcher 给桌面补一个 CANCEL。反射找不到
-     * 那个对象时（ROM 结构变了），桌面就会继续按自己的逻辑处理同一串事件 ——
-     * 典型表现是「在轮盘上滑动选择时，后面的工作区跟着左右翻页」。
-     *
-     * 所以在 `Activity.dispatchTouchEvent` 这一层再挡一次：只要轮盘正在接管，
-     * 就把事件吃掉，不往视图树里派发。放行 ACTION_CANCEL 是有意的 ——
-     * 那是 pilfer 成功后系统补过来的「手势已取消」，让它走完更干净。
-     */
-    private fun hookLauncherTouchDispatch() {
-        val installed = runCatching {
-            XposedHelpers.findAndHookMethod(
-                android.app.Activity::class.java,
-                "dispatchTouchEvent",
-                MotionEvent::class.java,
-                object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        val event = param.args?.getOrNull(0) as? MotionEvent ?: return
-                        if (event.actionMasked == MotionEvent.ACTION_CANCEL) return
-                        // 只在轮盘真的展开之后挡：按下阶段仍然让桌面正常处理，
-                        // 否则触发区里的普通点击（Dock 图标）会被一起吃掉。
-                        if (!radialGate.isRevealed && !RadialMenuController.isShowing) return
-                        // 吃掉事件：桌面视图树收不到 DOWN/MOVE，工作区就不会跟着滑。
-                        param.result = true
-                    }
-                }
-            )
-        }.isSuccess
-
-        RadialTrace.log("launcher touch dispatch hook installed=$installed")
-    }
 
     /**
      * 触摸输入入口 Hook。
@@ -2290,10 +2255,9 @@ object HookSwipeGesture {
         }.getOrDefault(24f).coerceAtLeast(12f)
 
         /*
-         * 尽力先缓存一个桌面根视图，作为悬浮窗失败时的兜底。
-         * 拿不到也不算失败：常规路径是轮盘自己开悬浮窗。
+         * 这里不再预解析桌面根视图：那是给「挂到桌面视图树」的旧兜底准备的。
+         * 现在轮盘只走悬浮窗，根视图只在真要展开时解析一次（当模糊目标）。
          */
-        val parent = resolveRadialParent()
         val gate = RadialGestureGate(revealSlopPx = slop)
         gate.arm(corner, event.rawX, event.rawY)
         radialGate = gate
@@ -2302,8 +2266,7 @@ object HookSwipeGesture {
         RadialTrace.log(
             "armed corner=$corner xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
                 "screen=${width}x$height slop=${slop.toInt()} " +
-                "origin=(${hit.originInsetX.toInt()},${hit.originInsetY.toInt()}) " +
-                "parent=${parent?.javaClass?.simpleName ?: "none"}"
+                "origin=(${hit.originInsetX.toInt()},${hit.originInsetY.toInt()})"
         )
         // 从这里起事件归我们暂扣，必须有超时兜底：UP 丢失时不能一直扣着。
         armRadialWatchdog()
@@ -2317,17 +2280,23 @@ object HookSwipeGesture {
          */
     }
 
+    /**
+     * 取桌面的根视图，**只作为高斯模糊的目标**（轮盘本身挂在独立悬浮窗上）。
+     *
+     * 展开顺序：缓存 → 桌面 Activity 的 DecorView → 手势 Handler 的视图树。
+     * 后两级都是为了「找得到就糊上」，找不到也只是不糊，不影响轮盘显示。
+     */
     private fun resolveRadialParent(): ViewGroup? {
-        // 1) 已经解析过的父容器（展开时缓存）
+        // 1) 已经解析过的根视图（展开时缓存）
         radialParentRef?.get()?.takeIf { it.isAttachedToWindow }?.let { return it }
         // 2) 桌面 Activity 的 DecorView：
         //    轮盘在 DOWN 时就把事件拦下，Launcher 不会创建手势 Handler，
-        //    因此不能再依赖 activeGestureHandler 反查 mRecentsView。
+        //    因此不能只依赖 activeGestureHandler 反查 mRecentsView。
         resolveLauncherDecorView()?.let {
             radialParentRef = java.lang.ref.WeakReference(it)
             return it
         }
-        // 3) 兜底：手势 Handler 的视图树（未拦截事件时仍然可用）
+        // 3) 手势 Handler 的视图树（同一棵 DecorView，仅路径不同）
         val handler = activeGestureHandler
         if (handler != null) {
             val resolved = runCatching {
@@ -2414,10 +2383,10 @@ object HookSwipeGesture {
         }
 
         /*
-         * 父容器只是兜底：主路径是轮盘自己开悬浮窗，才能盖在第三方应用之上。
-         * 拿不到桌面视图树也照常展开。
+         * 桌面根视图只用来做高斯模糊的背景，不参与轮盘挂载：
+         * 拿不到就只是不糊桌面，轮盘照常开在自己的悬浮窗里。
          */
-        val parent = resolveRadialParent()
+        val backdropRoot = resolveRadialParent()
         val (width, height) = displayBounds(safeContext)
         val corner = radialGate.corner ?: return false
 
@@ -2442,7 +2411,7 @@ object HookSwipeGesture {
         val shown = runCatching {
             RadialMenuController.reveal(
                 safeContext,
-                parent,
+                backdropRoot,
                 corner,
                 width,
                 height,

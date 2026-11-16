@@ -61,7 +61,8 @@ internal object RadialBackdrop {
      * 桌面明明在前台却一次也没糊过。反过来误判的代价几乎为零：
      * 不可见窗口不参与合成，effect 不会真的被渲染。
      *
-     * @return true 表示模糊已经挂到视图上；false 时由视图的重压暗兜底。
+     * @return true 表示模糊已经挂到视图上；false 表示没挂成 —— 此时桌面保持清晰，
+     *         和轮盘里的图标一眼就能区分（以前会退到重压暗把失败盖住）。
      */
     fun apply(density: Float, root: View?): Boolean {
         clear("reapply")

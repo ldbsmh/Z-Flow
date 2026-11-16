@@ -119,27 +119,30 @@ TouchInteractionHandler
 / `registerInputConsumer`），所以早期「沿对象图按方法名找 pilferPointers」永远找不到，
 日志一直是 `pilfer=unavailable`。真正的入口在 `InputMonitorCompat` 上。
 
-修法是两层：
+现在**只有一层**（兜底层已删除）：
 
 | 层 | 做法 | 作用 |
 |---|---|---|
-| 主 | `InputPilfer`：反射 `getInputResource(displayId)` 取 `InputResource`，读 `inputMonitorCompat`，调 `pilferPointers()` | InputDispatcher 给桌面发 CANCEL，桌面彻底退出这条手势 |
-| 兜 | `Activity.dispatchTouchEvent` Hook：轮盘展开期间直接吞掉事件 | 反射随 ROM 变化失效时，视图树照样收不到 DOWN/MOVE |
+| 唯一 | `InputPilfer`：反射 `getInputResource(displayId)` 取 `InputResource`，读 `inputMonitorCompat`，调 `pilferPointers()` | InputDispatcher 给桌面发 CANCEL，桌面彻底退出这条手势 |
 
-时机很关键：**都在「确认是上滑」之后**（`shouldReveal` 通过那一刻），不在 DOWN。
+删掉 `Activity.dispatchTouchEvent` 那条兜底是有意的：它在 pilfer 失败时也能挡住
+桌面视图树，于是「桌面不跟手」这个现象永远无法证明 pilfer 到底有没有生效。
+现在 pilfer 失败就是桌面跟着手指滑 —— 一眼可辨，而不是被一层假象盖住。
+
+时机很关键：**在「确认是上滑」之后**（`shouldReveal` 通过那一刻），不在 DOWN。
 如果在 DOWN 就抢，触发区里的普通点击（底部 Dock 图标）会一起失效 —— 那比轮盘本身更难忍受。
 
-`InputPilfer` 的解析顺序：
+`InputPilfer` 的解析只有一条路径：
 
-1. 精确路径：`getInputResource(displayId)` → `InputResource` → 类型为
+1. `getInputResource(displayId)` → `InputResource` → 类型为
    `InputMonitorCompat` / `android.view.InputMonitor` 的字段；
-2. 全图 BFS（深度 ≤5、节点 ≤1200）找同类型的对象，能穿透 `SparseArray` 内部的
-   `Object[]`，否则会被卡在 `displayResourceArray` 这一层；
-3. 最后才退回「任何带无参 `pilferPointers()` 的对象」。
 
-解析结果（含 monitor 实例）会缓存，后续手势直接调用，只有 monitor 被 dispose
-（抛异常）才重新解析。日志里打 `pilfer=ok via <类>#pilferPointers depth=N display=N`
-或 `pilfer=unavailable`；成功时系统侧还能看到一行
+以前还有「全图 BFS 瞎搜」「任何带无参 `pilferPointers()` 的对象」两级兜底，
+已经删了 —— 搜到的往往是别的类的同名方法，调了没效果却报告成功。
+
+解析结果（monitor 实例）会缓存，后续手势直接调用，只有 monitor 被 dispose
+（抛异常）才重新解析。日志里打 `pilfer ok via <类>#pilferPointers`
+或 `pilfer unavailable: ...`；成功时系统侧还能看到一行
 `D/InputManagerService: pilferPointers`，那是 InputDispatcher 真的执行了独占。
 
 
@@ -234,7 +237,8 @@ TouchInteractionHandler
 （表现为「有震动、小窗也能开，但什么也看不见」）。
 
 窗口类型按 `TYPE_SYSTEM_OVERLAY` → `TYPE_APPLICATION_OVERLAY` 的顺序尝试，
-都失败才退回 Launcher 的 DecorView。参数固定为
+**两种都失败就不显示**（不再退回 Launcher 的 DecorView：那条路只在桌面前台可见，
+还会让「轮盘到底挂在哪」变得不可判断）。参数固定为
 `FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCHABLE | FLAG_LAYOUT_IN_SCREEN | FLAG_LAYOUT_NO_LIMITS`，
 坐标仍由输入 Hook 推进来，窗口本身不参与触摸分发。
 像素格式用 `RGBA_8888` 而不是 `TRANSLUCENT`：后者在部分 ROM 上会把整窗按半透明处理，
@@ -252,6 +256,9 @@ TouchInteractionHandler
 |---|---|---|
 | 高斯模糊 | `RadialBackdrop`：对桌面**根视图**套 `RenderEffect.createBlurEffect`（API 31+，半径 12dp） | 图标糊成色块，彻底失去辨识度 |
 | 径向渐变 | `RadialMenuView.drawScrim`：圆心实色 → 边缘透明的 `RadialGradient` | 轮盘区域再压一层，边缘保持通透 |
+
+渐变**只有一种浓度**，不再按「模糊是否生效」切换：以前模糊失败会退到近黑的重压暗，
+画面看着也「能用」，于是永远发现不了模糊其实没挂上。现在模糊没生效就是桌面清晰可见。
 
 模糊直接作用在桌面自己的视图树上，有三个好处：糊的是图标**本身**而不是盖上去的一层膜
 （不会出现膜和图标边缘对不齐）；轮盘在**另一个窗口**里，不参与这次离屏渲染，圆盘始终锐利；
@@ -373,13 +380,13 @@ LSPosed 日志里前缀同样是 `ZFlowRadial`，没有 adb 也能看。
 | `reveal abort: empty_favorites` | 三份名单都空（同时会弹一次 Toast） | 到「轮盘应用」里勾几个应用 |
 | `reveal abort: provider_denied` | Launcher UID 未被 Provider 放行 | 看 `adb logcat -s FreeformAppsProvider` 里的 uid，补进白名单 |
 | `reveal abort: provider_error` | Provider 未注册 / Binder 异常 | 确认 APK 已更新（该 Provider 是新增的） |
-| `reveal ok` 但屏幕没东西 | 视图挂上了但没画出来 | 看 `host=` 是 overlay 还是 viewgroup，以及该窗口的 `alpha`（可能被系统压到 0.8） |
+| `reveal ok` 但屏幕没东西 | 视图挂上了但没画出来 | 看该窗口的 `alpha`（可能被系统压到 0.8）与 `type` |
 | `fallback: recent tasks count=0` | 没有名单也没有最近任务 | 属于首次开机未使用状态，先用几个应用再试 |
 | `abandon: direction rejected` | 底角起手但方向不是上滑（横滑返回 / 下拖） | **正常行为**，已把事件交还 Launcher |
 | `down: reap stale gesture` | 上一轮手势没正常收尾，新 DOWN 时清场 | **正常兜底**，若频繁出现说明 UP 一直没送达 |
 | `move: menu showing without gate` | 悬浮窗残留且已无活跃手势 | **正常兜底**，同上 |
 | `watchdog: gesture never finished` | 超时（未展开 2s / 已展开 6s）没有新事件 | **正常兜底**，清场但不提交选择 |
-| `pilfer=unavailable` | 既没拿到 `InputResource.inputMonitorCompat`，全图 BFS 也没撞到 monitor（ROM 结构又变了），只靠 `dispatchTouchEvent` 兜底 | 功能仍可用；若此时桌面仍在跟手滑，说明兜底层也没装上（启动日志里有 `launcher touch dispatch hook installed=false`） |
+| `pilfer unavailable: ...` | 没拿到 `InputResource.inputMonitorCompat`（ROM 结构变了） | 没有兜底了，表现为「桌面临时跟手滑」；需要按新的对象结构调整 `InputPilfer.resolve` |
 | `reveal slow: Nms` | reveal 在主线程上耗时超过一帧 | N 接近或超过 1000ms 要警惕：那时 `contentResolver.call` 很可能正在冷启动 Z-Flow 进程 |
 
 ### 出现「进程 system 没有响应」

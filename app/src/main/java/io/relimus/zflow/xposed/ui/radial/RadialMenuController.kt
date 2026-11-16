@@ -10,7 +10,6 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
 import io.relimus.zflow.providers.FreeformAppsProvider
 import io.relimus.zflow.providers.ProviderAccess
 import java.lang.ref.WeakReference
@@ -45,7 +44,6 @@ internal object RadialMenuController {
     )
 
     private var view: RadialMenuView? = null
-    private var hostRef: WeakReference<ViewGroup>? = null
     private var windowRef: WeakReference<android.view.WindowManager>? = null
 
     /** 展开批次号：后台补图标时校验，丢弃上一次窗口的过期结果。 */
@@ -84,18 +82,17 @@ internal object RadialMenuController {
     /**
      * 展开轮盘。
      *
-     * 轮盘**优先挂在自己的悬浮窗上**：桌面视图树只在桌面/最近任务位于前台时可见，
-     * 用户从第三方应用里上滑时轮盘会被应用窗口挡住（表现为「手势有震动、
-     * 小窗也能开，但什么也看不见」）。悬浮窗是 TYPE_APPLICATION_OVERLAY，
-     * 不接收触摸，指针仍由调用方推入。
+     * 轮盘**只挂在自己的悬浮窗上**。以前还留了「悬浮窗失败就挂到桌面视图树」的兜底，
+     * 已经删掉：那条路只在桌面/最近任务前台时可见（从第三方应用上滑会被挡住），
+     * 而且模糊会连轮盘一起糊掉 —— 排查时还分不清看到的是哪条路。
+     * 现在悬浮窗挂不上就直接返回 false，表现为「轮盘不出来」，一眼可辨。
      *
-     * @param parent 兜底父容器（桌面 DecorView），悬浮窗创建失败时才用。
-     * @return false 表示无法展开（没有条目 / 两种挂载方式都失败），
-     *         调用方应退回原本的手势行为。
+     * @param backdropRoot 桌面根视图，仅作为高斯模糊的目标（不参与挂载）。
+     * @return false 表示无法展开（没有条目 / 悬浮窗挂不上），调用方应退回原本手势。
      */
     fun reveal(
         context: Context,
-        parent: ViewGroup?,
+        backdropRoot: View?,
         corner: RadialCorner,
         widthPx: Int,
         heightPx: Int,
@@ -170,20 +167,15 @@ internal object RadialMenuController {
 
         val menu = RadialMenuView(context)
         menu.configure(placed, fitted, placeholders)
-        if (!attach(menu, parent)) return false
+        if (!attach(menu)) return false
 
         /*
          * 模糊桌面（GestureEVO 那套观感）。
          *
-         * 只在 overlay 模式下做：如果轮盘退回挂到桌面视图树里（attach 的兜底分支），
-         * 模糊根视图会把轮盘自己也一起糊掉。
+         * 轮盘现在只会挂在独立悬浮窗里，不在这棵被模糊的视图树中，
+         * 所以「糊桌面」不会连轮盘一起糊。
          */
-        val blurred = if (windowRef != null) {
-            RadialBackdrop.apply(context.resources.displayMetrics.density, parent)
-        } else {
-            false
-        }
-        menu.setBackdropBlurred(blurred)
+        RadialBackdrop.apply(context.resources.displayMetrics.density, backdropRoot)
 
         menu.isClickable = false
         menu.isFocusable = false
@@ -199,7 +191,7 @@ internal object RadialMenuController {
                 "shares=${fitted.shares} screen=${widthPx}x${heightPx} " +
                 "radius=${fitted.radius.toInt()} icon=${fitted.iconDiameter.toInt()} " +
                 "origin=(${placed.origin.x.toInt()},${placed.origin.y.toInt()}) " +
-                "host=${if (windowRef != null) "overlay($windowType)" else "viewgroup"}"
+                "host=overlay($windowType)"
         )
         return true
     }
@@ -235,68 +227,49 @@ internal object RadialMenuController {
     }
 
     /**
-     * 把轮盘挂到屏幕上：优先独立悬浮窗，失败退回桌面视图树。
+     * 把轮盘挂到独立悬浮窗上（唯一路径）。
      *
-     * 桌面进程持有 INTERNAL_SYSTEM_WINDOW，可以直接加 TYPE_APPLICATION_OVERLAY；
-     * 万一某个 ROM 仍然拒绝，退回 DecorView 至少还能在桌面/最近任务上工作。
+     * 桌面进程持有 INTERNAL_SYSTEM_WINDOW，两种 overlay 类型至少有一种能挂上；
+     * 都挂不上就返回 false —— 不再退回桌面视图树。那条路只在桌面/最近任务前台
+     * 时可见，而且会让「轮盘到底挂在哪」变得不可判断。
      */
-    private fun attach(menu: RadialMenuView, parent: ViewGroup?): Boolean {
+    private fun attach(menu: RadialMenuView): Boolean {
         val context = menu.context
         val windowManager = runCatching {
             context.getSystemService(android.view.WindowManager::class.java)
-        }.getOrNull()
-
-        if (windowManager != null) {
-            /*
-             * 窗口类型有讲究：先用 SYSTEM_OVERLAY，失败再退回 APPLICATION_OVERLAY。
-             *
-             * 桌面进程没有 SYSTEM_ALERT_WINDOW 这个 appop（也不该去要），
-             * 而 APPLICATION_OVERLAY 在 appop 处于 default 状态时会被系统
-             * 统一压到 80% 不透明度（dumpsys 里 mAttrs.alpha=0.8），
-             * 白圆盘会透出下面的壁纸，看起来像一层毛玻璃。
-             * SYSTEM_OVERLAY 属于系统窗口，不受这个 appop 约束；
-             * 它本来就不接收触摸，正好符合「坐标由调用方推入」的设计。
-             */
-            for (type in intArrayOf(
-                android.view.WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY,
-                android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            )) {
-                val params = buildParams(type)
-                val added = runCatching { windowManager.addView(menu, params) }
-                if (added.isSuccess) {
-                    windowRef = WeakReference(windowManager)
-                    hostRef = null
-                    windowType = type
-                    RadialTrace.log("overlay attached type=$type alpha=${params.alpha}")
-                    return true
-                }
-                RadialTrace.log(
-                    "overlay type=$type failed: ${added.exceptionOrNull()?.javaClass?.simpleName}:" +
-                        "${added.exceptionOrNull()?.message}"
-                )
-            }
+        }.getOrNull() ?: run {
+            lastFailureReason = "no_window_manager"
+            return false
         }
 
-        if (parent != null) {
-            val attached = runCatching {
-                parent.addView(
-                    menu,
-                    ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    ),
-                )
-            }.onFailure { throwable ->
-                lastFailureReason = "add_view_failed ${throwable.javaClass.simpleName}:${throwable.message}"
-                RadialTrace.log(lastFailureReason!!)
-            }.isSuccess
-            if (attached) {
-                hostRef = WeakReference(parent)
-                windowRef = null
+        /*
+         * 窗口类型有讲究：先用 SYSTEM_OVERLAY，失败再试 APPLICATION_OVERLAY。
+         *
+         * 桌面进程没有 SYSTEM_ALERT_WINDOW 这个 appop（也不该去要），
+         * 而 APPLICATION_OVERLAY 在 appop 处于 default 状态时会被系统
+         * 统一压到 80% 不透明度（dumpsys 里 mAttrs.alpha=0.8），
+         * 白圆盘会透出下面的壁纸，看起来像一层毛玻璃。
+         * SYSTEM_OVERLAY 属于系统窗口，不受这个 appop 约束；
+         * 它本来就不接收触摸，正好符合「坐标由调用方推入」的设计。
+         */
+        for (type in intArrayOf(
+            android.view.WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY,
+            android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        )) {
+            val params = buildParams(type)
+            val added = runCatching { windowManager.addView(menu, params) }
+            if (added.isSuccess) {
+                windowRef = WeakReference(windowManager)
+                windowType = type
+                RadialTrace.log("overlay attached type=$type alpha=${params.alpha}")
                 return true
             }
+            RadialTrace.log(
+                "overlay type=$type failed: ${added.exceptionOrNull()?.javaClass?.simpleName}:" +
+                    "${added.exceptionOrNull()?.message}"
+            )
         }
-        if (lastFailureReason == null) lastFailureReason = "no_host"
+        lastFailureReason = "no_overlay"
         return false
     }
 
@@ -332,10 +305,12 @@ internal object RadialMenuController {
             }
         }
 
-    /** 推入手指位置（MotionEvent 的 raw 屏幕坐标）。 */    fun updatePointer(rawX: Float, rawY: Float) {
+    /** 推入手指位置（MotionEvent 的 raw 屏幕坐标）。 */
+    fun updatePointer(rawX: Float, rawY: Float) {
         val menu = view ?: return
         if (!menu.isAttachedToWindow) return
-        // 悬浮窗与桌面视图树的原点不同，统一按轮盘自己（MATCH_PARENT 铺满）的位置换算。
+        // 悬浮窗铺满整屏且左上角在 (0,0)，但仍按实际位置换算一次：
+        // 有 ROM 会给 overlay 加状态栏偏移，硬减 0 会让选择整体错位。
         menu.getLocationOnScreen(hostLocation)
         menu.updatePointer(rawX - hostLocation[0], rawY - hostLocation[1])
     }
@@ -349,7 +324,6 @@ internal object RadialMenuController {
         // 让还在跑的后台任务失效，避免把图标写到下一个窗口上。
         iconGeneration += 1
         view = null
-        hostRef = null
         windowRef = null
         items = emptyList()
         if (menu == null) {
@@ -361,8 +335,6 @@ internal object RadialMenuController {
         val detach = {
             if (windowManager != null) {
                 runCatching { windowManager.removeViewImmediate(menu) }
-            } else {
-                (menu.parent as? ViewGroup)?.removeView(menu)
             }
             // 模糊和窗口同生共死：退场动画期间保持（否则会看到「桌面突然变清晰、
             // 圆盘还在慢慢淡出」），窗口一摘掉立刻恢复。
