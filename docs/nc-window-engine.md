@@ -65,6 +65,36 @@ HookSwipeGesture（最近任务里把卡片拖到投放区松手）
 | `queueMini()` | 入场动画期间 `state()` 会因 `s.entering` 拒绝切换，所以先把 `MINI` 挂成 `entryControl`，由 `completeEntryInput()` 在入场结束后补发 | 打开动画还在跑时下达形态切换会被静默丢弃 |
 | 已开窗的 `retained` 分支 | `presentExisting()` 之后同样走 `queueMini()` | 该应用已经有窗口时，不应该只是把它提到前台，而要收成迷你窗 |
 
+### 出生即迷你（不要先默认窗再缩）
+
+`queueMini()` 那条路是先按默认窗起来、入场结束再发 `MINI`，用户会看到一个完整默认窗
+约 1 秒后再缩成迷你窗。现在改成在**第一次布局之前**就把形态定好：
+
+```java
+boolean startMini = i.getBooleanExtra("mini", false);
+if (startMini) s.frame = "mini";   // 必须早于 prepareGeometry()
+prepareGeometry(s);                // 它的 s.placement 依赖 s.frame
+s.decoration = new TaskDecoration(a);
+if (startMini) s.decoration.disableDim();
+```
+
+配套三件事：
+
+| 位置 | 处理 |
+|---|---|
+| `prepareGeometry()` | `s.placement = "mini".equals(s.frame) ? s.miniPlacement : p`，所以形态必须先设 |
+| `updateDecoration()` 的 PRESENTED 分支 | 入场收尾按形态取 `barAlpha`：迷你窗 0，默认窗 1。给 1 会同时亮出把手条和 dim 层 |
+| `completeEntryInput()` | 迷你会话走 `settleAsMini()`：`setFocusable(false)` + `updateFocusedWindowLocked` + `resumeFocusedTasksTopActivities` + `requestTraversal` |
+
+**踩过的坑：整屏变暗、背景点不动。** `barAlpha` 同时驱动把手条和 `TaskDecoration` 的 dim 层
+（`alpha = dimAmount × barAlpha`，dim 覆盖整个 parent = 整屏）。默认窗几乎铺满屏幕，暗区被自己
+盖住看不出来；迷你窗只占一小块，dim 整块露在外面。正常 `MINI` 指令路径有
+`animate(startBar, endBar=0)` 把 `barAlpha` 收敛到 0，而出生即迷你没有这一步，于是暗区一直留着，
+直到用户手动展开/缩小一次、重走 `animate()` 才恢复。
+
+教训：`frame`、`barAlpha`、`dimEnabled` 是彼此耦合的形态状态。任何绕过 `state()` / `animate()`
+的新开窗路径，都要把这些收尾动作自己补齐，或者从一开始就把它们设成目标形态的值。
+
 排查（两端各一行锚点，不需要 LSPosed 日志）：
 
 ```bash
@@ -73,7 +103,10 @@ adb logcat -s ZFlowMini SunWindowDemo5
 # SunWindowDemo5 OPEN_MINI task=123 pkg=com.xxx           ← 引擎收到了
 # SunWindowDemo5 OPEN_TASK_FROM_RECENTS task=123 pkg=...  ← 从 recent 认领成功
 # SunWindowDemo5 OPEN_TASK_REJECTED ...                   ← 任务号和包名对不上，拒绝
+# SunWindowDemo5 MINI_SETTLED task=123 bar=0.0 ...        ← 迷你形态收尾完成（应为 bar=0.0）
 ```
+
+`MINI_SETTLED` 里的 `bar` 不是 0.0，就等于 dim 层还在，表现是整屏发暗。
 
 前两行有、后面没有，说明卡在准入（`AndroidWindowAdmission`）；一行都没有，说明手势
 hook 没触发，与内核无关。
