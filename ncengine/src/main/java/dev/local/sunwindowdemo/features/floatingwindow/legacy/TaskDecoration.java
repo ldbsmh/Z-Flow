@@ -14,6 +14,12 @@ final class TaskDecoration {
     private boolean backingShown;
     private boolean drawn,dimReady,dimEnabled=true;
     void enableDim(){dimEnabled=true;}
+    /**
+     * 出生即迷你的会话不会经过 MINI 指令，也就没有把 dim 收掉的那一步。
+     * 迷你窗只占一小块，dim 覆盖的是整块 parent，等于给整个屏幕压一层暗色，
+     * 所以这一类会话从第一次布局起就不该有 dim。
+     */
+    void disableDim(){dimEnabled=false;}
     void transferDimTo(TaskDecoration next,Object task)throws Exception{
         if(dim==null){next.enableDim();return;}
         if(next.dim!=null&&next.dim!=dim){tx(a.transaction(task),"remove",new Class<?>[]{SurfaceControl.class},next.dim);next.dim.release();}

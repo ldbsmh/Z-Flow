@@ -237,10 +237,13 @@ final class WindowEngine {
     private void settleAsMini(Session s){
         try{
             synchronized(lock){
+                // 迷你窗既不显示把手条，也不该让 dim 压暗屏幕；入场收尾可能把它设回来，这里兜底。
+                if(s.barAlpha!=0){s.barAlpha=0;renderFrame(s);}
                 a.call(s.task,"setFocusable",new Class<?>[]{boolean.class},false);
                 a.call(wms,"updateFocusedWindowLocked",new Class<?>[]{int.class,boolean.class},0,true);
                 a.call(root,"resumeFocusedTasksTopActivities");
                 a.call(wms,"requestTraversal");
+                log.accept("MINI_SETTLED task="+s.taskId+" bar="+s.barAlpha+" entering="+s.entering+" cover="+(s.cover!=null));
             }
         }catch(Throwable error){log.accept("MINI_SETTLE_FAILED "+FrameworkAccess.reason(error));}
     }
@@ -532,6 +535,7 @@ final class WindowEngine {
                         if(startMini)s.frame="mini";
                         prepareGeometry(s); // Bounds hook must know the canvas before switching mode.
                         s.decoration=new TaskDecoration(a);
+                        if(startMini)s.decoration.disableDim();
                         s.entering=true;s.transitioning=true;s.opacity=0;s.barAlpha=0;
                         if(previous!=null){
                             if(displaced==null)pinned=previous;
@@ -2848,7 +2852,13 @@ final class WindowEngine {
                 log.accept("PRESENTED task="+s.taskId+" elapsedMs="+(SystemClock.elapsedRealtime()-s.startedAt));
                 if(s.entering&&!s.entryStarted){
                     s.entryStarted=true;
-                    if(s.cover!=null){s.entering=false;s.transitioning=false;s.opacity=1;s.barAlpha=1;try{synchronized(lock){renderFrame(s);}}catch(Exception e){failure(s,e);}}
+                    /*
+                     * 出生即迷你的会话（卡片上滑）没有后续的 MINI 指令，这里就是它唯一
+                     * 的「入场结束」。barAlpha 同时驱动把手条和 dim 层：给 1 会让整块
+                     * 屏幕按 dimAmount 变暗（迷你窗太小，暗区全露在外面），用户看到的就是
+                     * 「小窗以外全黑了而且点不动」。所以按最终形态取，迷你窗一律 0。
+                     */
+                    if(s.cover!=null){s.entering=false;s.transitioning=false;s.opacity=1;s.barAlpha="mini".equals(s.frame)?0:1;try{synchronized(lock){renderFrame(s);}}catch(Exception e){failure(s,e);}}
                     else visibility(s,true);
                 }
                 else report("PRESENTED");
