@@ -7,7 +7,6 @@ import androidx.core.content.edit
 import androidx.room.withTransaction
 import io.relimus.zflow.providers.BlacklistProvider
 import io.relimus.zflow.providers.NotificationSettingsProvider
-import io.relimus.zflow.providers.WindowEngineSettings
 import io.relimus.zflow.room.MyDatabase.Companion.getDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -173,13 +172,11 @@ class DatabaseRepository(context: Context) {
     suspend fun insertBlacklist(packageName: String, userId: Int) =
         runWrite("insertBlacklist") {
             freeformBlacklistDao.insert(packageName, userId)
-            syncEngineBlocked()
         }.also { if (it.isSuccess) bumpVersion(BlacklistProvider.KEY_BLACKLIST_VERSION) }
 
     suspend fun deleteBlacklist(packageName: String, userId: Int) =
         runWrite("deleteBlacklist") {
             freeformBlacklistDao.delete(packageName, userId)
-            syncEngineBlocked()
         }.also { if (it.isSuccess) bumpVersion(BlacklistProvider.KEY_BLACKLIST_VERSION) }
 
     /** 整体替换黑名单（事务内先清空再写入）。 */
@@ -189,29 +186,12 @@ class DatabaseRepository(context: Context) {
                 freeformBlacklistDao.deleteAll()
                 freeformBlacklistDao.insertLists(list)
             }
-            syncEngineBlocked()
         }.also { if (it.isSuccess) bumpVersion(BlacklistProvider.KEY_BLACKLIST_VERSION) }
 
     suspend fun deleteAllBlacklist() =
         runWrite("deleteAllBlacklist") {
             freeformBlacklistDao.deleteAll()
-            syncEngineBlocked()
         }.also { if (it.isSuccess) bumpVersion(BlacklistProvider.KEY_BLACKLIST_VERSION) }
-
-    /**
-     * 名单同时是引擎的 `blocked`：黑名单应用在前台时角落扇区不响应。
-     *
-     * 名单以 Room 为准（Z-Flow 侧仍在开窗前拦截），这里只给引擎一份包名快照。
-     * 必须在 IO 线程调用；失败只记日志，不影响本次写入结果。
-     */
-    private fun syncEngineBlocked() {
-        try {
-            val packages = freeformBlacklistDao.getAllWithUser().map { it.packageName }.toSet()
-            WindowEngineSettings.syncBlacklist(app, packages)
-        } catch (e: Exception) {
-            Log.w(TAG, "sync blacklist to window engine failed", e)
-        }
-    }
 
     fun getAllBlacklist(): LiveData<List<FreeformBlacklistEntity>?> =
         freeformBlacklistDao.getAll()

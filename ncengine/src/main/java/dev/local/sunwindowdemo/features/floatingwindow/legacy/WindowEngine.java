@@ -96,9 +96,10 @@ final class WindowEngine {
     }
     private String uiTouch="尚未收到角落触摸";
     private boolean controlUid(int uid){return uid>=0&&(uid==clientUid||uid==uiUid);}
+    /** Pixel Launcher：分享/跨应用跳转不作为发起源（扇区已删，排除语义保留给分享门控）。 */
+    private static final String LAUNCHER_PACKAGE="com.google.android.apps.nexuslauncher";
     private volatile boolean hideRecents;
     private long frameSequence;
-    static final String HISTORY=Wire.PKG+".HISTORY",HISTORY_QUERY=Wire.PKG+".HISTORY_QUERY";
     private final WindowHistory history=new WindowHistory();
     private final AtomicFile historyFile=new AtomicFile(dev.local.sunwindowdemo.core.ModuleIdentity.CURRENT.systemFile("sunwindow-hidden-tasks.json"));
 
@@ -149,10 +150,6 @@ final class WindowEngine {
     private volatile java.util.List<Session> pinned=java.util.List.of();
     /** 同时存在的小窗上限（含前台窗），由打开请求携带，默认 2 与旧行为一致。 */
     private volatile int maxWindows=2;
-    /** Z-Flow 的外观设置（尺寸、迷你比例、变暗、贴边样式、横屏名单），随 OPEN 更新。 */
-    private volatile WindowSettings settings=WindowSettings.defaults();
-    /** 客户端下发过变暗值后，SystemUI 的本地设置不再覆盖它。 */
-    private volatile boolean dimFromClient;
     private BackPreparation backPreparation;
     private record BackPreparation(Object task,String token,TaskVisibilityGuard mask,TaskCover cover,IBinder lease){}
     private boolean prepareBack(int id,String pkg,String token,android.graphics.RectF pose,float radius,android.view.SurfaceControl leash){
@@ -427,9 +424,8 @@ final class WindowEngine {
                             landscapeShareWindow=i.getBooleanExtra("landscapeShareWindow",false);
                             autoMinimizeOnOpen=i.getBooleanExtra("autoMinimizeOnOpen",true);
                             endOnClose=i.getBooleanExtra("endOnClose",false);keepEdgeAwake=i.getBooleanExtra("keepEdgeAwake",false);
-                            windowDim=dimFromClient?windowDim:Rules.clamp(i.getIntExtra("windowDim",Config.DEFAULT_WINDOW_DIM),0,100);
+                            windowDim=Rules.clamp(i.getIntExtra("windowDim",Config.DEFAULT_WINDOW_DIM),0,100);
                             handler.post(WindowEngine.this::updateContinuation);
-                            uiTouch=i.getStringExtra("lastTouch");
                             if(extras.getBinder("frameChannel")!=null)frameSink=extras.getBinder("frameChannel");
                         }
                     } catch (Exception e) { return; }
@@ -438,10 +434,6 @@ final class WindowEngine {
                     else command(i);
                 }
             }, new IntentFilter(Wire.COMMAND), null, handler, Context.RECEIVER_EXPORTED);
-            context.registerReceiver(new BroadcastReceiver(){public void onReceive(Context c,Intent i){
-                try{if(getSentFromUid()==context.getPackageManager().getApplicationInfo(LauncherGuard.PACKAGE,0).uid)pushHistory();}
-                catch(Exception ignored){}
-            }},new IntentFilter(HISTORY_QUERY),null,handler,Context.RECEIVER_EXPORTED);
             try{continuation=new WindowContinuation(context,log);}catch(Exception e){log.accept("EDGE_CONTINUATION_UNAVAILABLE "+FrameworkAccess.reason(e));}
             attached = true;
             IntentFilter screen=new IntentFilter(Intent.ACTION_SCREEN_OFF);
@@ -461,7 +453,7 @@ final class WindowEngine {
             },screen,null,handler,Context.RECEIVER_NOT_EXPORTED);
             handler.post(() -> {
                 try{orientations.load();}catch(Exception error){log.accept("ORIENTATION_MEMORY_LOAD_FAILED "+FrameworkAccess.reason(error));}
-                loadHistory();historyTick();pushHistory();
+                loadHistory();historyTick();
                 note("READY: Android " + Build.VERSION.SDK_INT + "；仅系统框架；默认无窗口改动\n" + capabilities());
                 if (journal.getBaseFile().exists()) recover("初始化恢复");
             });
@@ -493,30 +485,10 @@ final class WindowEngine {
             }
             // Heartbeats republish recents history only when it changed; explicit queries always publish.
             if ("STATUS".equals(op)) {
-                pushHistory(false);
                 String requestId=i.getIntExtra("protocol",0)==Wire.PROTOCOL?i.getStringExtra("requestId"):null;
                 report("STATUS",requestId);return;
             }
             if(i.getIntExtra("protocol",0)!=Wire.PROTOCOL) throw new IllegalStateException("请重启加载 0.2.0 后端");
-            if ("SETTINGS".equals(op)) {
-                // 只重刷变暗：改尺寸/迷你比例要重新算几何，留给下一次开窗，避免窗口当场跳动。
-                Bundle windowSettings=i.getBundleExtra("windowSettings");
-                if(windowSettings!=null){
-                    WindowSettings applied=WindowSettings.from(windowSettings);
-                    // 横屏名单是按包判断的，设置页这次没有目标包，保留已有值。
-                    settings=new WindowSettings(applied.size,applied.sizeLand,applied.miniSize,
-                        applied.dim,applied.dockStyle,settings.landscape);
-                    dimFromClient=true;windowDim=settings.dim;
-                    synchronized(lock){
-                        for(Session s:sessions)if(visible(s)&&s.decoration!=null){
-                            s.decoration.dimAmount(windowDim);
-                            try{renderFrame(s);}catch(Exception ignored){}
-                        }
-                    }
-                    log.accept("SETTINGS_APPLIED "+settings);
-                }
-                report("SETTINGS");return;
-            }
             if ("OTP_INPUT".equals(op)) {
                 if(suggestionInput!=null)suggestionInput.accept(i);
                 else{ResultReceiver receiver=i.getParcelableExtra("inputReply",ResultReceiver.class);if(receiver!=null)receiver.send(0,null);}
@@ -556,16 +528,6 @@ final class WindowEngine {
                 "OPEN_MINI task="+i.getIntExtra("taskId",-1)+" pkg="+pkg);
             Bundle extras = i.getExtras();
             // Z-Flow 的「最多同时小窗数量」随请求下发（1~5）。引擎不读对方 SP，
-            // 只认这次请求的上限；没带就保持默认 2，与旧行为一致。
-            int requestedMax=i.getIntExtra("maxWindows",0);
-            if(requestedMax>=1&&requestedMax<=8)maxWindows=requestedMax;
-            // Z-Flow 的外观设置：尺寸、迷你比例、变暗、贴边样式、是否横屏。
-            Bundle windowSettings=i.getBundleExtra("windowSettings");
-            if(windowSettings!=null){
-                settings=WindowSettings.from(windowSettings);
-                dimFromClient=true;windowDim=settings.dim;
-                android.util.Log.i("SunWindowDemo5","OPEN_SETTINGS "+settings);
-            }
             IBinder lease = uiLease;
             if (lease == null || !lease.isBinderAlive()) throw new IllegalStateException("控制进程已退出");
             Session previous=active;java.util.List<Session> previousPinned=pinned;
@@ -864,7 +826,7 @@ final class WindowEngine {
             ComponentName component=(ComponentName)a.field(task,"realActivity");
             if(component==null||!ticket.targetAllowed(component.getPackageName(),(Integer)a.field(task,"mUserId"))
                 ||Wire.PKG.equals(component.getPackageName())||BackBridge.PACKAGE.equals(component.getPackageName())
-                ||LauncherGuard.PACKAGE.equals(component.getPackageName())||a.integer(task,"getActivityType")!=1)return;
+                ||LAUNCHER_PACKAGE.equals(component.getPackageName())||a.integer(task,"getActivityType")!=1)return;
             synchronized(ticket){
                 if(pendingShortcutLaunch.get()!=ticket||ticket.state.generation!=openGeneration)return;
                 ticket.task=task;ticket.state.bind((Integer)a.field(task,"mTaskId"),component.getPackageName());
@@ -927,10 +889,10 @@ final class WindowEngine {
             if((Boolean)a.call(request,"isResolverOrDelegateActivity")||a.integer(request,"getUid")<10000)return null;
             String pkg=(String)a.field(request,"packageName");
             if(!Wire.allowedPackage(pkg)||Wire.PKG.equals(pkg)||BackBridge.PACKAGE.equals(pkg)
-                ||LauncherGuard.PACKAGE.equals(pkg)||!UserHandle.getUserHandleForUid(a.integer(request,"getUid")).equals(android.os.Process.myUserHandle()))return null;
+                ||LAUNCHER_PACKAGE.equals(pkg)||!UserHandle.getUserHandleForUid(a.integer(request,"getUid")).equals(android.os.Process.myUserHandle()))return null;
             Intent intent=(Intent)a.field(request,"intent");boolean chooser=(Boolean)a.call(source,"isResolverOrDelegateActivity");
             String sourcePkg=(String)a.field(source,"packageName");
-            if(!chooser&&(a.integer(source,"getUid")<10000||Wire.PKG.equals(sourcePkg)||BackBridge.PACKAGE.equals(sourcePkg)||LauncherGuard.PACKAGE.equals(sourcePkg)))return null;
+            if(!chooser&&(a.integer(source,"getUid")<10000||Wire.PKG.equals(sourcePkg)||BackBridge.PACKAGE.equals(sourcePkg)||LAUNCHER_PACKAGE.equals(sourcePkg)))return null;
             if(pkg.equals(a.call(context.getPackageManager(),"getPermissionControllerPackageName")))return null;
             if(!ShareWindow.eligibleIntent(intent,chooser)||(intent.getFlags()&Intent.FLAG_ACTIVITY_CLEAR_TASK)!=0||pkg.equals(a.field(source,"packageName")))return null;
             Object sourceTask=a.call(source,"getTask");
@@ -1733,7 +1695,7 @@ final class WindowEngine {
         float margin=s.placementMargin;
         Geometry.Placement end=normalForIme(s);
         if("mini".equals(target)) {
-            end=WindowControl.miniTarget(start,s.miniPlacement,s.defaultScale,controlSafe(safe,margin),s.miniLarge,settings.miniSize);
+            end=WindowControl.miniTarget(start,s.miniPlacement,s.defaultScale,controlSafe(safe,margin),s.miniLarge);
             end=cascadeMini(s,end);
             s.miniPlacement=end;
         }
@@ -1759,7 +1721,7 @@ final class WindowEngine {
             Rect safe=safeArea(a.call(s.task,"getDisplayContent"),false);
             float margin=s.placementMargin;
             s.miniLarge=!s.miniLarge;s.animationRev++;s.radiusFactor=1;
-            Geometry.Placement end=Geometry.resizeMini(start,s.defaultScale,safe.left,safe.top,safe.right,safe.bottom,margin,s.miniLarge,settings.miniSize);
+            Geometry.Placement end=Geometry.resizeMini(start,s.defaultScale,safe.left,safe.top,safe.right,safe.bottom,margin,s.miniLarge);
             s.miniPlacement=end;animate(s,start,end,false,0,0);
         }
     }
@@ -2000,13 +1962,10 @@ final class WindowEngine {
             Rect safe = safeArea(display);
             Rect mini = safeArea(display,false);
             int margin = Math.round(a.config(display, false).densityDpi / 160f * (displayBounds.width()>displayBounds.height()?4:12));
-            WindowSettings view=settings;
-            // 「横屏应用名单」：进小窗就按横屏布局，等价于旧实现的强制横屏。
-            if(view.landscape)s.landscape=true;
             Geometry.Placement p = Geometry.place(s.logicalShort, s.landscape,
-                safe.left, safe.top, safe.right, safe.bottom, margin, view.size, view.sizeLand);
+                safe.left, safe.top, safe.right, safe.bottom, margin);
             s.defaultScale=p.scale();s.normalPlacement=p;
-            s.miniPlacement=Geometry.miniTopRight(p,p.scale(),mini.left,mini.top,mini.right,mini.bottom,margin,s.miniLarge,view.miniSize);
+            s.miniPlacement=Geometry.miniTopRight(p,p.scale(),mini.left,mini.top,mini.right,mini.bottom,margin,s.miniLarge);
             s.placement="mini".equals(s.frame)?s.miniPlacement:p;
             s.displayW=displayBounds.width();s.displayH=displayBounds.height();s.displayRotation=a.integer(display,"getRotation");
             s.safeBounds=new Rect(safe);s.miniBounds=mini;s.placementMargin=margin;
@@ -2061,7 +2020,7 @@ final class WindowEngine {
                     }
                     else if(mini!=null)s.miniPlacement=Geometry.remapMini(mini,s.normalPlacement,s.defaultScale,
                         oldMiniSafe.left,oldMiniSafe.top,oldMiniSafe.right,oldMiniSafe.bottom,oldMargin,
-                        safe.left,safe.top,safe.right,safe.bottom,s.placementMargin,s.miniLarge,settings.miniSize);
+                        safe.left,safe.top,safe.right,safe.bottom,s.placementMargin,s.miniLarge);
                     s.placement="mini".equals(s.frame)?s.miniPlacement:s.normalPlacement;
                     if(s.placement==null)s.placement=previous;
                     if(s.edgeHidden)s.placement=Geometry.offscreen(s.miniPlacement,s.edgeSide,0,s.displayW,s.placementMargin);
@@ -2283,30 +2242,6 @@ final class WindowEngine {
             stream=historyFile.startWrite();stream.write(bytes);historyFile.finishWrite(stream);
         }catch(Exception e){if(stream!=null)historyFile.failWrite(stream);log.accept("HISTORY_SAVE_FAILED "+FrameworkAccess.reason(e));}
     }
-    private int[] pushedHidden;
-    private void pushHistory(){pushHistory(true);}
-    private void pushHistory(boolean force){
-        if(context==null)return;
-        int[] hidden=hiddenIds();
-        synchronized(this){
-            if(!force&&java.util.Arrays.equals(hidden,pushedHidden))return;
-            pushedHidden=hidden;
-        }
-        Intent state=new Intent(HISTORY).setPackage(LauncherGuard.PACKAGE).putExtra("protocol",Wire.PROTOCOL)
-            .putExtra("hiddenTaskIds",hidden);
-        // Callers can still own the WM lock. Snapshot now, but acquire AMS only
-        // after this window operation unwinds, as the result broadcasts do.
-        handler.post(()->{
-            try{context.sendBroadcast(state,null,android.app.BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle());}
-            catch(Exception e){log.accept("HISTORY_PUBLISH_FAILED "+FrameworkAccess.reason(e));}
-        });
-    }
-    private int[] hiddenIds(){
-        if(!hideRecents)return new int[0];
-        java.util.ArrayList<Integer> ids=new java.util.ArrayList<>();
-        synchronized(lock){for(WindowHistory.Entry e:history.entries())try{Object task=find(e.taskId());if(task==null||hideRecent(task))ids.add(e.taskId());}catch(Exception ignored){}}
-        return ids.stream().mapToInt(Integer::intValue).toArray();
-    }
     private void historyTick(){
         try{synchronized(lock){
             if(recovering&&recoveryRetryState.needsReadinessCheck()&&pendingRecovery!=null&&recoveryStateReady(pendingRecovery)){
@@ -2344,7 +2279,6 @@ final class WindowEngine {
         handler.postDelayed(this::historyTick,400);
     }
     private void notifyRecents(){
-        pushHistory();
         try{synchronized(lock){a.call(a.field(atm,"mTaskChangeNotificationController"),"notifyTaskStackChanged");}}
         catch(Exception e){log.accept("RECENTS_REFRESH_FAILED "+FrameworkAccess.reason(e));}
     }
@@ -3519,8 +3453,6 @@ final class WindowEngine {
             .putExtra("transitionHandle",s.transitionHandle).putExtra("presented",s.presented&&!s.rotation.active()).putExtra("inputPending",entryInputPending(s)).putExtra("nativeHandle",true)
             .putExtra("barAlpha",s.barAlpha).putExtra("barColor",s.decoration==null?0xfff0f2f2:s.decoration.color()).putExtra("miniLarge",s.miniLarge)
             .putExtra("edgeHidden",s.edgeHidden).putExtra("edgeSide",s.edgeSide)
-            // 贴边把手露出比例（Z-Flow freeform_dock_style）：SystemUI 用它决定露出多少。
-            .putExtra("dockStyle",settings.dockStyle)
             .putExtra("edgeBarDragging",s.edgeBarDragging).putExtra("edgeBarCenterX",s.edgeBarCenterX).putExtra("edgeBarCenterY",s.edgeBarCenterY)
             .putExtra("edgeCenterY",s.miniPlacement==null?p.y()+p.height()*p.scale()/2:s.miniPlacement.y()+s.miniPlacement.height()*s.miniPlacement.scale()/2)
             .putExtra("muted",audio!=null&&audio.isMuted(s.uid));

@@ -86,47 +86,20 @@ final class Wire {
      *               引擎在入场结束后把这条请求当成一次 MINI 控制指令执行，
      *               因此不需要客户端自己算时机再补一条指令。
      */
-    /** 设置页改了小窗外观：通知引擎立刻刷新能立即生效的部分（变暗），其余下次开窗生效。 */
-    static void reloadSettings(Context context,android.os.Bundle windowSettings){
-        if(windowSettings==null)return;
-        Intent i=new Intent(COMMAND).setPackage("android").putExtra("protocol",PROTOCOL).putExtra("op","SETTINGS")
-            .putExtra("windowSettings",windowSettings).putExtra("hideRecents",new Config(context).hideRecents());
-        sendRequest(context,i);
-    }
     static void openApp(Context context,String pkg,int taskId,boolean wakeStep,boolean mini){
-        openApp(context,pkg,taskId,wakeStep,mini,0);
-    }
-    /**
-     * @param maxWindows 同时存在的小窗上限（含前台窗）；0 表示沿用引擎默认值。
-     *                   由 Z-Flow 的「最多同时小窗数量」设置下发。
-     */
-    static void openApp(Context context,String pkg,int taskId,boolean wakeStep,boolean mini,int maxWindows){
-        openApp(context,pkg,taskId,wakeStep,mini,maxWindows,null);
-    }
-    /**
-     * @param maxWindows     同时存在的小窗上限（含前台窗）；0 表示沿用引擎默认值。
-     * @param windowSettings Z-Flow 的外观设置（尺寸/迷你比例/变暗/贴边样式/横屏），可为 null。
-     */
-    static void openApp(Context context,String pkg,int taskId,boolean wakeStep,boolean mini,int maxWindows,android.os.Bundle windowSettings){
         Intent i=new Intent(COMMAND).setPackage("android").putExtra("protocol",PROTOCOL).putExtra("op","OPEN")
             .putExtra("package",pkg).putExtra("taskId",taskId).putExtra("token",token())
             .putExtra("wakeStep",wakeStep).putExtra("hideRecents",new Config(context).hideRecents());
         if(mini)i.putExtra("mini",true);
-        if(maxWindows>=1)i.putExtra("maxWindows",maxWindows);
-        if(windowSettings!=null)i.putExtra("windowSettings",windowSettings);
         sendRequest(context,i);
     }
     static void openNotification(Context context,String pkg,PendingIntent launch,Intent fill,ResultReceiver reply){
-        openNotification(context,pkg,launch,fill,reply,null);
-    }
-    static void openNotification(Context context,String pkg,PendingIntent launch,Intent fill,ResultReceiver reply,android.os.Bundle windowSettings){
         if(!allowedPackage(pkg)||launch==null||!launch.isActivity())throw new IllegalArgumentException("notification activity");
         Intent request=new Intent(COMMAND).setPackage("android").putExtra("protocol",PROTOCOL).putExtra("op","OPEN")
             .putExtra("package",pkg).putExtra("taskId",-1).putExtra("token",token())
             .putExtra("hideRecents",new Config(context).hideRecents()).putExtra("shortcutLaunch",launch)
             .putExtra("shortcutUser",launch.getCreatorUserHandle()).putExtra("openReply",reply).putExtra("notificationLaunch",true);
         if(fill!=null)request.putExtra("launchFillIn",new Intent(fill));
-        if(windowSettings!=null)request.putExtra("windowSettings",windowSettings);
         sendRequest(context,request);
     }
     static void inputDigits(Context context,String digits,int delay,ResultReceiver receiver){
@@ -143,7 +116,7 @@ final class Wire {
             .putExtra("endOnClose",config.endOnClose()).putExtra("keepEdgeAwake",config.enabled()&&config.keepEdgeAwake())
             .putExtra("windowDim",config.windowDim()).putExtra("autoMinimizeOnOpen",config.autoMinimizeOnOpen());
         if(BackBridge.PACKAGE.equals(context.getPackageName())){
-            i.putExtra("hostReady",SystemUiHost.live!=null&&SystemUiHost.live.ready()).putExtra("lastTouch",SystemUiHost.lastTouch);
+            i.putExtra("hostReady",SystemUiHost.live!=null&&SystemUiHost.live.ready());
         }
         Bundle b = new Bundle(); b.putBinder("lease", LEASE); if(listener!=null)b.putBinder("frameChannel",FRAMES); i.putExtras(b);
         context.sendBroadcast(i, null, BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle());

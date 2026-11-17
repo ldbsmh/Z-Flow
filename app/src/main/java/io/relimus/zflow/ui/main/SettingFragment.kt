@@ -22,7 +22,6 @@ import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.providers.WindowEngineSettings
 import io.relimus.zflow.service.ForegroundService
 import io.relimus.zflow.service.KeepAliveService
-import io.relimus.zflow.service.NcWindowBackend
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
 import io.relimus.zflow.ui.choose_apps.ChooseAppsViewModel
 import io.relimus.zflow.ui.permission.PermissionActivity
@@ -50,15 +49,6 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
 
         private const val URL_OPEN_API = "https://github.com/ldbsmh/Z-Flow/blob/import/open_api_zh-Hans.md"
         private const val URL_SOURCE = "https://github.com/ldbsmh/Z-Flow"
-
-        /** 与 NC 引擎对应的外观项；其它设置项引擎没有对应能力，不在这里触发。 */
-        private val NC_SETTINGS_KEYS = setOf(
-            "freeform_size",
-            "freeform_size_land",
-            "freeform_float_view_size",
-            "freeform_dimming_amount",
-            "freeform_dock_style",
-        )
 
         fun newInstance(rootKey: String): SettingFragment {
             return SettingFragment().apply {
@@ -326,19 +316,12 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
     }
 
     /**
-     * 设置改动后同步给 NC 引擎。
-     *
-     * - 外观类（尺寸/迷你比例/贴边/变暗）走 SETTINGS 指令：变暗立刻生效，
-     *   尺寸类留给下次开窗；
-     * - 引擎原生开关（[WindowEngineSettings]）以 `corner` 偏好为准，镜像过去再
-     *   广播让 SystemUI 重读快照。
+     * 引擎原生开关（[WindowEngineSettings]）改动后镜像到 `corner` 偏好，
+     * 再广播让 SystemUI 重读快照。外观设置只对经典内核生效，不经过这里。
      */
     private val ncSettingsListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == null || !isAdded) return@OnSharedPreferenceChangeListener
-            when (key) {
-                in WindowEngineSettings.ALL_KEYS -> WindowEngineSettings.sync(requireContext())
-                in NC_SETTINGS_KEYS -> NcWindowBackend.reloadSettings(requireContext())
-            }
+            if (key in WindowEngineSettings.ALL_KEYS) WindowEngineSettings.sync(requireContext())
         }
 }

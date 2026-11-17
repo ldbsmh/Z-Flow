@@ -89,7 +89,7 @@ final class BackVisual {
         }catch(Exception ignored){}
     }
     static void receive(Context c,Intent i,int uid){
-        try{if(STATE.equals(i.getAction())&&uid==c.getPackageManager().getApplicationInfo(LauncherGuard.PACKAGE,0).uid)
+        try{if(STATE.equals(i.getAction())&&uid==c.getPackageManager().getApplicationInfo("com.google.android.apps.nexuslauncher",0).uid)
             remote=i.getExtras()==null?null:i.getExtras().getBinder("channel");
         }catch(Exception ignored){}
     }

@@ -88,17 +88,6 @@ object WindowEngineSettings {
         notifyChanged(context)
     }
 
-    /**
-     * 小窗黑名单同时作为引擎的 `blocked`：黑名单应用在前台时角落扇区不响应。
-     *
-     * 名单本身仍以 Room 为准（Z-Flow 侧拦截开窗），这里只是给引擎一份包名快照。
-     */
-    fun syncBlacklist(context: Context, packages: Set<String>) {
-        context.getSharedPreferences(CORNER_PREFS, Context.MODE_PRIVATE)
-            .edit().putStringSet("blocked", packages).apply()
-        notifyChanged(context)
-    }
-
     private fun notifyChanged(context: Context) {
         runCatching { Engine.notifySettingsChanged(context) }
             .onFailure { XLog.w("$TAG: notify engine settings failed: ${it.message}") }

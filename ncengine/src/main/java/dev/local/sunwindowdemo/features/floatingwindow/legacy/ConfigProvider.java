@@ -16,11 +16,7 @@ public final class ConfigProvider extends ContentProvider {
             if(uid!=getContext().getApplicationInfo().uid && uid!=getContext().getPackageManager().getApplicationInfo(BackBridge.PACKAGE,0).uid)
                 throw new SecurityException("settings reader");
         } catch(android.content.pm.PackageManager.NameNotFoundException e){throw new SecurityException(e);}
-        if("targets".equals(method)){
-            ArrayList<String> keys=extras==null?null:extras.getStringArrayList("targets");
-            new Config(getContext()).targets(keys,extras==null?null:extras.getStringArrayList("labels"));
-            changed(getContext());Bundle saved=new Bundle();saved.putBoolean("saved",true);return saved;
-        }
+        if("targets".equals(method))throw new IllegalArgumentException("targets retired");
         if(!"read".equals(method))throw new IllegalArgumentException("method");
         new Config(getContext()); // Migrate before exporting, even if the manager has not opened yet.
         dev.local.sunwindowdemo.core.WindowBackendEligibility.refreshAsync(getContext());

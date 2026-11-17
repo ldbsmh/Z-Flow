@@ -83,11 +83,8 @@ final class WindowControl {
         return new Dock(destination,0);
     }
     static Geometry.Placement miniTarget(Geometry.Placement start,Geometry.Placement retained,float normal,Safe safe,boolean large){
-        return miniTarget(start,retained,normal,safe,large,WindowSettings.DEFAULT_MINI);
-    }
-    static Geometry.Placement miniTarget(Geometry.Placement start,Geometry.Placement retained,float normal,Safe safe,boolean large,int miniPercent){
-        return retained==null?Geometry.miniTopRight(start,normal,safe.left,safe.top,safe.right,safe.bottom,safe.margin,large,miniPercent)
-            :Geometry.resizeMini(retained,normal,safe.left,safe.top,safe.right,safe.bottom,safe.margin,large,miniPercent);
+        return retained==null?Geometry.miniTopRight(start,normal,safe.left,safe.top,safe.right,safe.bottom,safe.margin,large)
+            :Geometry.resizeMini(retained,normal,safe.left,safe.top,safe.right,safe.bottom,safe.margin,large);
     }
     private static float dockX(Geometry.Placement p,float x,Safe safe){
         return x+p.width()*p.scale()/2<((safe.left+safe.right)>>1)?safe.left+safe.margin:safe.right-safe.margin-p.width()*p.scale();

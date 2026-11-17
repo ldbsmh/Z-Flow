@@ -2,19 +2,7 @@ package dev.local.sunwindowdemo;
 
 /** Pure geometry and validation, shared by UI and JVM checks. */
 public final class Rules {
-    public static boolean blocked(boolean locked, boolean landscape, boolean landscapeOff,
-            boolean keyboard, boolean keyboardOff, boolean excluded) {
-        return locked || (landscape && landscapeOff) || (keyboard && keyboardOff) || excluded;
-    }
     public static int clamp(int value, int min, int max) { return Math.max(min, Math.min(max, value)); }
-    public static double angle(int index, int count) {
-        if (count < 1 || count > 6 || index < 0 || index >= count) throw new IllegalArgumentException();
-        return (index + .5) * 90.0 / count;
-    }
-    public static double radius(double requested, double icon, int count) {
-        if (count < 1 || count > 6) throw new IllegalArgumentException();
-        return count == 1 ? requested : Math.max(requested, (icon + 8) / (2 * Math.sin(Math.PI / (4 * count))));
-    }
     public static boolean triggered(float dx, float dy, boolean right, float distance) {
         float inward = right ? -dx : dx;
         return inward >= distance * .35f && -dy >= distance * .35f && Math.hypot(dx, dy) >= distance;

@@ -60,8 +60,6 @@ final class WindowControls {
     private Context moduleContext;
     private MiniAction sizeAction,muteAction;
     private boolean miniLarge,muted,edgeHidden;
-    /** 贴边把手露出比例（Z-Flow freeform_dock_style，28~100）。 */
-    private int dockStyle=100;
     private int edgeSide;
     private float edgeCenterY;
     /** Clear each touch-only buffer explicitly; it must never become a visible backdrop. */
@@ -141,7 +139,6 @@ final class WindowControls {
         frame=next;
         miniLarge=i.getBooleanExtra("miniLarge",false);muted=i.getBooleanExtra("muted",false);
         edgeHidden=i.getBooleanExtra("edgeHidden",false);edgeSide=i.getIntExtra("edgeSide",1);
-        dockStyle=Rules.clamp(i.getIntExtra("dockStyle",WindowSettings.DEFAULT_DOCK),28,100);
         edgeCenterY=i.getFloatExtra("edgeCenterY",ny+nh/2);
         edgeBarDragging=i.getBooleanExtra("edgeBarDragging",false);
         edgeBarCenterX=i.getFloatExtra("edgeBarCenterX",0);edgeBarCenterY=i.getFloatExtra("edgeBarCenterY",edgeCenterY);
@@ -168,12 +165,9 @@ final class WindowControls {
                     float size=Math.min(getWidth(),getHeight());
                     if(size<=0)return;
                     /*
-                     * 露出比例：把手窗口仍是 60dp（触摸区不能变小），但绘制内容往屏幕外
-                     * 方向偏移，超出视图的部分被裁掉 —— 这就是 Z-Flow 的 dockStyle 效果。
-                     * 长按/内拖时恢复完整把手，避免拖动过程中突然“缺一块”。
+                     * 贴边隐藏时把手移出屏幕边缘；长按/内拖时恢复完整把手。
                      */
-                    float ratio=Rules.clamp(dockStyle,28,100)/100f;
-                    float shift=(edgeBarDragging||edgeGesture==1)?0:(1-ratio)*size*(edgeSide<0?-1:1);
+                    float shift=(edgeBarDragging||edgeGesture==1)?0:size*(edgeSide<0?-1:1);
                     float left=(getWidth()-size)/2f+shift,top=(getHeight()-size)/2f;
                     edgePaint.setStyle(Paint.Style.FILL);
                     edgePaint.setColor(0xf2ffffff);

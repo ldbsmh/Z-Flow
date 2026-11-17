@@ -160,12 +160,19 @@ ClassLoader，桌面里的类一个都找不到。
 
 并入：`WindowEngine`、`SystemUiHost`、`WindowControls`、`Wire`、`Config`、`TaskCover`、
 `TaskVisibilityGuard`、`WindowContinuation`、`LinkedBack`、`ServerViewport`、`ShareWindow`、
-`LauncherGuard`（角落扇区）、`BackBridge`（SystemUI 宿主）。
+`BackBridge`（SystemUI 宿主）。
+
+**已删除（与 Z-Flow 高度拟合，2026-11 精简）**：角落扇形菜单全套
+（`FanView`/`HotspotView`/`CornerGesture`/`LauncherGuard`/快捷操作面板
+`AppList`+`WindowQuickHost`+`QuickActionCatalog`）——扇区手势由 Z-Flow 自己的轮盘
+（另一个分支）承担；`NotificationWindow`（死代码）、`WindowTools`（扇区录屏磁贴）、
+`LongBackGesture`/`BackSwipe`/`BackHandoffState`（引擎零引用）、
+`DemoActivity`/`DiagnosticActivity`/`TaskTools`（无声明演示组件）。
 
 未并（Z-Flow 已有对应入口或本阶段不做）：
 
-- 通知点击接管（`NotificationWindow`）——由 Z-Flow 自己的通知钩子负责，叠加会一次点击开两个窗。
-- 弹幕通知、快捷建议、边缘防误触、图标适配、来电拦截、壁纸等非小窗功能。
+- 弹幕通知、快捷建议、边缘防误触、图标适配、来电拦截、壁纸等非小窗功能
+  （`ProductFeatures` 里的空实现仅为接口兼容）。
 - 上游 Compose 设置页（`features/floatingwindow/ui/**`）——设置界面仍用 Z-Flow 的 Preference 页。
 
 ## 贴边把手与关闭方式（对齐 Z-Flow）
@@ -192,17 +199,9 @@ miniMagnet.follow((窗口底边 - 关闭区顶部) / 关闭区高度);  // 0..1
 ## 多个迷你窗与数量上限
 
 引擎原来只有「前台窗 + 一个挂起的迷你窗」两个位置（`Session active` / `Session pinned`），
-连开第二个应用时前一个会被关掉。现在 `pinned` 是列表，容量由 Z-Flow 的
-「最多同时小窗数量」控制（`max_freeform_windows`，1~5，默认 2）。
-
-数据通路只有一条，避免两个进程各自解释同一个设置：
-
-```
-Z-Flow 设置(SeekBar) → app_settings.max_freeform_windows
-   → NcWindowBackend.maxWindows()          每次开窗现读，改设置立刻生效
-   → Engine.openApp(..., maxWindows) → Wire  → OPEN 的 maxWindows extra
-   → WindowEngine.maxWindows                超出时淘汰最旧的迷你窗
-```
+连开第二个应用时前一个会被关掉。现在 `pinned` 是列表，容量固定为引擎默认 2
+（`WindowEngine.maxWindows`；设置页的「最多同时小窗数量」只对经典内核生效）。
+超限时淘汰最旧的迷你窗，记 `MINI_EVICT`。
 
 `WindowEngine` 侧的关键约定：
 
@@ -226,27 +225,16 @@ SystemUI 侧从「一个 `miniControls`」改成「按 taskId 复用的 `WindowC
 ## 设置项对接（Z-Flow 设置 → NC 引擎）
 
 设置页在 Z-Flow app 进程，引擎在 system_server。引擎不读对方的 SharedPreferences
-（部分 ROM 上会被 SELinux 拦），**统一由客户端读好、随请求下发**：
+（部分 ROM 上会被 SELinux 拦）。对接分两类：
 
-```
-设置页 → app_settings → NcWindowBackend.windowSettings() 打包 Bundle
-   → Engine.openApp(..., Bundle) / openNotification(..., Bundle)
-   → OPEN 的 windowSettings extra → WindowSettings.from(Bundle) → WindowEngine.settings
-```
+### 外观设置：不再下发
 
-| Z-Flow 设置项 | 引擎落点 | 生效时机 |
-|---|---|---|
-| `freeform_size`（10~100，默认 75） | `Geometry.place()` 竖屏 scale | 下次开窗 |
-| `freeform_size_land`（10~100，默认 90） | `Geometry.place()` 横屏分支（以 90 为基准折算，默认值下与旧硬编码一致） | 下次开窗 |
-| `freeform_float_view_size`（10~50，默认 20） | `Geometry.miniTopRight()` 的 `small`（原为固定 .28） | 下次开窗 |
-| `freeform_dimming_amount`（0~100，默认 20） | `WindowEngine.windowDim` → `TaskDecoration.dimAmount()` | **立即**（`SETTINGS` 指令重刷） |
-| `freeform_dock_style`（28~100，默认 100） | 帧报文 `dockStyle` → `WindowControls` 把手露出比例 | 下一帧 |
-| `max_freeform_windows`（1~5，默认 2） | `WindowEngine.maxWindows` | 下次开窗 |
-| 横屏应用名单（`landscape_apps` SP） | `prepareGeometry()` 里强制 `s.landscape=true` | 下次开窗 |
-| 小窗黑名单（Room） | Z-Flow 侧 `isBlacklistedOrBlock()` 拦在开窗前，引擎不参与 | 每次开窗 |
-
-设置页改动后由 `SettingFragment` 的监听器推一条 `SETTINGS` 指令：变暗立刻重绘，
-尺寸/迷你比例/贴边样式不做就地重排（会让窗口当场跳动），留到下一次开窗。
+引擎窗口支持长按调整大小，尺寸/迷你比例/变暗/贴边样式用引擎自己的默认值
+（竖屏 75%、横屏 90%、迷你 28%、dim 20%、把手完全露出）。Z-Flow 设置页里那几项
+（`freeform_size` / `freeform_size_land` / `freeform_float_view_size` /
+`freeform_dimming_amount` / `freeform_dock_style` / `max_freeform_windows` /
+横屏应用名单）只对经典虚拟屏内核生效。`WindowSettings` Bundle 通道、`SETTINGS`
+指令、`dockStyle`/`maxWindows` extra 已在 2026-11 精简时移除。
 
 **没有搬的三项**（引擎确实没有对应能力，硬接就是假开关）：
 
@@ -274,7 +262,7 @@ NC 引擎自己有一套 `corner` 偏好（`Config.java`），SystemUI 宿主启
 
 | 设置页键 | `corner` 键 | 作用 | 消费方 |
 |---|---|---|---|
-| `nc_engine_enabled`（默认开） | `enabled` | 引擎总开关：关掉后 Z-Flow 开窗回退经典内核，SystemUI 侧角落扇区与控制条同时停止 | 两边 |
+| `nc_engine_enabled`（默认开） | `enabled` | 引擎总开关：关掉后 Z-Flow 开窗回退经典内核，SystemUI 控制条停止 | 两边 |
 | `nc_auto_minimize`（默认开） | `autoMinimizeOnOpen` | 开新窗时上一个默认窗收成迷你，而不是直接关闭 | `Wire` 随 OPEN 下发 |
 | `nc_end_on_close`（默认关） | `endOnClose` | 关掉应用的最后一个窗口时 force-stop 该应用 | `Wire` 随 OPEN 下发 |
 | `nc_keep_edge_awake`（默认关） | `keepEdgeAwake` | 贴边迷你窗保活应用进程 | `Wire` 随 OPEN 下发 |
@@ -282,23 +270,30 @@ NC 引擎自己有一套 `corner` 偏好（`Config.java`），SystemUI 宿主启
 | `nc_hide_window_recents`（默认关） | `hideRecents` | 小窗任务不进最近任务 | `Wire` 随 OPEN 下发 |
 | `nc_landscape_share_window`（默认开） | `landscapeShareWindow` | 横屏下分享目标以窗口打开 | SystemUI 分享门控 |
 
-小窗黑名单同时镜像一份给引擎的 `blocked`（`WindowEngineSettings.syncBlacklist`）：
-Room 里的每次增删改都会把包名集合写进 `corner.blocked` 并广播，黑名单应用在前台时
-角落扇区不响应。名单本身仍以 Room 为准，Z-Flow 侧继续拦在开窗前。
+小窗黑名单（Room）不镜像给引擎：原本同步的 `corner.blocked` 只被角落扇区消费，
+扇区删除后镜像一并移除；开窗拦截始终在 Z-Flow 侧 `isBlacklistedOrBlock()`。
 
-没搬的原生项：角落扇区几何参数（热区/半径/图标/数量/模糊等，Z-Flow 用自己的轮盘，
-按引擎默认值运行）、快捷应用名单 `apps`/`targets`（扇区面板内可改）、
-`notificationWindow`（引擎没装通知接管 Hook，是死配置）、`longBackWindow`（引擎内
-零引用）。
+已删除的原生项：角落扇区几何参数（heat/distance/radius/icon/fanCount 等）、
+快捷应用名单 `apps`/`targets`、`blocked`、`notificationWindow`（死配置）、
+`longBackWindow`（引擎内零引用）、`menuBlur`/`showHeat`/`hideTopHint` 等。
+
+### 通知跳转与白名单
+
+通知入口（通知上的小窗按钮 / 点通知开小窗）由 Z-Flow 自己的通知钩子
+（`HookNotificationAction`）发起，三个挂点全部先查
+`RemoteSettings.isNotificationEnabled`（Room 的通知白名单），再走统一链路
+`FreeformRequestHandler.create` → `NcWindowBackend.openNotification`。
+白名单对 NC 与经典内核一视同仁；引擎侧的通知接管（`NotificationWindow`）
+从未安装，也已在精简时删除。
 
 ## 已知缺口（待后续阶段）
 
-1. Z-Flow「运行规则」里的黑名单、横屏清单已接通（黑名单在 Z-Flow 侧拦截），
-   但尺寸类设置只在**下一次开窗**时应用，已开的窗口不会就地重排。
+1. 外观设置只对经典内核生效；NC 引擎用自身默认值（长按可调整大小），
+   已开的窗口不会就地重排。
 2. 引擎安装失败（例如 `SunWindowModule` 的 `startOtherServices` deopt 预检不过）时不会自动回退，
    表现为“点了没反应”，需要在设置里手动切回经典内核。
-3. 引擎总开关已单独暴露（`nc_engine_enabled`）；角落扇区几何参数按引擎默认值运行，
-   未在设置页出现（用户决定不搬）。
+3. 引擎总开关已单独暴露（`nc_engine_enabled`）；角落扇区已整体删除
+   （斜滑菜单由 Z-Flow 另一分支的轮盘承担）。
 4. 真机未验证：`Wire` 协议、`WindowEngine` 的 WMS Hook、SystemUI 宿主在当前 ROM 上的可用性。
 
 ## 构建

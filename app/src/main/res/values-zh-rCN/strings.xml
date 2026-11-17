@@ -253,7 +253,7 @@
     <string name="freeform_size_land_title">横屏小窗大小</string>
     <string name="freeform_float_view_size_title">小窗悬浮窗大小</string>
     <string name="nc_engine_enabled_title">NC 引擎总开关</string>
-    <string name="nc_engine_enabled_summary">关闭后开窗交回经典虚拟屏内核，引擎的角落扇区与控制条同时停止。已经打开的小窗需要关掉重开</string>
+    <string name="nc_engine_enabled_summary">关闭后开窗交回经典虚拟屏内核，引擎的控制条同时停止。已经打开的小窗需要关掉重开</string>
     <string name="nc_auto_minimize_title">开新窗时上一个收成迷你窗</string>
     <string name="nc_auto_minimize_summary">关闭后，打开新窗口时上一个窗口直接关闭，不再缩成迷你窗</string>
     <string name="nc_end_on_close_title">关闭小窗时结束应用</string>
