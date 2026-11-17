@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.Toast
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.appcompat.widget.SwitchCompat
 import androidx.recyclerview.widget.RecyclerView
@@ -24,7 +25,9 @@ class AppsRecyclerAdapter(
     private var allAppsList: ArrayList<LauncherActivityInfo>,
     private val viewModel: ChooseAppsViewModel,
     selectedKeys: List<String>,
-    private val type: Int
+    private val type: Int,
+    /** >0 时限制最多可勾选的条数（轮盘只有 6 格），超出给一次提示。 */
+    private val maxSelection: Int = 0,
 ) : RecyclerView.Adapter<AppsRecyclerAdapter.ViewHolder>() {
 
     private val checkedKeys: MutableSet<String> = selectedKeys.toMutableSet()
@@ -104,7 +107,9 @@ class AppsRecyclerAdapter(
      * 横屏（Provider/SharedPreferences）与白名单（本地文件）没有，需要本地自行重排。
      */
     private fun hasSelectionStream(): Boolean = when (type) {
-        ChooseAppsViewModel.TYPE_LANDSCAPE, ChooseAppsViewModel.TYPE_TRUSTED -> false
+        ChooseAppsViewModel.TYPE_LANDSCAPE,
+        ChooseAppsViewModel.TYPE_TRUSTED,
+        ChooseAppsViewModel.TYPE_RADIAL -> false
         else -> true
     }
 
@@ -177,16 +182,26 @@ class AppsRecyclerAdapter(
         holder.switch.setOnCheckedChangeListener(null)
         holder.switch.isChecked = key in checkedKeys
 
-        holder.itemView.setOnClickListener { toggle(key, info) }
+        holder.itemView.setOnClickListener { toggle(key, info, it.context) }
         holder.switch.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked == (key in checkedKeys)) return@setOnCheckedChangeListener
-            toggle(key, info)
+            toggle(key, info, holder.itemView.context)
         }
     }
 
     /** 单点切换：本地集合即时更新（开关控件已自带动画），再交给 ViewModel 落库。 */
-    private fun toggle(key: String, info: LauncherActivityInfo) {
+    private fun toggle(key: String, info: LauncherActivityInfo, context: android.content.Context) {
         val checked = key !in checkedKeys
+        if (checked && maxSelection > 0 && checkedKeys.size >= maxSelection) {
+            // 已经存满了：直接拒掉并回滚开关，否则用户会看到「勾上了但轮盘里没有」。
+            Toast.makeText(
+                context,
+                context.getString(R.string.radial_apps_limit, maxSelection),
+                Toast.LENGTH_SHORT,
+            ).show()
+            notifyItemChanged(items.indexOf(info), PAYLOAD_CHECKED)
+            return
+        }
         if (checked) checkedKeys.add(key) else checkedKeys.remove(key)
         // 有回流的类型等数据回来再排（保持现有手感）；横屏 / 白名单没有回流，
         // 不在这里自己排就永远不会置顶——这就是横屏列表勾选后不动的原因。

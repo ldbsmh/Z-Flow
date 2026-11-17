@@ -66,19 +66,17 @@ object RemoteSettings {
     }
 
     /**
-     * 读取一个兼容性修复开关。
+     * 读取一个兼容性修复开关；**读不到返回 null**。
      *
-     * 供运行在被 hook 应用进程里的补丁使用——那边读不到 Z-Flow 的
-     * SharedPreferences，只能跨进程问 Provider。
-     *
-     * @param key 必须是 [NotificationSettingsProvider] 白名单内的 key
-     * @param default 查询失败时的兜底值（保证不因为读不到设置而误改行为）
+     * 与 [isFeatureEnabled] 的区别：那个方法把「读不到」和「用户关掉了」都压成 false，
+     * 于是被 hook 的进程无法区分「功能确实关闭」和「模块进程还没起来」——
+     * 后者在系统刚更新过模块时非常常见，表现就是「开关明明是开的，手势却没反应」。
      */
-    fun isFeatureEnabled(context: Context, key: String, default: Boolean): Boolean {
+    fun isFeatureEnabledOrNull(context: Context, key: String): Boolean? {
         val cacheKey = "flag:$key"
         val now = android.os.SystemClock.uptimeMillis()
         cache[cacheKey]?.let { cached ->
-            if (now - cached.at < FLAG_CACHE_MS) return cached.value as? Boolean ?: default
+            if (now - cached.at < FLAG_CACHE_MS) return cached.value as? Boolean
         }
 
         val value = runCatching {
@@ -87,11 +85,72 @@ object RemoteSettings {
                 NotificationSettingsProvider.METHOD_GET_FEATURE_FLAG,
                 Bundle().apply { putString(NotificationSettingsProvider.EXTRA_FLAG_KEY, key) }
             )
-            if (result.isDenied()) null
-            else result?.getBoolean(NotificationSettingsProvider.EXTRA_FLAG_VALUE, default)
-        }.getOrNull() ?: default
+            if (result == null || result.isDenied()) {
+                null
+            } else {
+                result.getBoolean(NotificationSettingsProvider.EXTRA_FLAG_VALUE, false)
+            }
+        }.getOrNull()
 
-        cache[cacheKey] = CacheEntry(value, now)
+        // 只缓存成功的读取：一次瞬时失败不应该把状态锁在缓存里
+        if (value != null) cache[cacheKey] = CacheEntry(value, now)
+        return value
+    }
+
+    /**
+     * 读取一个兼容性修复开关。
+     *
+     * 供运行在被 hook 应用进程里的补丁使用——那边读不到 Z-Flow 的
+     * SharedPreferences，只能跨进程问 Provider。
+     *
+     * @param key 必须是 [NotificationSettingsProvider] 白名单内的 key
+     * @param default 查询失败时的兜底值（保证不因为读不到设置而误改行为）
+     */
+    fun isFeatureEnabled(context: Context, key: String, default: Boolean): Boolean =
+        isFeatureEnabledOrNull(context, key) ?: default
+
+    /**
+     * 读取轮盘的触发区域（矩形中心 + 尺寸 + 是否镜像）。
+     *
+     * 读不到返回 null 而不是默认值：被 hook 的进程需要区分「用户设成了默认区域」
+     * 和「Provider 还没起来」，前者可以静默使用，后者要退避重试。
+     */
+    fun getRadialTrigger(context: Context): RadialTriggerSettings.Config? {
+        val cacheKey = "radial_trigger"
+        val now = android.os.SystemClock.uptimeMillis()
+        cache[cacheKey]?.let { cached ->
+            if (now - cached.at < FLAG_CACHE_MS) return cached.value as? RadialTriggerSettings.Config
+        }
+        val value = runCatching {
+            val result = call(context, NotificationSettingsProvider.METHOD_GET_RADIAL_TRIGGER, null)
+            if (result == null || result.isDenied()) {
+                null
+            } else {
+                RadialTriggerSettings.Config(
+                    centerXPercent = result.getInt(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_X,
+                        RadialTriggerSettings.DEFAULT_CENTER_X,
+                    ),
+                    centerYPercent = result.getInt(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_Y,
+                        RadialTriggerSettings.DEFAULT_CENTER_Y,
+                    ),
+                    widthPercent = result.getInt(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_W,
+                        RadialTriggerSettings.DEFAULT_WIDTH,
+                    ),
+                    heightPercent = result.getInt(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_H,
+                        RadialTriggerSettings.DEFAULT_HEIGHT,
+                    ),
+                    mirror = result.getBoolean(
+                        NotificationSettingsProvider.EXTRA_TRIGGER_MIRROR,
+                        RadialTriggerSettings.DEFAULT_MIRROR,
+                    ),
+                ).sanitized()
+            }
+        }.getOrNull()
+        if (value != null) cache[cacheKey] = CacheEntry(value, now)
         return value
     }
 

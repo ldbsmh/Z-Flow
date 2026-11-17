@@ -42,6 +42,14 @@ class NotificationSettingsProvider : ContentProvider() {
         const val EXTRA_FLAG_KEY = "flag_key"
         const val EXTRA_FLAG_VALUE = "flag_value"
 
+        /** 读取轮盘的触发区域（矩形中心 + 尺寸 + 是否镜像到另一侧） */
+        const val METHOD_GET_RADIAL_TRIGGER = "get_radial_trigger"
+        const val EXTRA_TRIGGER_X = "trigger_x"
+        const val EXTRA_TRIGGER_Y = "trigger_y"
+        const val EXTRA_TRIGGER_W = "trigger_w"
+        const val EXTRA_TRIGGER_H = "trigger_h"
+        const val EXTRA_TRIGGER_MIRROR = "trigger_mirror"
+
         private const val PREFS_NAME = "app_settings"
         private const val KEY_NOTIFY_FREEFORM = "notify_freeform"
         private const val KEY_MAX_FREEFORM = "max_freeform_windows"
@@ -57,6 +65,20 @@ class NotificationSettingsProvider : ContentProvider() {
         private val ALLOWED_FEATURE_FLAGS = setOf(
             ZFlow.KEY_POPUP_FREEFORM_ENABLE,
             ZFlow.KEY_POPUP_BUBBLE_BLOCK,
+            ZFlow.KEY_RADIAL_GESTURE_ENABLE,
+        )
+
+        /**
+         * 各开关在「用户从未改过」时的取值。
+         *
+         * 必须与 res/xml/settings.xml 的 defaultValue 一致：
+         * PreferenceFragmentCompat 不会主动写入默认值，缺省时若两边不一致，
+         * 就会出现「设置页显示关、Launcher 却按开处理」的鬼故事。
+         */
+        private val FEATURE_FLAG_DEFAULTS = mapOf(
+            ZFlow.KEY_POPUP_FREEFORM_ENABLE to true,
+            ZFlow.KEY_POPUP_BUBBLE_BLOCK to true,
+            ZFlow.KEY_RADIAL_GESTURE_ENABLE to true,
         )
     }
 
@@ -103,10 +125,23 @@ class NotificationSettingsProvider : ContentProvider() {
                     return ProviderAccess.denied("flag not allowed")
                 }
                 val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                val fallback = FEATURE_FLAG_DEFAULTS[key] ?: false
                 val enabled = ctx.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
-                    .getBoolean(key, true)
+                    .getBoolean(key, fallback)
 
                 Bundle().apply { putBoolean(EXTRA_FLAG_VALUE, enabled) }
+            }
+
+            METHOD_GET_RADIAL_TRIGGER -> {
+                val ctx = context ?: return ProviderAccess.denied("context unavailable")
+                val config = RadialTriggerSettings.read(ctx)
+                Bundle().apply {
+                    putInt(EXTRA_TRIGGER_X, config.centerXPercent)
+                    putInt(EXTRA_TRIGGER_Y, config.centerYPercent)
+                    putInt(EXTRA_TRIGGER_W, config.widthPercent)
+                    putInt(EXTRA_TRIGGER_H, config.heightPercent)
+                    putBoolean(EXTRA_TRIGGER_MIRROR, config.mirror)
+                }
             }
 
             METHOD_GET_APP_LIST_VERSION -> {

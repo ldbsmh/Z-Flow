@@ -66,6 +66,24 @@
                 android:summary="@string/nc_engine_enabled_summary"
                 android:defaultValue="true"
                 app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="radial_gesture_enable"
+                android:title="@string/radial_gesture_enable_title"
+                android:summary="@string/radial_gesture_enable_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
+            <Preference
+                android:key="radial_trigger_area"
+                android:title="@string/radial_trigger_area_title"
+                android:summary="@string/radial_trigger_area_summary"
+                android:dependency="radial_gesture_enable"
+                app:iconSpaceReserved="false"/>
+            <Preference
+                android:key="radial_gesture_apps"
+                android:title="@string/radial_apps_title"
+                android:summary="@string/radial_apps_summary"
+                android:dependency="radial_gesture_enable"
+                app:iconSpaceReserved="false"/>
             <Preference
                 android:key="trusted_callers"
                 app:title="@string/preference_trusted_callers"

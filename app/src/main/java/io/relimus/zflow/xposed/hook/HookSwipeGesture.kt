@@ -13,9 +13,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Display
 import android.view.InputEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
 import de.robv.android.xposed.XC_MethodHook
@@ -23,11 +25,19 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import io.github.kyuubiran.ezxhelper.core.util.ClassUtil.loadClass
 import io.github.kyuubiran.ezxhelper.core.util.ObjectUtil
+import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.broadcast.StartFreeformReceiver
 import io.relimus.zflow.providers.BlacklistProvider
 import io.relimus.zflow.providers.LandscapeAppsProvider
+import io.relimus.zflow.providers.RemoteSettings
 import io.relimus.zflow.utils.cast
+import io.relimus.zflow.xposed.hook.utils.InputPilfer
 import io.relimus.zflow.xposed.hook.utils.XLog
+import io.relimus.zflow.xposed.ui.radial.RadialCorner
+import io.relimus.zflow.xposed.ui.radial.RadialGestureGate
+import io.relimus.zflow.xposed.ui.radial.RadialItem
+import io.relimus.zflow.xposed.ui.radial.RadialMenuController
+import io.relimus.zflow.xposed.ui.radial.RadialTrace
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
@@ -80,6 +90,41 @@ object HookSwipeGesture {
 
     // 诊断日志总开关，默认关闭，避免刷屏
     private const val ENABLE_DIAGNOSTIC_LOGS = false
+
+    /*
+     * 触发区几何（摆放位置、尺寸、镜像）已经搬到
+     * io.relimus.zflow.providers.RadialTriggerSettings：
+     * 那边是纯函数，可以直接在 JVM 单测里覆盖「命中区随设置移动」，
+     * 不必为一次几何改动跑真机。
+     */
+
+    /**
+     * 已按下但还没展开时，扣着事件的最长时间（毫秒）。
+     *
+     * 这段时间里屏幕上什么都没有，用户看到的就是「按下去没反应」，
+     * 扣久了等同于卡死。位移一旦越过判定阈值，MOVE 分支会立刻给出
+     * 「展开」或「放弃」的结论，只有手指一直不动才会走到这个超时。
+     */
+    private const val RADIAL_ARMED_TIMEOUT_MS = 2_000L
+
+    /**
+     * 轮盘已经展开后，无事件的最长时间（毫秒）。
+     *
+     * 比 [RADIAL_ARMED_TIMEOUT_MS] 宽松得多：此时轮盘是可见的，用户看得懂
+     * 自己在干什么，停下来挑一两秒很正常，不该被硬切掉。
+     *
+     * 它和 InputDispatcher 的 5 秒并不冲突：ANR 的前提是「有事件送不进去」，
+     * 而按住不动本身不产生新事件；真要有新事件（手指动了）就会重挂看门狗。
+     */
+    private const val RADIAL_REVEALED_TIMEOUT_MS = 6_000L
+
+    /**
+     * 轮盘开关缓存的有效期。
+     *
+     * 不能永久缓存：用户在设置页把开关关掉后，桌面进程（本 Hook 所在进程）
+     * 如果不重新读一次，会一直按旧值放行。3 秒足够便宜，也能让开关很快生效。
+     */
+    private const val FLAG_CACHE_TTL_MS = 3_000L
 
     @Volatile
     private var inited = false
@@ -212,6 +257,130 @@ object HookSwipeGesture {
     @Volatile
     private var hintCommittedThisGesture = false
 
+    // ===== 底角轮盘 =====
+
+    /**
+     * 轮盘手势状态机。每次 ACTION_DOWN 按当前 touch slop 重新创建，
+     * 因此这里不是 val。
+     */
+    private var radialGate = RadialGestureGate(revealSlopPx = 24f)
+
+    /** 本次手势的圆心内缩量（px）：由触发区的中心决定，展开时原样传给轮盘。 */
+    @Volatile
+    private var radialOriginInsetX = 0f
+
+    @Volatile
+    private var radialOriginInsetY = 0f
+
+    /** 本次手势是否已经把输入从桌面窗口手里抢过来（只抢一次，UP 时不用重复）。 */
+    @Volatile
+    private var radialPilferedThisGesture = false
+
+    /** 输入回调的 thisObject，抢输入时要用它当反射起点。 */
+    @Volatile
+    private var radialHookTarget: Any? = null
+
+    /**
+     * 上一条已处理事件的身份，用于「同一事件被多个 hook 各投递一次」时只跑一遍状态机。
+     * 键由 eventTime/downTime/action 组成，够区分不同事件。
+     */
+    @Volatile
+    private var lastProcessedEventKey = 0L
+
+    @Volatile
+    private var lastProcessedEventHandled = false
+
+    /** 「因为入口是事件接收器而拒绝吞事件」只记一次日志，避免每个事件都刷屏。 */
+    @Volatile
+    private var receiverSwallowBlockedLogged = false
+
+    /** 已经打印过日志的入口类名（每个进程每种入口一行）。 */
+    private val loggedHookOwners = HashSet<String>()
+
+    /** 上一次成功读到的触发点配置；Provider 短暂不可用时沿用它，避免触发点跳变。 */
+    @Volatile
+    private var radialTriggerConfig = io.relimus.zflow.providers.RadialTriggerSettings.Config()
+
+    /** 触发点配置读取失败后的退避时间戳（避免每条 DOWN 都去撞一次 Binder）。 */
+    @Volatile
+    private var radialTriggerRetryAt = 0L
+
+    /** 本次手势是否已经尝试过展开（用于只记一次失败原因，避免每个 MOVE 刷日志）。 */
+    @Volatile
+    private var radialRevealAttempted = false
+
+    /** 起手日志的节流时间戳：每次 DOWN 都记录，但相邻两次至少间隔 200ms。 */
+    @Volatile
+    private var lastRadialDownTraceAt = 0L
+
+    /** 「轮盘没有可显示应用」的提示每个进程只弹一次。 */
+    @Volatile
+    private var radialEmptyToastShown = false
+
+    /**
+     * 上一次成功用于挂载浮层的父容器。
+     *
+     * 轮盘靠 activeGestureHandler 反查 mRecentsView 来定位父容器，
+     * 但 Handler 在某些 ROM 上可能已被回收/替换；落点提示成功挂过一次后，
+     * 这里留一份弱引用作为兜底，避免「提示能显示、轮盘却挂不上去」。
+     */
+    private var radialParentRef: java.lang.ref.WeakReference<ViewGroup>? = null
+
+    /** 本次手势是否由轮盘接管（已展开过）。 */
+    @Volatile
+    private var radialUsedThisGesture = false
+
+    /** 本次手势是否真的启动了轮盘里的小窗（决定要不要把落点改成 HOME）。 */
+    @Volatile
+    private var radialLaunchedThisGesture = false
+
+    /**
+     * 轮盘开关的读值缓存。
+     *
+     * 跨进程读 SharedPreferences（模块进程 → Provider）刚开机或刚安装的那一小段时间里
+     * 可能拿不到结果，此时不能把它当成「关闭」——否则刚打开开关的用户会看到
+     * 手势完全没反应，而重启后又好了。三态语义：null = 未知。
+     */
+    @Volatile
+    private var radialFlagCache: Boolean? = null
+
+    /** [radialFlagCache] 的写入时刻，用于 TTL 失效。 */
+    @Volatile
+    private var radialFlagAt = 0L
+
+    /** 后台补读开关的节流时间戳，避免每次 DOWN 都起线程。 */
+    @Volatile
+    private var radialFlagRetryAt = 0L
+
+    /**
+     * 轮盘手势的看门狗。
+     *
+     * 为什么非有不可：这条 ROM 上 `ACTION_UP` 并不可靠，而我们又在 DOWN 阶段
+     * 就把事件吞掉了 —— Launcher 因此根本不会创建 `AbsSwipeUpHandler`，
+     * `handleGestureEnd` 里的那次「补提交」永远不会执行。两件事叠起来就是：
+     * UP 一丢，`radialGate` 永久停在 ARMED/REVEALED，悬浮窗也一直挂着，
+     * 之后任何一条 MOVE 都会被当成「轮盘还在展开」吞掉。
+     *
+     * Launcher 的 `recents_animation_input_consumer` 收不到后续事件，
+     * InputDispatcher 等满 5 秒后报 `Input dispatching timed out`；
+     * 因为这个 consumer 注册在 system 侧，ANR 会归到 system 进程，
+     * 用户看到的就是「进程 system 没有响应」。
+     *
+     * 超时只清理、不提交：输入流已经断了，用户并没有完成「滑到目标再松手」，
+     * 这时替他启动一个应用属于误操作。
+     */
+    private val radialWatchdogHandler by lazy { Handler(Looper.getMainLooper()) }
+
+    private val radialWatchdog = Runnable {
+        if (radialGate.isActive || RadialMenuController.isShowing) {
+            RadialTrace.log(
+                "watchdog: gesture never finished state=${radialGate.state} " +
+                    "showing=${RadialMenuController.isShowing}"
+            )
+            clearRadialState()
+        }
+    }
+
     /**
      * resolveContext 解析出的可用 Context 缓存，避免每次手势结束后
      * 还要再反射一遍。用弱引用持有：解析兜底可能拿到 Activity，
@@ -219,6 +388,9 @@ object HookSwipeGesture {
      */
     @Volatile
     private var cachedSwipeContext: java.lang.ref.WeakReference<Context>? = null
+
+    /** 兜底 Application Context 缓存，见 [appContext]。 */
+    private var appContextRef: java.lang.ref.WeakReference<Context>? = null
 
     private fun debugLog(message: String) {
         if (!ENABLE_DIAGNOSTIC_LOGS) {
@@ -401,6 +573,10 @@ object HookSwipeGesture {
         releaseInDropTarget = false
         hintCommittedThisGesture = false
         activeGestureHandler = null
+
+        // 轮盘：视图与图标缓存都要放掉，否则热重载后仍持有上一份位图
+        clearRadialState()
+        RadialMenuController.clearIconCache()
 
         lifecycleLog("init() enter")
 
@@ -846,6 +1022,15 @@ object HookSwipeGesture {
         PortraitSwipeGestureHandler.reset()
         LandscapeSwipeGestureHandler.reset()
 
+        /*
+         * 只清掉上一轮可能残留的轮盘视图。
+         *
+         * 不能在这里 reset 轮盘状态机：本方法由 initStateCallbacks 触发，
+         * 时机在 ACTION_DOWN 之后，而热区正是在 DOWN 里记录的 ——
+         * 这里重置等于把本轮手势刚记下的底角信息抹掉，轮盘永远展不开。
+         */
+        RadialMenuController.dismiss(immediate = true)
+
         debugLog(
             "BEGIN " +
                 "handler=${identity(handler)} " +
@@ -941,6 +1126,17 @@ object HookSwipeGesture {
         }
 
         if (!progress.isFinite()) {
+            return
+        }
+
+        /*
+         * 轮盘手势进行中不再显示落点提示：
+         * 两套浮层同时出现会让用户不知道松手会发生什么。
+         */
+        if (radialUsedThisGesture || radialGate.isActive) {
+            if (hintView != null) {
+                removeHint(immediate = true, reason = "radialActive")
+            }
             return
         }
 
@@ -1114,6 +1310,36 @@ object HookSwipeGesture {
         gestureState: Any,
         homeTarget: Any
     ) {
+        /*
+         * 轮盘已经接管过这次手势：无论如何都不再走「把当前应用变常窗」的老路径，
+         * 否则用户滑轮盘选中 A 应用，当前应用 B 也会被顺手开成小窗。
+         *
+         * 若轮盘真的启动了某个应用，把落点改成 HOME，避免源应用被手势带进
+         * 最近任务动画里和新开的小窗抢焦点；没选中任何东西时不动落点，
+         * 让 Launcher 按自己原本的语义收尾（通常就是回到桌面）。
+         */
+        if (radialUsedThisGesture || radialLaunchedThisGesture || RadialMenuController.isShowing) {
+            // ACTION_UP 可能没送达输入 Hook（Android 17），在这里补一次提交；
+            // finish() 保证与 ACTION_UP 那次互斥，不会重复启动。
+            commitRadialSelection(resolveLauncherContext(handler))
+            val launched = radialLaunchedThisGesture
+            clearRadialState()
+            hintCommittedThisGesture = false
+            releaseInDropTarget = false
+            hintDismissed = true
+            gestureArmed = false
+            removeHint(immediate = true, reason = "radialConsumed")
+            if (launched) {
+                runCatching {
+                    XposedHelpers.callMethod(gestureState, "setEndTarget", homeTarget)
+                }.onFailure {
+                    XLog.e("$DEBUG_TAG radial setEndTarget failed", it)
+                }
+            }
+            lifecycleLog("GESTURE_END_RADIAL launched=$launched")
+            return
+        }
+
         // Android 17：抬手 ACTION_UP 不再可靠地送达我们的输入 Hook，
         // releaseInDropTarget（raw-motion 命中测试）恒为 false。
         // 改以“提示框已展示（用户确实上滑到了提交区）”为准，
@@ -1295,6 +1521,9 @@ object HookSwipeGesture {
             )
             return
         }
+
+        // 落点提示能挂上去，说明这个父容器可用：留给轮盘做兜底。
+        radialParentRef = java.lang.ref.WeakReference(parent)
 
         val context =
             recentsView.context
@@ -1659,6 +1888,7 @@ object HookSwipeGesture {
             .start()
     }
 
+
     /**
      * 触摸输入入口 Hook。
      *
@@ -1678,12 +1908,41 @@ object HookSwipeGesture {
     private fun hookTouchInteractionService() {
         val candidateClassNames =
             listOf(
+                /*
+                 * 新版 Quickstep（Pixel / 类原生以及多家 OEM 定制）把 TIS 的输入处理
+                 * 搬到了 TouchInteractionHandler，onInputEvent 是 private 的，
+                 * 且不再出现在 TouchInteractionService 上。
+                 *
+                 * 这是真机上唯一真正收到整条手势事件流的方法：之前名单里没有它，
+                 * 按签名兜底时只匹配到 MotionPauseDetector.addPosition（根本不是输入入口），
+                 * 于是 INPUT_HOOKS_INSTALLED 显示成功，实际 handleInputEvent 一次都没被调用 ——
+                 * 轮盘因此完全收不到 DOWN/MOVE/UP，表现为「没反应也没有日志」。
+                 */
+                "com.android.quickstep.TouchInteractionHandler",
                 "com.android.quickstep.TouchInteractionService",
                 "com.android.quickstep.TouchInteractionService\$TISBinder",
                 "com.android.quickstep.inputconsumers.TouchInteractionInputConsumer",
                 "com.android.quickstep.TouchInteractionInputConsumer",
                 "com.android.quickstep.InputConsumerController",
-                "com.android.quickstep.util.MotionPauseDetector"
+                /*
+                 * ⚠️ 这里**不能**再列出 `InputConsumerController$InputEventReceiver`。
+                 *
+                 * 之前它被当成「更靠前的入口」加了进来，而它的 onInputEvent 方法体是：
+                 *
+                 *     listener.onInputEvent(ev);
+                 *     finishInputEvent(ev, true);   // ← 事件在这里才算被 ack
+                 *
+                 * 我们用 `param.result = null` 跳过方法体来吞事件，于是 finish 也被一起跳过：
+                 * 这条事件永远不 ack，InputDispatcher 等满 5 秒就会抛出
+                 *
+                 *     Input dispatching timed out (recents_animation_input_consumer is
+                 *     not responding. Waited 5001ms for MotionEvent)
+                 *
+                 * 因为连接建在 system_server 侧（gesture monitor），ANR 记在 system 进程上，
+                 * 用户看到的就是「进程 system 没有响应」。吞事件必须吞在
+                 * `finishInputEvent` 之下的那一层（TouchInteractionHandler.onInputEvent），
+                 * 接收器那一层只允许放行。
+                 */
             )
 
         val candidateMethodNames =
@@ -1695,7 +1954,14 @@ object HookSwipeGesture {
                     param: MethodHookParam
                 ) {
                     try {
-                        handleInputEvent(param)
+                        /*
+                         * 轮盘接管期间把事件吞掉（方法没有返回值，setResult(null)
+                         * 即跳过原方法）。否则 Launcher 会同步跑自己的上滑手势，
+                         * 表现为「最近任务卡片和轮盘同时出现」。
+                         */
+                        if (handleInputEvent(param)) {
+                            param.result = null
+                        }
                     } catch (throwable: Throwable) {
                         recoverFromGestureFailure()
 
@@ -1709,51 +1975,71 @@ object HookSwipeGesture {
 
         var installed = 0
         val hookedDescriptions = mutableListOf<String>()
+        // 同一个方法可能从「子类精确匹配」和「父类遍历」两条路各命中一次，
+        // 重复挂载会让每条事件都被处理多遍（日志里一段 down 出现三行就是这么来的）。
+        val hookedSignatures = HashSet<String>()
 
-        // 1) 按已知方法名精确匹配
+        // 1) 按已知方法名精确匹配（含父类：onInputEvent 有时声明在基类上）
         for (className in candidateClassNames) {
-            val clazz = loadOptionalClass(className) ?: continue
-
-            for (methodName in candidateMethodNames) {
-                val unhooks =
+            if (isEventReceiverClass(className)) continue
+            var clazz: Class<*>? = loadOptionalClass(className)
+            var depth = 0
+            while (clazz != null && depth < 4) {
+                val methods =
                     runCatching {
-                        HookRegistry.hookAll(
-                            clazz,
-                            methodName,
-                            callback
-                        )
-                    }.getOrNull() ?: continue
+                        clazz!!.declaredMethods.filter { method ->
+                            method.name in candidateMethodNames &&
+                                isSingleInputEventParam(method)
+                        }
+                    }.getOrNull().orEmpty()
 
-                if (unhooks > 0) {
-                    installed += unhooks
-                    hookedDescriptions +=
-                        "$className.$methodName($unhooks)"
+                for (method in methods) {
+                    val signature = signatureOf(method)
+                    if (!hookedSignatures.add(signature)) continue
+                    val ok = runCatching { HookRegistry.hookMethod(method, callback) }.isSuccess
+                    if (ok) {
+                        installed += 1
+                        hookedDescriptions +=
+                            "${method.declaringClass.simpleName}.${method.name}" +
+                                "(${method.parameterTypes[0].simpleName})"
+                    }
                 }
+                clazz = runCatching { clazz?.superclass }.getOrNull()
+                depth += 1
             }
         }
 
         // 2) 名称匹配全部落空时，按签名兜底（单参 InputEvent/MotionEvent）
         if (installed == 0) {
             for (className in candidateClassNames) {
+                /*
+                 * 只接受看起来就是输入入口的类。
+                 *
+                 * 之前不设这道闸，兜底会匹配到 MotionPauseDetector.addPosition
+                 * 之类的「恰好收 MotionEvent」的工具方法，把 installed 撑成 1，
+                 * 于是「Hook 安装成功」但事件流根本没有接上。
+                 */
+                if (!className.contains("TouchInteraction") &&
+                    !className.contains("InputConsumer")
+                ) {
+                    continue
+                }
+                // 接收器同样是禁区，理由见候选名单上的注释（吞它 = 吞掉 finishInputEvent）。
+                if (isEventReceiverClass(className)) continue
                 val clazz = loadOptionalClass(className) ?: continue
 
                 val methods =
                     runCatching {
                         clazz.declaredMethods.filter { method ->
-                            val params = method.parameterTypes
-                            params.size == 1 &&
-                                (
-                                    InputEvent::class.java
-                                        .isAssignableFrom(params[0]) ||
-                                        MotionEvent::class.java
-                                            .isAssignableFrom(params[0])
-                                    )
+                            isSingleInputEventParam(method)
                         }
                     }.getOrNull().orEmpty()
 
                 for (method in methods) {
+                    val signature = signatureOf(method)
+                    if (!hookedSignatures.add(signature)) continue
                     runCatching {
-                        XposedBridge.hookMethod(method, callback)
+                        HookRegistry.hookMethod(method, callback)
                     }.onSuccess {
                         installed += 1
                         hookedDescriptions +=
@@ -1796,19 +2082,541 @@ object HookSwipeGesture {
         )
     }
 
+    /** 只认「单个 InputEvent / MotionEvent 参数」的方法，避免挂到 `(ev, displayId)` 这类重载。 */
+    private fun isSingleInputEventParam(method: java.lang.reflect.Method): Boolean {
+        val params = method.parameterTypes
+        if (params.size != 1) return false
+        return InputEvent::class.java.isAssignableFrom(params[0]) ||
+            MotionEvent::class.java.isAssignableFrom(params[0])
+    }
+
+    private fun signatureOf(method: java.lang.reflect.Method): String =
+        "${method.declaringClass.name}#${method.name}(${method.parameterTypes[0].name})"
+
+    /**
+     * 事件接收器（`InputEventReceiver` 家族）是禁挂区。
+     *
+     * 它们的 `onInputEvent` 方法体末尾就是 `finishInputEvent(ev, handled)`：
+     * 一旦用 `param.result = null` 跳过方法体，这条事件就永远不被 ack，
+     * InputDispatcher 等满 5 秒会把 ANR 记到 system 进程上
+     * （`recents_animation_input_consumer is not responding`）。
+     */
+    private fun isEventReceiverClass(className: String): Boolean =
+        className.endsWith("InputEventReceiver") ||
+            className.contains("InputEventReceiver\$")
+
+    /** [isEventReceiverClass] 的运行时版本：按 thisObject 的继承链判断。 */
+    private fun isEventReceiverOwner(target: Any?): Boolean {
+        var clazz: Class<*>? = target?.javaClass ?: return false
+        var depth = 0
+        while (clazz != null && clazz != Any::class.java && depth < 6) {
+            if (isEventReceiverClass(clazz.name)) return true
+            clazz = runCatching { clazz.superclass }.getOrNull()
+            depth += 1
+        }
+        return false
+    }
+
+    // ===== 底角轮盘 =====
+
+    /**
+     * 轮盘只在用户显式开启时接管手势。
+     *
+     * 这里刻意不用「读不到就当关闭」：模块刚更新、Z-Flow 进程还没起来时，
+     * 跨进程读开关会失败，那样用户会看到「开关明明是开的，底角上滑却没反应」。
+     * 读不到时先按开启处理，同时在后台重试一次把真实值补回来。
+     */
+    private fun radialEnabled(context: Context?): Boolean {
+        if (context == null) return false
+        val now = SystemClock.uptimeMillis()
+        val cached = radialFlagCache
+        if (cached != null && now - radialFlagAt < FLAG_CACHE_TTL_MS) return cached
+        val value = runCatching {
+            RemoteSettings.isFeatureEnabledOrNull(context, ZFlow.KEY_RADIAL_GESTURE_ENABLE)
+        }.getOrNull()
+        if (value != null) {
+            radialFlagCache = value
+            radialFlagAt = now
+            return value
+        }
+        // 读不到：有旧值就继续用旧值，没有就乐观放行。
+        if (cached != null) return cached
+        scheduleFlagRetry(context)
+        return true
+    }
+
+    /** 后台补读一次开关，避免每条手势都卡在 Binder 上。 */
+    private fun scheduleFlagRetry(context: Context) {
+        val now = SystemClock.uptimeMillis()
+        if (now - radialFlagRetryAt < 1500L) return
+        radialFlagRetryAt = now
+        val app = context.applicationContext ?: context
+        runCatching {
+            Thread({
+                val value = runCatching {
+                    RemoteSettings.isFeatureEnabledOrNull(app, ZFlow.KEY_RADIAL_GESTURE_ENABLE)
+                }.getOrNull()
+                if (value != null) {
+                    radialFlagCache = value
+                    radialFlagAt = SystemClock.uptimeMillis()
+                    RadialTrace.log("flag resolved in background: $value")
+                }
+            }, "zflow-radial-flag").apply { isDaemon = true }.start()
+        }
+    }
+
+    /**
+     * 触发点配置（哪一侧、离底边多高）。
+     *
+     * 读失败时沿用上一次成功的值，并在 3 秒内不再重试：这个调用点就在 ACTION_DOWN
+     * 里，每条手势都撞一次不可用的 Provider 会直接拖慢输入分发。
+     */
+    private fun triggerConfig(context: Context): io.relimus.zflow.providers.RadialTriggerSettings.Config {
+        val now = SystemClock.uptimeMillis()
+        if (now < radialTriggerRetryAt) return radialTriggerConfig
+        val value = runCatching { RemoteSettings.getRadialTrigger(context) }.getOrNull()
+        if (value == null) {
+            radialTriggerRetryAt = now + 3_000L
+            RadialTrace.log(
+                "trigger config unavailable, keep " +
+                    "${radialTriggerConfig.centerXPercent},${radialTriggerConfig.centerYPercent} " +
+                    "${radialTriggerConfig.widthPercent}x${radialTriggerConfig.heightPercent}"
+            )
+            return radialTriggerConfig
+        }
+        radialTriggerConfig = value
+        return value
+    }
+
+    private fun displayBounds(context: Context): Pair<Int, Int> {
+        return runCatching {
+            val metrics = context.getSystemService(WindowManager::class.java)
+                ?.currentWindowMetrics?.bounds
+            if (metrics != null && metrics.width() > 0 && metrics.height() > 0) {
+                metrics.width() to metrics.height()
+            } else {
+                val dm = context.resources.displayMetrics
+                dm.widthPixels to dm.heightPixels
+            }
+        }.getOrElse {
+            val dm = context.resources.displayMetrics
+            dm.widthPixels to dm.heightPixels
+        }
+    }
+
+    /**
+     * ACTION_DOWN：判断这次按下是否落在**触发区域**里。
+     *
+     * 触发区是用户在设置页里摆的一块矩形（可镜像到另一侧），命中只说明「这次手势
+     * 可能属于轮盘」；真正展开还要等「明显上滑」这个条件，所以单纯点一下不会弹轮盘。
+     *
+     * 命中之后只记两件事：命中所在的一侧（决定扇形朝哪开），以及圆心位置
+     * （触发区中心）—— 展开时沿用同一份坐标，避免轮盘和手指错位。
+     * 抢输入（[InputPilfer]）不在这里做，理由见函数末尾。
+     */
+    private fun armRadialGesture(
+        context: Context?,
+        event: MotionEvent,
+        hookTarget: Any? = null,
+    ) {
+        radialUsedThisGesture = false
+        radialLaunchedThisGesture = false
+        radialRevealAttempted = false
+        radialPilferedThisGesture = false
+        radialHookTarget = hookTarget
+        radialGate.reset()
+
+        val safeContext = context
+        if (safeContext == null) {
+            RadialTrace.log("down: no context raw=(${event.rawX.toInt()},${event.rawY.toInt()})")
+            return
+        }
+        val (width, height) = displayBounds(safeContext)
+        val trigger = triggerConfig(safeContext)
+        val hit = trigger.hit(
+            x = event.rawX,
+            y = event.rawY,
+            widthPx = width.toFloat(),
+            heightPx = height.toFloat(),
+        )
+        val corner = when {
+            hit == null -> null
+            hit.leftSide -> RadialCorner.BOTTOM_LEFT
+            else -> RadialCorner.BOTTOM_RIGHT
+        }
+        val enabled = radialEnabled(safeContext)
+
+        /*
+         * 起手日志只记「离底部 15% 以内」的点，否则桌面上的日常点击会把日志刷满；
+         * 一旦命中触发区则无条件记录。屏幕尺寸和指针坐标系不一致时，
+         * 这行日志同时给出两者，避免出现「连一条日志都没有」的死角。
+         */
+        val nowAtDown = SystemClock.uptimeMillis()
+        val nearBottom = event.rawY >= height * 0.85f
+        val shouldTrace = hit != null || (nearBottom && nowAtDown - lastRadialDownTraceAt >= 200L)
+        if (shouldTrace) {
+            lastRadialDownTraceAt = nowAtDown
+            RadialTrace.log(
+                "down raw=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
+                    "screen=${width}x$height " +
+                    "area=${
+                        trigger.area(width.toFloat(), height.toFloat()).let {
+                            "(${it.left.toInt()},${it.top.toInt()})-(${it.right.toInt()},${it.bottom.toInt()})"
+                        }
+                    } mirror=${trigger.mirror} " +
+                    "enabled=$enabled corner=$corner " +
+                    "thread=${Thread.currentThread().name} ctx=${safeContext.javaClass.name}"
+            )
+        }
+
+        if (!enabled) {
+            if (hit != null) RadialTrace.log("skip: switch off")
+            return
+        }
+
+        if (hit == null || corner == null) {
+            // 起手点不在触发区：上面那行 down 日志已经带上了坐标与区域尺寸。
+            return
+        }
+
+        val slop = runCatching {
+            ViewConfiguration.get(safeContext).scaledTouchSlop.toFloat() * 2f
+        }.getOrDefault(24f).coerceAtLeast(12f)
+
+        /*
+         * 这里不再预解析桌面根视图：那是给「挂到桌面视图树」的旧兜底准备的。
+         * 现在轮盘只走悬浮窗，根视图只在真要展开时解析一次（当模糊目标）。
+         */
+        val gate = RadialGestureGate(revealSlopPx = slop)
+        gate.arm(corner, event.rawX, event.rawY)
+        radialGate = gate
+        radialOriginInsetX = hit.originInsetX
+        radialOriginInsetY = hit.originInsetY
+        RadialTrace.log(
+            "armed corner=$corner xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
+                "screen=${width}x$height slop=${slop.toInt()} " +
+                "origin=(${hit.originInsetX.toInt()},${hit.originInsetY.toInt()})"
+        )
+        // 从这里起事件归我们暂扣，必须有超时兜底：UP 丢失时不能一直扣着。
+        armRadialWatchdog()
+
+        /*
+         * 注意：这里**不**抢输入。
+         *
+         * 抢输入（pilfer）会让桌面窗口收到 ACTION_CANCEL，代价是「在触发区里的普通点击」
+         * 也不再生效 —— 桌面底部通常是 Dock 图标，把整条带子变成点不动，比轮盘本身
+         * 更难忍受。所以等真正确认「这是上滑」之后再抢，见 handleRadialMove。
+         */
+    }
+
+    /**
+     * 取桌面的根视图，**只作为高斯模糊的目标**（轮盘本身挂在独立悬浮窗上）。
+     *
+     * 展开顺序：缓存 → 桌面 Activity 的 DecorView → 手势 Handler 的视图树。
+     * 后两级都是为了「找得到就糊上」，找不到也只是不糊，不影响轮盘显示。
+     */
+    private fun resolveRadialParent(): ViewGroup? {
+        // 1) 已经解析过的根视图（展开时缓存）
+        radialParentRef?.get()?.takeIf { it.isAttachedToWindow }?.let { return it }
+        // 2) 桌面 Activity 的 DecorView：
+        //    轮盘在 DOWN 时就把事件拦下，Launcher 不会创建手势 Handler，
+        //    因此不能只依赖 activeGestureHandler 反查 mRecentsView。
+        resolveLauncherDecorView()?.let {
+            radialParentRef = java.lang.ref.WeakReference(it)
+            return it
+        }
+        // 3) 手势 Handler 的视图树（同一棵 DecorView，仅路径不同）
+        val handler = activeGestureHandler
+        if (handler != null) {
+            val resolved = runCatching {
+                val recentsView =
+                    ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView") as? View
+                val candidate = recentsView?.let {
+                    (it.rootView as? ViewGroup) ?: (it.parent as? ViewGroup)
+                }
+                candidate?.takeIf { it.isAttachedToWindow }
+            }.getOrNull()
+            if (resolved != null) {
+                radialParentRef = java.lang.ref.WeakReference(resolved)
+                return resolved
+            }
+        }
+        return null
+    }
+
+    /**
+     * 取桌面 Activity 的根视图。
+     *
+     * 轮盘需要在 Launcher 自己的窗口里画，但又不能触发 Launcher 的上滑手势，
+     * 因此不能依赖 `AbsSwipeUpHandler`（那时还没创建）。这里直接从
+     * `ActivityThread.mActivities` 里挑一个已 attach、未 paused 的 Activity，
+     * 用它的 DecorView 当父容器 —— 也就是桌面当前所在的那层窗口。
+     */
+    private fun resolveLauncherDecorView(): ViewGroup? {
+        return runCatching {
+            val activityThreadClass = Class.forName("android.app.ActivityThread")
+            val thread = XposedHelpers.callStaticMethod(activityThreadClass, "currentActivityThread")
+                ?: return@runCatching null
+            val records = XposedHelpers.getObjectField(thread, "mActivities") as? Map<*, *>
+                ?: return@runCatching null
+
+            var fallback: ViewGroup? = null
+            for (record in records.values) {
+                if (record == null) continue
+                val activity = XposedHelpers.getObjectField(record, "activity") as? android.app.Activity
+                    ?: continue
+                if (activity.isFinishing || activity.isDestroyed) continue
+                val decor = activity.window?.decorView as? ViewGroup ?: continue
+                if (!decor.isAttachedToWindow) continue
+                val paused = runCatching {
+                    XposedHelpers.getBooleanField(record, "paused")
+                }.getOrDefault(false)
+                if (paused) continue
+                if (decor.hasWindowFocus()) return@runCatching decor
+                if (fallback == null) fallback = decor
+            }
+            fallback
+        }.getOrNull()
+    }
+
+    /** @return true 表示事件已被轮盘消费，调用方应立即返回。 */
+    private fun handleRadialMove(context: Context?, event: MotionEvent): Boolean {
+        if (RadialMenuController.isShowing) {
+            /*
+             * 悬浮窗可能来自上一轮没正常收尾的手势（UP 丢失）。
+             * 那种情况下 radialGate 已经 idle —— 如果这里继续无条件吞 MOVE，
+             * 事件流就永远停在我们手里，Launcher 的输入 consumer 会被判超时。
+             * 所以「本次手势有没有 gate」才是能否接管事件的唯一依据。
+             */
+            if (!radialGate.isActive) {
+                RadialTrace.log("move: menu showing without gate, dismiss stale menu")
+                RadialMenuController.dismiss(immediate = true)
+                return false
+            }
+            armRadialWatchdog()
+            RadialMenuController.updatePointer(event.rawX, event.rawY)
+            return true
+        }
+        if (!radialGate.isActive) return false
+        if (!radialGate.shouldReveal(event.rawX, event.rawY)) return false
+
+        val safeContext = context ?: return false
+        val firstAttempt = !radialRevealAttempted
+        if (firstAttempt) {
+            radialRevealAttempted = true
+            RadialTrace.log(
+                "reveal try xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
+                    "down=(${radialGate.downX.toInt()},${radialGate.downY.toInt()}) " +
+                    "handler=${identity(activeGestureHandler)}"
+            )
+        }
+
+        /*
+         * 桌面根视图只用来做高斯模糊的背景，不参与轮盘挂载：
+         * 拿不到就只是不糊桌面，轮盘照常开在自己的悬浮窗里。
+         */
+        val backdropRoot = resolveRadialParent()
+        val (width, height) = displayBounds(safeContext)
+        val corner = radialGate.corner ?: return false
+
+        /*
+         * 确认是轮盘手势了，现在把输入从桌面窗口手里抢过来。
+         *
+         * 放在这里而不是 DOWN：抢输入会让桌面收到 CANCEL，等于把触发区里的
+         * 「普通点击」一起废掉（底部是 Dock，会很痛）。等位移已经证明这是上滑，
+         * 再抢就不会误伤点击，而桌面此时最多只是跟着挪了几个像素。
+         */
+        if (!radialPilferedThisGesture) {
+            radialPilferedThisGesture = true
+            // SparseArray 以 displayId 为下标取 InputResource，取错就找不到 monitor。
+            val displayId = runCatching { safeContext.display?.displayId }
+                .getOrNull() ?: Display.DEFAULT_DISPLAY
+            val pilfered = runCatching { InputPilfer.pilfer(radialHookTarget, displayId) }
+                .getOrDefault(false)
+            RadialTrace.log("pilfer=${if (pilfered) "ok" else "unavailable"} display=$displayId")
+        }
+
+        val revealStartedAt = SystemClock.uptimeMillis()
+        val shown = runCatching {
+            RadialMenuController.reveal(
+                safeContext,
+                backdropRoot,
+                corner,
+                width,
+                height,
+                radialOriginInsetX,
+                radialOriginInsetY,
+            )
+        }.onFailure {
+            XLog.e("$DEBUG_TAG radial reveal failed", it)
+            RadialTrace.log("reveal threw ${it.javaClass.simpleName}:${it.message}")
+        }.getOrDefault(false)
+        /*
+         * reveal 是同步跑在主线程的输入回调里的，包含跨进程取名单（可能把
+         * Z-Flow 进程拉起来）、解析图标、解码 Bitmap 和 addView。
+         * 一旦这里耗时过长，事件会在 InputDispatcher 侧堆积，
+         * 同样会走到「system 没有响应」。超过一帧就留痕，方便定位。
+         */
+        val revealCost = SystemClock.uptimeMillis() - revealStartedAt
+        if (revealCost >= 32L) {
+            RadialTrace.log("reveal slow: ${revealCost}ms shown=$shown")
+        }
+
+        if (!shown) {
+            // 没有收藏应用 / Provider 拒绝：本次手势不再尝试，退回原本行为。
+            val reason = RadialMenuController.lastFailureReason
+            RadialTrace.log("reveal abort: $reason")
+            maybeExplainRadialFailure(safeContext, reason)
+            radialGate.reset()
+                return false
+        }
+        radialGate.markRevealed()
+        radialUsedThisGesture = true
+        // 状态切到 REVEALED，看门狗改用更宽松的「展开后」超时。
+        armRadialWatchdog()
+        RadialMenuController.updatePointer(event.rawX, event.rawY)
+        return true
+    }
+
+    /** @return true 表示这次手势由轮盘接管，原本的落点提示与启动流程都应跳过。 */
+    private fun handleRadialUp(context: Context?): Boolean {
+        if (!radialGate.isActive && !RadialMenuController.isShowing) return false
+        val revealed = radialGate.isRevealed || RadialMenuController.isShowing
+        if (radialGate.isActive && !revealed) {
+            // 热区按下了但没有越过展开阈值：说明方向/位移被 shouldReveal 挡掉。
+            RadialTrace.log(
+                "up: armed but never revealed " +
+                    "down=(${radialGate.downX.toInt()},${radialGate.downY.toInt()})"
+            )
+        }
+        commitRadialSelection(context)
+        return revealed
+    }
+
+    /**
+     * 轮盘展不开且是「用户没配收藏」时，用一次 Toast 说明原因。
+     *
+     * 这条路径原本是纯静默的：用户从底角上滑看到没有任何反应，
+     * 完全不知道是没配置还是功能坏了。每个进程只提示一次。
+     */
+    private fun maybeExplainRadialFailure(context: Context, reason: String?) {
+        if (reason == null || !reason.startsWith("empty_favorites")) return
+        if (radialEmptyToastShown) return
+        radialEmptyToastShown = true
+        runCatching {
+            android.widget.Toast.makeText(
+                context,
+                "轮盘里还没有应用：请先在 Z-Flow 里添加「小窗收藏应用」",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }.onFailure {
+            RadialTrace.log("toast failed ${it.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * 提交当前选中项。
+     *
+     * ⚠️ 必须幂等：Android 17 上 ACTION_UP 不一定送达输入 Hook，
+     * 因此 [handleGestureEnd] 还要再调一次。真正的去重由 [RadialGestureGate.finish] 完成。
+     */
+    private fun commitRadialSelection(context: Context?) {
+        val item = RadialMenuController.currentItem()
+        val wasShowing = RadialMenuController.isShowing
+        RadialMenuController.dismiss()
+        // 手势已有终态：退场动画还在跑，看门狗不该在这时把它切成立即移除。
+        disarmRadialWatchdog()
+        if (!radialGate.finish()) return
+        if (item == null) {
+            if (wasShowing) RadialTrace.log("commit: no selection (cancelled)")
+            return
+        }
+        val safeContext = context ?: resolveLauncherContext(activeGestureHandler)
+        if (safeContext == null) {
+            RadialTrace.log("commit: no launcher context pkg=${item.packageName}")
+            return
+        }
+        RadialTrace.log("commit: pkg=${item.packageName} user=${item.userId}")
+        launchRadialSelection(safeContext, item)
+    }
+
+    /** 从被 hook 的 Handler 上取 Launcher 的 Activity Context（广播鉴权需要真实调用方 UID）。 */
+    private fun resolveLauncherContext(handler: Any?): Context? {
+        if (handler == null) return null
+        return runCatching {
+            val recentsView = ObjectUtil.getObjectUntilSuperclass(handler, "mRecentsView")
+                ?: return null
+            XposedHelpers.callMethod(recentsView, "getContext") as? Context
+        }.getOrNull()
+    }
+
+    private fun launchRadialSelection(context: Context, item: RadialItem) {
+        runCatching {
+            val intent = StartFreeformReceiver.newIntent(
+                context = context,
+                packageName = item.packageName,
+                userId = item.userId,
+                miniMode = false,
+                source = StartFreeformReceiver.SOURCE_RADIAL,
+            )
+            context.sendBroadcast(intent)
+            radialLaunchedThisGesture = true
+            debugLog("RADIAL_LAUNCH pkg=${item.packageName} user=${item.userId}")
+        }.onFailure {
+            XLog.e("$DEBUG_TAG radial launch failed", it)
+        }
+    }
+
+    /** 清理轮盘运行态（新手势、异常恢复都走这里）。 */
+    private fun clearRadialState() {
+        radialUsedThisGesture = false
+        radialLaunchedThisGesture = false
+        radialRevealAttempted = false
+        radialPilferedThisGesture = false
+        radialHookTarget = null
+        radialGate.reset()
+        disarmRadialWatchdog()
+        RadialMenuController.dismiss(immediate = true)
+    }
+
+    /**
+     * 重挂看门狗。活跃手势每来一条事件就顺延一次，
+     * 因此只有「事件流真的断了」才会被判超时，用户按住慢慢挑不会被误伤。
+     */
+    private fun armRadialWatchdog() {
+        val timeout = if (radialGate.isRevealed) {
+            RADIAL_REVEALED_TIMEOUT_MS
+        } else {
+            RADIAL_ARMED_TIMEOUT_MS
+        }
+        runCatching {
+            radialWatchdogHandler.removeCallbacks(radialWatchdog)
+            radialWatchdogHandler.postDelayed(radialWatchdog, timeout)
+        }
+    }
+
+    private fun disarmRadialWatchdog() {
+        runCatching { radialWatchdogHandler.removeCallbacks(radialWatchdog) }
+    }
+
+    /**
+     * 输入事件的统一入口：先做「只处理一次」与「绝不在接收器上吞事件」两道闸，
+     * 再交给 [processInputEvent] 跑轮盘状态机。
+     *
+     * @return true 表示事件已被轮盘消费，调用方必须阻止 Launcher 继续处理。
+     */
     private fun handleInputEvent(
         param: XC_MethodHook.MethodHookParam
-    ) {
+    ): Boolean {
         // Android 17 起入口方法参数可能声明为 InputEvent，
         // 也可能出现在非首位参数上，这里逐个参数寻找 MotionEvent。
         val event =
             param.args
                 ?.firstOrNull { it is MotionEvent }
                 as? MotionEvent
-                ?: return
+                ?: return false
 
-        val action =
-            event.actionMasked
+        val action = event.actionMasked
 
         if (
             action != MotionEvent.ACTION_DOWN &&
@@ -1816,14 +2624,57 @@ object HookSwipeGesture {
             action != MotionEvent.ACTION_UP &&
             action != MotionEvent.ACTION_CANCEL
         ) {
-            return
+            return false
         }
 
+        /*
+         * 同一个物理事件会被多个入口各投递一次（TIS 的 handler、输入接收器…）。
+         * 状态机只能跑一次：跑第二次时，第一条回调刚设好的 ARMED 会被当成
+         * 「上一轮的残留」清掉（日志里的 "down: reap stale gesture state=ARMED" 就是它），
+         * 顺手还会 dismiss 掉刚建好的悬浮窗。
+         */
+        val eventKey = event.eventTime * 31L + event.downTime * 7L + action
+        if (eventKey == lastProcessedEventKey) return lastProcessedEventHandled
+
+        /*
+         * 兜底闸：即便候选名单里又混进了事件接收器，这里也绝不吞。
+         * 吞掉它的方法体等于吞掉 `finishInputEvent`，5 秒后就是
+         * 「进程 system 没有响应（recents_animation_input_consumer）」。
+         */
+        if (isEventReceiverOwner(param.thisObject)) {
+            if (!receiverSwallowBlockedLogged) {
+                receiverSwallowBlockedLogged = true
+                RadialTrace.log(
+                    "skip swallow: hook owner ${param.thisObject?.javaClass?.name} " +
+                        "owns finishInputEvent"
+                )
+            }
+            return false
+        }
+
+        // 首次见到某个入口时记一行，方便对照「到底是哪一层在收事件」。
+        val owner = param.thisObject?.javaClass?.name ?: param.method?.declaringClass?.name
+        if (owner != null && loggedHookOwners.add(owner)) {
+            RadialTrace.log("hook owner=$owner method=${param.method?.name}")
+        }
+
+        val handled = processInputEvent(param, event, action)
+        lastProcessedEventKey = eventKey
+        lastProcessedEventHandled = handled
+        return handled
+    }
+
+    private fun processInputEvent(
+        param: XC_MethodHook.MethodHookParam,
+        event: MotionEvent,
+        action: Int,
+    ): Boolean {
         // thisObject 不再保证是 TouchInteractionService 本身
         // （可能是 TISBinder / InputConsumer 等内部对象），
         // 因此从多个来源解析可用的 Context。
         val ctx = cachedSwipeContext?.get()
             ?: resolveContext(param.thisObject)
+            ?: appContext()
 
         if (ctx != null) {
             cachedSwipeContext = java.lang.ref.WeakReference(ctx)
@@ -1834,6 +2685,22 @@ object HookSwipeGesture {
             MotionEvent.ACTION_DOWN -> {
                 inputDownCount += 1L
                 releaseInDropTarget = false
+
+                /*
+                 * 新的一条输入序列开始，先把上一轮的残留清干净。
+                 *
+                 * armRadialGesture 只会 reset 状态机，不会摘悬浮窗；而 UP 一旦丢失，
+                 * 悬浮窗会一直挂在屏幕上、radialGate 也一直 active，
+                 * 之后每条 MOVE 都会被当成「本轮轮盘」吞掉 —— 这就是
+                 * 「进程 system 没有响应」的来源。
+                 */
+                if (radialGate.isActive || RadialMenuController.isShowing) {
+                    RadialTrace.log(
+                        "down: reap stale gesture state=${radialGate.state} " +
+                            "showing=${RadialMenuController.isShowing}"
+                    )
+                    clearRadialState()
+                }
 
                 /*
                  * ACTION_DOWN 表示开始了一条新的输入序列。
@@ -1859,17 +2726,56 @@ object HookSwipeGesture {
                     LandscapeSwipeGestureHandler.reset()
                     gestureDisplayMode = GestureDisplayMode.NONE
                 }
+
+                // 底角轮盘：只记录触发区命中，是否展开留给 MOVE 决定。
+                armRadialGesture(ctx, event, param.thisObject)
+
+                /*
+                 * 热区命中就地吞掉这条手势。
+                 *
+                 * 只要把 DOWN 放给 Launcher，它就会自己跑一遍上滑手势，
+                 * 轮盘会和最近任务卡片同时出现在屏幕上；而一旦 Launcher
+                 * 开始跑手势，就没有干净的撤销手段了。
+                 */
+                if (radialGate.isActive) return true
             }
 
             MotionEvent.ACTION_MOVE -> {
+                // 轮盘展开后，指针只喂给轮盘，不再走落点提示的命中测试。
+                if (handleRadialMove(ctx, event)) return true
+
+                if (radialGate.isActive) {
+                    /*
+                     * 状态还停在 ARMED、没到展开条件。
+                     *
+                     * 位移一旦越过判定阈值却又不满足「斜向上」
+                     * （典型是沿底边横滑的返回手势、以及从底角往下拖），
+                     * 就必须立刻放手。继续扣着这条 MOVE 的代价不是「手势失灵」，
+                     * 而是 Launcher 的 recents_animation_input_consumer 永远等不到
+                     * 后续事件，InputDispatcher 等满 5 秒后把 ANR 记到 system 进程上。
+                     */
+                    if (radialGate.shouldAbandon(event.rawX, event.rawY)) {
+                        RadialTrace.log(
+                            "abandon: direction rejected " +
+                                "xy=(${event.rawX.toInt()},${event.rawY.toInt()}) " +
+                                "down=(${radialGate.downX.toInt()},${radialGate.downY.toInt()})"
+                        )
+                        clearRadialState()
+                        return false
+                    }
+                    // 位移还不到阈值：继续暂扣（手指刚动，事件极少），并顺延看门狗。
+                    armRadialWatchdog()
+                    return true
+                }
+
                 val target =
-                    hintView ?: return
+                    hintView ?: return false
 
                 if (
                     !dropTargetShowing ||
                     !target.isAttachedToWindow
                 ) {
-                    return
+                    return false
                 }
 
                 when (gestureDisplayMode) {
@@ -1888,6 +2794,14 @@ object HookSwipeGesture {
             }
 
             MotionEvent.ACTION_UP -> {
+                /*
+                 * 一旦在 DOWN 阶段吞掉了事件，这条手势的 UP 也必须吞掉：
+                 * Launcher 从没见过 DOWN，突然收到一个孤立 UP 更容易出问题。
+                 */
+                val wasHandled = radialGate.isActive || RadialMenuController.isShowing
+                if (handleRadialUp(ctx)) return true
+                if (wasHandled) return true
+
                 val target = hintView
 
                 val inside =
@@ -1933,9 +2847,15 @@ object HookSwipeGesture {
             }
 
             MotionEvent.ACTION_CANCEL -> {
+                val consumed = radialGate.isActive || RadialMenuController.isShowing
                 releaseInDropTarget = false
+                RadialMenuController.dismiss()
+                radialGate.finish()
+                        disarmRadialWatchdog()
+                if (consumed) return true
             }
         }
+        return false
     }
 
     /**
@@ -1963,8 +2883,8 @@ object HookSwipeGesture {
             }
         }
 
-        // 常见的 Context 字段名
-        for (fieldName in listOf("mContext", "context", "mService")) {
+        // 常见的 Context 字段名（mContainer 是 AbsSwipeUpHandler 持有的 Launcher Context）
+        for (fieldName in listOf("mContext", "context", "mService", "mContainer")) {
             runCatching {
                 val value =
                     XposedHelpers.getObjectField(target, fieldName)
@@ -1995,6 +2915,26 @@ object HookSwipeGesture {
         return null
     }
 
+    /**
+     * 兜底 Context：当前进程的 Application。
+     *
+     * `TouchInteractionHandler` 本身不是 Context，也没有直接持有 Context 字段
+     * （构造参数里的 Context 没有落成成员），第一次 DOWN 时可能拿不到 Context，
+     * 于是轮盘会静默跳过整条手势。Launcher 进程的 Application 足够用来取
+     * 屏幕尺寸、density、ContentResolver 与 PackageManager。
+     */
+    private fun appContext(): Context? {
+        appContextRef?.get()?.let { return it }
+        val resolved = runCatching {
+            XposedHelpers.callStaticMethod(
+                Class.forName("android.app.ActivityThread"),
+                "currentApplication"
+            ) as? Context
+        }.getOrNull() ?: return null
+        appContextRef = java.lang.ref.WeakReference(resolved)
+        return resolved
+    }
+
     private fun recoverFromGestureFailure() {
         debugLog(
             "RECOVER_ENTER " +
@@ -2003,6 +2943,8 @@ object HookSwipeGesture {
 
         gestureGeneration += 1L
         activeGestureHandler = null
+
+        clearRadialState()
 
         val activeView =
             hintView

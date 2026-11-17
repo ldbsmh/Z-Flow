@@ -36,6 +36,7 @@ Z-Flow 的小窗内核**固定为 NC 引擎**（设置 → 启动与触发 → �
 | 桌面长按图标开小窗 | `popup_freeform_enable`，HookLauncher → `SOURCE_POPUP` |
 | **多任务卡片上滑开小窗** | HookSwipeGesture → `SOURCE_RECENT_SWIPE`，携带被上滑卡片的 `taskId`；引擎从最近任务认领，按包名校验防任务号复用 |
 | **通知栏小窗按钮** | `notify_freeform`，HookNotificationAction → `SOURCE_NOTIFICATION`；`openNotification` 保留通知的着陆 Activity；**入口受 Z-Flow 通知白名单（Room `notification_apps`）约束，与经典内核共用同一条链路** |
+| **底角上滑轮盘** | `radial_gesture_enable`，Launcher 手势 hook → `SOURCE_RADIAL`；从可配置的底角触发区斜向上滑，三环最多 13 个应用，松手即以小窗打开 |
 | 侧边栏快捷应用 | Z-Flow 自己的悬浮侧边栏选应用后走统一链路 |
 | 开放 API | `open_api_zh-Hans.md` 的两个入口，`FreeformService` 里有 NC 分支 |
 
@@ -57,6 +58,26 @@ Z-Flow 的小窗内核**固定为 NC 引擎**（设置 → 启动与触发 → �
   `MainHook.dispatch()`（经典入口）。踩过的坑：APK 里有 `module.prop` 时 LSPosed
   忽略 `assets/xposed_init`，经典入口静默失效。排查：`adb logcat -s ZFlowMini`。
 
+### 1.4 底角上滑轮盘（从 `feat/radial-gesture` 合回）
+
+NC 的角落扇形菜单已删，斜滑菜单由 Z-Flow 自己的轮盘承担：
+
+| 环节 | 实现 |
+|---|---|
+| 触发 | Launcher 的 `TouchInteractionHandler.onInputEvent` 里起手落在触发区内（默认右下角 20%×12%，可镜像到左侧）→ 斜向上滑越过 slop 才展开 |
+| 展开 | 独立 overlay 窗口（type 2006），背景真高斯模糊 + 圆心径向渐变；三环 3+4+6 最多 13 格 |
+| 抢占 | 确认是上滑后调 `InputMonitorCompat.pilferPointers()`，桌面不再跟着手势翻页 |
+| 名单 | `RadialAppsStore`（有序 `pkg|userId`）→ 空则退回侧边栏应用 → 再空取最近任务前 6 个 |
+| 提交 | 松手取「真的选过」的格子 → `StartFreeformReceiver(source=radial)` → `FreeformRequestHandler` → NC 引擎开窗 |
+| 安全 | 看门狗（未展开 2s / 已展开 6s 无事件）清场；只挂单参数 `InputEvent` 的精确方法，`InputEventReceiver` 家族禁挂 |
+
+设置项在「启动与触发 → 桌面与手势」：上滑轮盘开关（默认开启）、触发区域（四滑杆 + 镜像）、
+轮盘应用（勾选顺序即排列顺序）。开关缺省值必须同时改 `settings.xml` 与
+`NotificationSettingsProvider.FEATURE_FLAG_DEFAULTS`，否则设置页显示与 Launcher 读到的值会打架。
+
+真机验证（2026-11-17）：`reveal ok corner=BOTTOM_RIGHT count=6 rings=2 shares=[2,4]`，
+选 Telegram 后任务为 `mode=freeform`，小窗正常浮在桌面上。
+
 ## 2. 已接入、待真机复验 🧪
 
 代码完成、编译安装通过（**改引擎代码后要重载 SystemUI 才生效**）：
@@ -66,7 +87,7 @@ Z-Flow 的小窗内核**固定为 NC 引擎**（设置 → 启动与触发 → �
 | **多迷你窗并存** | 连开多个小窗同时挂着（`pinned` 列表），向下堆叠错开（`MINI_CASCADE`）；数量上限为引擎默认 2 |
 | 贴边图标 / 滑底渐隐 | 贴边是应用图标；拖到底渐隐、无叉号 |
 | 原生设置镜像 6 项 | `nc_*` 开关改完广播给 SystemUI 立即重拉；关「引擎总开关」后开窗回退经典内核 |
-| **本轮扇区删除后的引擎** | 角落斜滑不再呼出任何菜单；小窗控制条、迷你窗、贴边、通知开窗全部正常（回归） |
+| **扇区删除后的引擎** | 引擎侧不再有角落斜滑；斜滑由 Z-Flow 轮盘接管（见 1.4），小窗控制条、迷你窗、贴边、通知开窗正常 |
 
 ## 3. 已接入的设置项
 
@@ -107,7 +128,7 @@ Z-Flow 的小窗内核**固定为 NC 引擎**（设置 → 启动与触发 → �
 
 | 删除项 | 理由 |
 |---|---|
-| **角落扇形菜单全套**（FanView/HotspotView/CornerGesture/快捷操作面板） | 斜向滑动呼出的应用扇区与 Z-Flow 的轮盘（在 Z-Flow 项目的**另一个分支**实现）高度拟合；连同扇区专属的快捷操作（Wi-Fi/免打扰/截屏/录屏/亮度/音量/媒体控制，`WindowQuickHost` + `QuickActionCatalog`）、热区参数（`Config` 里 heat/distance/radius/icon/fanCount 等 10 项）、`LauncherGuard`（Pixel Launcher hook）一并移除 |
+| **角落扇形菜单全套**（FanView/HotspotView/CornerGesture/快捷操作面板） | 斜向滑动呼出的应用扇区与 Z-Flow 自己的轮盘高度拟合（轮盘来自 `feat/radial-gesture`，本轮已合回 `import`）；连同扇区专属的快捷操作（Wi-Fi/免打扰/截屏/录屏/亮度/音量/媒体控制，`WindowQuickHost` + `QuickActionCatalog`）、热区参数（`Config` 里 heat/distance/radius/icon/fanCount 等 10 项）、`LauncherGuard`（Pixel Launcher hook）一并移除 |
 | **外观设置 8 项接入**（`WindowSettings` Bundle 通道、`SETTINGS` 指令、`dockStyle`/`maxWindows` extra），以及设置页里对应的 8 个条目 | 引擎已有长按调整大小；尺寸/比例/变暗/贴边样式交回引擎默认值，设置项留着也是假开关 |
 | **通知点击接管**（`NotificationWindow`，从未安装的死代码） | Z-Flow 自己的通知钩子（带白名单）已覆盖 |
 | **录屏 QS 磁贴适配**（`WindowTools`） | 只服务于扇区的「录屏」快捷操作 |

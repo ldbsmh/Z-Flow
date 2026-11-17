@@ -13,6 +13,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import io.relimus.zflow.R
 import io.relimus.zflow.databinding.ActivityChooseAppsBinding
+import io.relimus.zflow.providers.RadialAppsStore
 import io.relimus.zflow.utils.cast
 
 /**
@@ -53,9 +54,15 @@ class ChooseAppsActivity : AppCompatActivity() {
                 ChooseAppsViewModel.TYPE_LANDSCAPE -> R.string.label_landscape_apps
                 ChooseAppsViewModel.TYPE_NOTIFICATION -> R.string.label_notification_apps
                 ChooseAppsViewModel.TYPE_TRUSTED -> R.string.label_trusted_callers
+                ChooseAppsViewModel.TYPE_RADIAL -> R.string.label_radial_apps
                 else -> R.string.label_floating_apps
             }
         )
+        supportActionBar?.subtitle = if (type == ChooseAppsViewModel.TYPE_RADIAL) {
+            getString(R.string.radial_apps_hint, RadialAppsStore.MAX_ITEMS)
+        } else {
+            null
+        }
 
         viewModel.state.observe(this) { state ->
             when (state) {
@@ -100,7 +107,13 @@ class ChooseAppsActivity : AppCompatActivity() {
 
         renderedApps = ArrayList(state.allApps)
         binding.recyclerApps.layoutManager = LinearLayoutManager(this)
-        adapter = AppsRecyclerAdapter(renderedApps, viewModel, state.selected, type)
+        adapter = AppsRecyclerAdapter(
+            allAppsList = renderedApps,
+            viewModel = viewModel,
+            selectedKeys = state.selected,
+            type = type,
+            maxSelection = if (type == ChooseAppsViewModel.TYPE_RADIAL) RadialAppsStore.MAX_ITEMS else 0,
+        )
         binding.recyclerApps.adapter = adapter
     }
 
@@ -111,6 +124,11 @@ class ChooseAppsActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.menu_choose_apps, menu)
+        // 轮盘只有 6 格，「全选」会得到一个「勾满但只存了 6 个」的错觉，直接不给。
+        if (viewModel.type == ChooseAppsViewModel.TYPE_RADIAL) {
+            menu.findItem(R.id.choose_all)?.isVisible = false
+            menu.findItem(R.id.choose_all_cancel)?.isVisible = false
+        }
         menu.findItem(R.id.app_bar_search)?.actionView.cast<SearchView>()?.setOnQueryTextListener(
             object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String): Boolean = false

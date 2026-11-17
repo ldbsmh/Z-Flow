@@ -11,7 +11,7 @@
 | 窗口外观 | SystemUI 里自绘窗口框（`FreeformWindow`） | 系统窗口 + SystemUI 控件层（贴边图标、迷你窗、底栏关闭区） |
 | 跨进程协议 | AIDL `IFreeformManager` | 广播 + Binder 帧通道（`Wire`，协议 16） |
 | Hook 框架 | 经典 Xposed API 82 | libxposed API 101 |
-| 入口 | 侧边栏 / 磁贴 / 通知 / 桌面长按 | 保留 Z-Flow 入口，另带 NC 自有的角落扇区 |
+| 入口 | 侧边栏 / 磁贴 / 通知 / 桌面长按 | 保留 Z-Flow 入口，斜滑改由 Z-Flow 轮盘承担（`docs/radial-gesture.md`） |
 
 ## 结构
 
@@ -164,8 +164,8 @@ ClassLoader，桌面里的类一个都找不到。
 
 **已删除（与 Z-Flow 高度拟合，2026-11 精简）**：角落扇形菜单全套
 （`FanView`/`HotspotView`/`CornerGesture`/`LauncherGuard`/快捷操作面板
-`AppList`+`WindowQuickHost`+`QuickActionCatalog`）——扇区手势由 Z-Flow 自己的轮盘
-（另一个分支）承担；`NotificationWindow`（死代码）、`WindowTools`（扇区录屏磁贴）、
+`AppList`+`WindowQuickHost`+`QuickActionCatalog`）——斜滑手势由 Z-Flow 自己的轮盘承担
+（`feat/radial-gesture` 已合回，见 `docs/radial-gesture.md`）；`NotificationWindow`（死代码）、`WindowTools`（扇区录屏磁贴）、
 `LongBackGesture`/`BackSwipe`/`BackHandoffState`（引擎零引用）、
 `DemoActivity`/`DiagnosticActivity`/`TaskTools`（无声明演示组件）。
 
@@ -331,7 +331,7 @@ NC 引擎自己有一套 `corner` 偏好（`Config.java`），SystemUI 宿主启
    开窗会静默回退到经典虚拟屏（关掉「NC 引擎总开关」也是这条路径）；内核选择项已删除，
    没有「切回经典」的手动开关。
 3. 引擎总开关已单独暴露（`nc_engine_enabled`）；角落扇区已整体删除
-   （斜滑菜单由 Z-Flow 另一分支的轮盘承担）。
+   （斜滑菜单由 Z-Flow 自己的轮盘承担，见 `docs/radial-gesture.md`）。
 4. 真机未验证：`Wire` 协议、`WindowEngine` 的 WMS Hook、SystemUI 宿主在当前 ROM 上的可用性。
 
 ## 构建

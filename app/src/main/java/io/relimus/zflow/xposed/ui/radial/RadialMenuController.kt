@@ -1,0 +1,558 @@
+package io.relimus.zflow.xposed.ui.radial
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Shader
+import android.graphics.drawable.Drawable
+import android.net.Uri
+import android.os.Bundle
+import android.view.View
+import io.relimus.zflow.providers.FreeformAppsProvider
+import io.relimus.zflow.providers.ProviderAccess
+import java.lang.ref.WeakReference
+import java.util.Collections
+
+/**
+ * 把轮盘接到 Launcher 视图树上，并负责取数据、取图标、交出选中项。
+ *
+ * 分工刻意做得比较薄：几何在 [RadialGeometry]，动画曲线在 [RadialMotion]，
+ * 状态机在 [RadialGestureGate]，这里只做「取数据 + 挂视图 + 返回选中项」。
+ * 任何一步失败都返回 null/false，让调用方安全退回 Launcher 原本的手势。
+ */
+internal object RadialMenuController {
+
+    /** 图标缓存上限；被 hook 的 Launcher 进程长期存活，必须封顶。 */
+    private const val ICON_CACHE_LIMIT = 24
+
+    /**
+     * 兜底名单最多显示几个最近任务。
+     *
+     * 用户没配置名单时才走这条路径。这时塞满三层（13 个）等于把一屏陌生应用
+     * 摊在手指前面，反而更难选；6 个（两环）既够用也不会让人不知所措。
+     */
+    private const val RECENT_FALLBACK_LIMIT = 6
+
+    /** 不该出现在轮盘里的包名：模块自己、系统 UI、桌面。 */
+    private val IGNORED_PACKAGES = setOf(
+        "io.relimus.zflow",
+        "com.android.systemui",
+        "com.google.android.apps.nexuslauncher",
+        "com.android.launcher3",
+    )
+
+    private var view: RadialMenuView? = null
+    private var windowRef: WeakReference<android.view.WindowManager>? = null
+
+    /** 展开批次号：后台补图标时校验，丢弃上一次窗口的过期结果。 */
+    @Volatile
+    private var iconGeneration = 0
+
+    /** 实际生效的窗口类型，仅用于诊断（见 [attach] 里的选择顺序）。 */
+    private var windowType = android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    private var items: List<RadialItem> = emptyList()
+    private val hostLocation = IntArray(2)
+
+    private val iconCache = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Bitmap>(ICON_CACHE_LIMIT, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>): Boolean {
+                if (size > ICON_CACHE_LIMIT) {
+                    eldest.value.recycle()
+                    return true
+                }
+                return false
+            }
+        }
+    )
+
+    val isShowing: Boolean
+        get() = view?.isAttachedToWindow == true
+
+    /**
+     * 上一次 [reveal] 失败的原因，仅用于诊断日志。
+     *
+     * 轮盘失败时一律静默退回原本手势，若不留这个字段，
+     * 真机上只能看到「没反应」，无法判断是名单为空还是 Provider 被拒。
+     */
+    var lastFailureReason: String? = null
+        private set
+
+    /**
+     * 展开轮盘。
+     *
+     * 轮盘**只挂在自己的悬浮窗上**。以前还留了「悬浮窗失败就挂到桌面视图树」的兜底，
+     * 已经删掉：那条路只在桌面/最近任务前台时可见（从第三方应用上滑会被挡住），
+     * 而且模糊会连轮盘一起糊掉 —— 排查时还分不清看到的是哪条路。
+     * 现在悬浮窗挂不上就直接返回 false，表现为「轮盘不出来」，一眼可辨。
+     *
+     * @param backdropRoot 桌面根视图，仅作为高斯模糊的目标（不参与挂载）。
+     * @return false 表示无法展开（没有条目 / 悬浮窗挂不上），调用方应退回原本手势。
+     */
+    fun reveal(
+        context: Context,
+        backdropRoot: View?,
+        corner: RadialCorner,
+        widthPx: Int,
+        heightPx: Int,
+        originInsetXPx: Float = Float.NaN,
+        originInsetYPx: Float = Float.NaN,
+    ): Boolean {
+        lastFailureReason = null
+        dismiss(immediate = true)
+
+        val favorites = loadFavorites(context)
+        if (favorites.isEmpty()) {
+            // loadFavorites 已经在内部把具体原因写进 lastFailureReason，
+            // 这里只兜住「确实一条都没配」的情况。
+            if (lastFailureReason == null) lastFailureReason = "no_favorites"
+            return false
+        }
+        val count = favorites.size.coerceAtMost(RadialLayoutSpec.MAX_ITEMS)
+
+        /*
+         * 圆心跟着触发区走：调用方传的是「圆心到依附边 / 到屏幕底边」的距离。
+         * 两个值都没给（NaN）时才退回旧的「贴角」默认值。
+         */
+        val density = context.resources.displayMetrics.density
+        val fallbackInset = RadialLayoutSpec.CORNER_INSET_DP * density
+        val insetX = originInsetXPx.takeIf { it.isFinite() && it >= 0f } ?: fallbackInset
+        val insetY = originInsetYPx.takeIf { it.isFinite() && it >= 0f } ?: fallbackInset
+
+        val fitted = RadialLayoutSpec.fit(
+            widthPx = widthPx,
+            heightPx = heightPx,
+            density = density,
+            itemCount = count,
+            originInsetXPx = insetX,
+            originInsetYPx = insetY,
+        )
+        val placed = RadialGeometry.layout(
+            corner = corner,
+            width = widthPx.toFloat(),
+            height = heightPx.toFloat(),
+            radius = fitted.radius,
+            itemCount = count,
+            originInsetX = fitted.originInsetX,
+            originInsetY = fitted.originInsetY,
+            rings = fitted.rings,
+            ringStep = fitted.ringStep,
+            shares = fitted.shares.toIntArray(),
+        )
+        if (placed.isEmpty) {
+            lastFailureReason = "empty_layout count=$count"
+            return false
+        }
+
+        val iconSize = (fitted.iconDiameter * RadialLayoutSpec.ICON_INSET_RATIO)
+            .toInt()
+            .coerceAtLeast(1)
+        /*
+         * 先挂上「有格子、没图标」的版本，图标在后台线程补。
+         *
+         * 三环最多 13 个应用，逐个 getApplicationIcon + 裁圆 + 解码在输入回调里
+         * 同步跑要上百毫秒，事件会在 InputDispatcher 侧堆积（之前 ANR 的成因之一）。
+         * 白圆盘先出来，图标随后落位，观感上只是「图标稍晚一点出现」。
+         */
+        val chosen = favorites.take(count)
+        val placeholders = chosen.map { favorite ->
+            RadialItem(
+                packageName = favorite.packageName,
+                userId = favorite.userId,
+                label = favorite.label,
+                icon = null,
+            )
+        }
+
+        val menu = RadialMenuView(context)
+        menu.configure(placed, fitted, placeholders)
+        if (!attach(menu)) return false
+
+        /*
+         * 模糊桌面（GestureEVO 那套观感）。
+         *
+         * 轮盘现在只会挂在独立悬浮窗里，不在这棵被模糊的视图树中，
+         * 所以「糊桌面」不会连轮盘一起糊。
+         */
+        RadialBackdrop.apply(context.resources.displayMetrics.density, backdropRoot)
+
+        menu.isClickable = false
+        menu.isFocusable = false
+        menu.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        menu.animateIn()
+
+        view = menu
+        items = placeholders
+        loadIconsAsync(context, chosen, menu, iconSize, ++iconGeneration)
+
+        RadialTrace.log(
+            "reveal ok corner=$corner count=$count rings=${fitted.rings} " +
+                "shares=${fitted.shares} screen=${widthPx}x${heightPx} " +
+                "radius=${fitted.radius.toInt()} icon=${fitted.iconDiameter.toInt()} " +
+                "origin=(${placed.origin.x.toInt()},${placed.origin.y.toInt()}) " +
+                "host=overlay($windowType)"
+        )
+        return true
+    }
+
+    /**
+     * 后台补图标。
+     *
+     * [generation] 用来丢弃过期任务：用户可能在手势取消后立刻再展开一次，
+     * 上一个窗口的图标不能画到新窗口上（数量相同但应用不同，会配错图）。
+     */
+    private fun loadIconsAsync(
+        context: Context,
+        chosen: List<Favorite>,
+        menu: RadialMenuView,
+        iconSize: Int,
+        generation: Int,
+    ) {
+        val app = context.applicationContext ?: context
+        runCatching {
+            Thread({
+                val bitmaps = chosen.map { favorite ->
+                    runCatching { circularIcon(app, favorite, iconSize) }.getOrNull()
+                }
+                if (generation != iconGeneration) return@Thread
+                menu.post {
+                    if (generation != iconGeneration || view !== menu) return@post
+                    menu.applyIcons(bitmaps)
+                    val missing = bitmaps.count { it == null }
+                    if (missing > 0) RadialTrace.log("icons missing=$missing/${bitmaps.size}")
+                }
+            }, "zflow-radial-icons").apply { isDaemon = true }.start()
+        }
+    }
+
+    /**
+     * 把轮盘挂到独立悬浮窗上（唯一路径）。
+     *
+     * 桌面进程持有 INTERNAL_SYSTEM_WINDOW，两种 overlay 类型至少有一种能挂上；
+     * 都挂不上就返回 false —— 不再退回桌面视图树。那条路只在桌面/最近任务前台
+     * 时可见，而且会让「轮盘到底挂在哪」变得不可判断。
+     */
+    private fun attach(menu: RadialMenuView): Boolean {
+        val context = menu.context
+        val windowManager = runCatching {
+            context.getSystemService(android.view.WindowManager::class.java)
+        }.getOrNull() ?: run {
+            lastFailureReason = "no_window_manager"
+            return false
+        }
+
+        /*
+         * 窗口类型有讲究：先用 SYSTEM_OVERLAY，失败再试 APPLICATION_OVERLAY。
+         *
+         * 桌面进程没有 SYSTEM_ALERT_WINDOW 这个 appop（也不该去要），
+         * 而 APPLICATION_OVERLAY 在 appop 处于 default 状态时会被系统
+         * 统一压到 80% 不透明度（dumpsys 里 mAttrs.alpha=0.8），
+         * 白圆盘会透出下面的壁纸，看起来像一层毛玻璃。
+         * SYSTEM_OVERLAY 属于系统窗口，不受这个 appop 约束；
+         * 它本来就不接收触摸，正好符合「坐标由调用方推入」的设计。
+         */
+        for (type in intArrayOf(
+            android.view.WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY,
+            android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        )) {
+            val params = buildParams(type)
+            val added = runCatching { windowManager.addView(menu, params) }
+            if (added.isSuccess) {
+                windowRef = WeakReference(windowManager)
+                windowType = type
+                RadialTrace.log("overlay attached type=$type alpha=${params.alpha}")
+                return true
+            }
+            RadialTrace.log(
+                "overlay type=$type failed: ${added.exceptionOrNull()?.javaClass?.simpleName}:" +
+                    "${added.exceptionOrNull()?.message}"
+            )
+        }
+        lastFailureReason = "no_overlay"
+        return false
+    }
+
+    /** 构造铺满全屏、不接收触摸的浮层参数。 */
+    private fun buildParams(type: Int): android.view.WindowManager.LayoutParams =
+        android.view.WindowManager.LayoutParams(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            type,
+            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            /*
+             * 用 RGBA_8888 而不是 TRANSLUCENT：后者在部分 ROM 上会把整个窗口
+             * 按半透明合成，轮盘的白圆盘会透出底下的桌面图标，看起来像一层毛玻璃
+             * （就是「图标半透明、和桌面图标重叠」的来源）。
+             */
+            android.graphics.PixelFormat.RGBA_8888,
+        ).apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            x = 0
+            y = 0
+            alpha = 1f
+            setTitle("ZFlowRadial")
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode =
+                    android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                fitInsetsTypes = 0
+            }
+        }
+
+    /** 推入手指位置（MotionEvent 的 raw 屏幕坐标）。 */
+    fun updatePointer(rawX: Float, rawY: Float) {
+        val menu = view ?: return
+        if (!menu.isAttachedToWindow) return
+        // 悬浮窗铺满整屏且左上角在 (0,0)，但仍按实际位置换算一次：
+        // 有 ROM 会给 overlay 加状态栏偏移，硬减 0 会让选择整体错位。
+        menu.getLocationOnScreen(hostLocation)
+        menu.updatePointer(rawX - hostLocation[0], rawY - hostLocation[1])
+    }
+
+    /** 当前选中项；没有选中返回 null。不自动关闭，由调用方决定时机。 */
+    fun currentItem(): RadialItem? = items.getOrNull(view?.currentSelection ?: -1)
+
+    fun dismiss(immediate: Boolean = false, onFinished: (() -> Unit)? = null) {
+        val menu = view
+        val windowManager = windowRef?.get()
+        // 让还在跑的后台任务失效，避免把图标写到下一个窗口上。
+        iconGeneration += 1
+        view = null
+        windowRef = null
+        items = emptyList()
+        if (menu == null) {
+            // 没有窗口却可能留着模糊（状态被外部打断）：一并恢复，不能让桌面糊着。
+            RadialBackdrop.clear("no_view")
+            onFinished?.invoke()
+            return
+        }
+        val detach = {
+            if (windowManager != null) {
+                runCatching { windowManager.removeViewImmediate(menu) }
+            }
+            // 模糊和窗口同生共死：退场动画期间保持（否则会看到「桌面突然变清晰、
+            // 圆盘还在慢慢淡出」），窗口一摘掉立刻恢复。
+            RadialBackdrop.clear(if (immediate) "immediate" else "dismiss")
+            Unit
+        }
+        if (immediate || !menu.isAttachedToWindow) {
+            detach()
+            onFinished?.invoke()
+            return
+        }
+        menu.animateOut {
+            detach()
+            onFinished?.invoke()
+        }
+    }
+
+    /** 进程内缓存图标位图的总入口，便于热重载时清理。 */
+    fun clearIconCache() {
+        synchronized(iconCache) {
+            iconCache.values.forEach { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+            iconCache.clear()
+        }
+    }
+
+    // ===== 数据 =====
+
+    private data class Favorite(
+        val packageName: String,
+        val userId: Int,
+        val label: String,
+        val icon: Drawable?,
+    )
+
+    /**
+     * 名单的进程内缓存，跨手势复用。
+     *
+     * 一次展开要读两份名单（轮盘应用 + 小窗收藏），每次都是跨进程 Binder；
+     * 如果 Z-Flow 进程刚好被系统回收，第一次调用还要负责把它冷启动起来 ——
+     * 那是几百毫秒级别的同步开销，而这个调用点正好落在 Launcher 的输入回调里，
+     * 事件会在 InputDispatcher 侧堆积。命中缓存可以把这份成本摊到第一次之外。
+     *
+     * TTL 取 3 秒：既能让连续两次手势复用，又不至于让用户改完名单后长时间看不到变化。
+     */
+    private var cachedFavorites: List<Favorite> = emptyList()
+    private var cachedFavoritesAt = 0L
+    private const val FAVORITES_TTL_MS = 3_000L
+
+    /**
+     * 取轮盘条目，顺序为：用户在「轮盘应用」里挑的名单 → 小窗收藏应用 → 最近任务。
+     *
+     * 前两级是「用户明确指定过的」，第三级只是兜底：绝大多数用户从没打开过
+     * 任何一列表（数据库里就是 0 行），纯收藏制在真机上的实际体验是
+     * 「从底角上滑毫无反应」。把最近任务当兜底，保证首次使用就能看到东西；
+     * 一旦用户配置了任一份名单，就严格按配置来。
+     */
+    private fun loadFavorites(context: Context): List<Favorite> {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (cachedFavorites.isNotEmpty() && now - cachedFavoritesAt < FAVORITES_TTL_MS) {
+            return cachedFavorites
+        }
+        val loaded = queryFavorites(context)
+        if (loaded.isNotEmpty()) {
+            cachedFavorites = loaded
+            cachedFavoritesAt = now
+        }
+        return loaded
+    }
+
+    private fun queryFavorites(context: Context): List<Favorite> {
+        val radial = loadProviderList(context, FreeformAppsProvider.METHOD_GET_RADIAL_APPS)
+        if (radial.isNotEmpty()) return radial
+
+        val configured = loadProviderList(context, FreeformAppsProvider.METHOD_GET_APPS)
+        if (configured.isNotEmpty()) return configured
+
+        val recents = loadRecent(context)
+        if (recents.isNotEmpty()) {
+            RadialTrace.log(
+                "fallback: recent tasks count=${recents.size} " +
+                    "reason=${lastFailureReason ?: "empty_favorites"}"
+            )
+            lastFailureReason = null
+            return recents
+        }
+        if (lastFailureReason == null) lastFailureReason = "empty_favorites"
+        return emptyList()
+    }
+
+    /** 最近任务里的应用（已去重、去自身），只取包名。 */
+    private fun loadRecent(context: Context): List<Favorite> {
+        val packages = runCatching {
+            val am = context.getSystemService(android.app.ActivityManager::class.java)
+                ?: return@runCatching emptyList()
+            @Suppress("DEPRECATION")
+            val tasks = am.getRecentTasks(
+                RECENT_FALLBACK_LIMIT * 4,
+                android.app.ActivityManager.RECENT_IGNORE_UNAVAILABLE,
+            )
+            val seen = LinkedHashSet<String>()
+            for (task in tasks) {
+                val pkg = task?.baseIntent?.component?.packageName
+                    ?: task?.topActivity?.packageName
+                    ?: continue
+                if (pkg == context.packageName || pkg in IGNORED_PACKAGES) continue
+                seen.add(pkg)
+                if (seen.size >= RECENT_FALLBACK_LIMIT) break
+            }
+            seen.toList()
+        }.getOrElse { throwable ->
+            lastFailureReason = "recent_error ${throwable.javaClass.simpleName}"
+            emptyList()
+        }
+        return packages.mapNotNull { pkg ->
+            val resolved = resolveApp(context, pkg) ?: return@mapNotNull null
+            Favorite(
+                packageName = pkg,
+                userId = android.os.Process.myUserHandle().hashCode(),
+                label = resolved.first,
+                icon = resolved.second,
+            )
+        }
+    }
+
+    /**
+     * 从 App 进程的 Provider 读名单（`method` 决定读哪一份）。
+     *
+     * 失败（Provider 拒绝 / Binder 异常 / 名单为空）一律返回空列表：
+     * 轮盘只是手势的一种呈现，宁可退回下一级来源，也不要在 Launcher 里抛异常。
+     */
+    private fun loadProviderList(context: Context, method: String): List<Favorite> {
+        val bundle = runCatching {
+            context.contentResolver.call(
+                Uri.parse("content://${FreeformAppsProvider.AUTHORITY}"),
+                method,
+                null,
+                null,
+            )
+        }.getOrElse { throwable ->
+            lastFailureReason = "provider_error ${throwable.javaClass.simpleName}:${throwable.message}"
+            return emptyList()
+        }
+        if (bundle == null) {
+            lastFailureReason = "provider_null"
+            return emptyList()
+        }
+        if (ProviderAccess.isDenied(bundle)) {
+            // Provider 拒绝（Launcher UID 不在白名单）：必须与「用户没配收藏」区分开，
+            // 否则真机上只会看到「没反应」。
+            lastFailureReason = "provider_denied ${bundle.getString(ProviderAccess.EXTRA_REASON)}"
+            return emptyList()
+        }
+        val keys = bundle.getStringArray(FreeformAppsProvider.EXTRA_KEYS)?.toList().orEmpty()
+        if (keys.isEmpty()) {
+            lastFailureReason = "empty_favorites"
+            return emptyList()
+        }
+
+        return keys.take(RadialLayoutSpec.MAX_ITEMS).mapNotNull { key ->
+            val parts = key.split('|')
+            if (parts.size != 2) {
+                RadialTrace.log("skip malformed key=$key")
+                return@mapNotNull null
+            }
+            val packageName = parts[0]
+            if (packageName.isEmpty()) return@mapNotNull null
+            val userId = parts[1].toIntOrNull() ?: 0
+            val resolved = resolveApp(context, packageName)
+            if (resolved == null) {
+                // 图标取不到不算失败：格子照画，用包名当标题。
+                RadialTrace.log("icon unresolved pkg=$packageName")
+            }
+            Favorite(
+                packageName = packageName,
+                userId = userId,
+                label = resolved?.first ?: packageName,
+                icon = resolved?.second,
+            )
+        }
+    }
+
+    /**
+     * 取应用名称与图标。
+     *
+     * 只用 PackageManager：收藏列表本质是「当前用户下的应用」，
+     * 跨用户查询要走 LauncherApps 的系统接口，收益远小于复杂度。
+     * 其它用户的应用按当前用户解析，图标顶多不精确，但不会影响启动链路。
+     */
+    private fun resolveApp(
+        context: Context,
+        packageName: String,
+    ): Pair<String, Drawable?>? = runCatching {
+        val pm = context.packageManager
+        val info = pm.getApplicationInfo(packageName, 0)
+        pm.getApplicationLabel(info).toString() to pm.getApplicationIcon(info)
+    }.getOrNull()
+
+    /** 把应用图标预渲染成圆形位图：绘制阶段只做一次 drawBitmap，不在每帧裁圆。 */
+    private fun circularIcon(context: Context, favorite: Favorite, sizePx: Int): Bitmap? {
+        val drawable = favorite.icon ?: return null
+        val key = "${favorite.packageName}|${favorite.userId}|$sizePx"
+        iconCache[key]?.takeIf { !it.isRecycled }?.let { return it }
+        return runCatching {
+            val raw = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+            val rawCanvas = Canvas(raw)
+            drawable.setBounds(0, 0, sizePx, sizePx)
+            drawable.draw(rawCanvas)
+
+            val rounded = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+            val roundedCanvas = Canvas(rounded)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = BitmapShader(raw, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            }
+            val half = sizePx / 2f
+            roundedCanvas.drawCircle(half, half, half, paint)
+            raw.recycle()
+            iconCache[key] = rounded
+            rounded
+        }.getOrNull()
+    }
+}

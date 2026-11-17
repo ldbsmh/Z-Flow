@@ -15,12 +15,15 @@ import com.google.android.material.snackbar.Snackbar
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.providers.RadialAppsStore
+import io.relimus.zflow.providers.RadialTriggerSettings
 import io.relimus.zflow.providers.WindowEngineSettings
 import io.relimus.zflow.service.ForegroundService
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
 import io.relimus.zflow.ui.choose_apps.ChooseAppsViewModel
 import io.relimus.zflow.ui.permission.PermissionActivity
+import io.relimus.zflow.ui.radial_area.RadialTriggerAreaActivity
 import io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
 import io.relimus.zflow.utils.PermissionUtils
 
@@ -67,6 +70,10 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                 findPreference<Preference>("quick_floating_app")!!.onPreferenceClickListener = this
                 findPreference<Preference>("reset_overlay_setting")?.onPreferenceClickListener = this
                 findPreference<Preference>("trusted_callers")?.onPreferenceClickListener = this
+                findPreference<Preference>("radial_gesture_apps")?.onPreferenceClickListener = this
+                findPreference<Preference>("radial_trigger_area")?.onPreferenceClickListener = this
+                updateRadialAreaSummary()
+                updateRadialAppsSummary()
             }
 
             KEY_RULES -> {
@@ -130,6 +137,37 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
     }
 
+    /**
+     * 触发区摘要。
+     *
+     * 直接写「双侧 · 20%×12%」而不是把四个数字全列出来：设置页的这一行是
+     * 「我配的是哪块区」的速记，具体数值进详情页看滑杆更直观。
+     */
+    private fun updateRadialAreaSummary() {
+        val preference = findPreference<Preference>("radial_trigger_area") ?: return
+        val config = RadialTriggerSettings.read(requireContext())
+        val side = when {
+            config.mirror -> getString(R.string.radial_trigger_side_both)
+            config.centerXPercent <= 50 -> getString(R.string.radial_trigger_side_left)
+            else -> getString(R.string.radial_trigger_side_right)
+        }
+        preference.summary = getString(
+            R.string.radial_trigger_area_current,
+            "$side · ${config.widthPercent}%×${config.heightPercent}%",
+        )
+    }
+
+    /** 轮盘名单的摘要：空名单要说清「会退回最近任务」，否则用户不知道为什么轮盘里是自己没用过的应用。 */
+    private fun updateRadialAppsSummary() {
+        val preference = findPreference<Preference>("radial_gesture_apps") ?: return
+        val count = RadialAppsStore.read(requireContext()).size
+        preference.summary = if (count == 0) {
+            getString(R.string.radial_apps_summary_empty)
+        } else {
+            getString(R.string.radial_apps_summary_count, count)
+        }
+    }
+
     override fun onPreferenceClick(preference: Preference): Boolean {
         val key = preference.key
         when {
@@ -174,6 +212,19 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                     Intent(requireContext(), ChooseAppsActivity::class.java)
                         .putExtra("type", ChooseAppsViewModel.TYPE_TRUSTED)
                 )
+            }
+
+            key == "radial_gesture_apps" -> {
+                startActivity(
+                    Intent(requireContext(), ChooseAppsActivity::class.java)
+                        .putExtra("type", ChooseAppsViewModel.TYPE_RADIAL)
+                )
+                return true
+            }
+
+            key == "radial_trigger_area" -> {
+                startActivity(Intent(requireContext(), RadialTriggerAreaActivity::class.java))
+                return true
             }
 
             key == "reset_overlay_setting" -> {
@@ -266,6 +317,9 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
         if (arguments == null || arguments?.getString(ARG_PREFERENCE_ROOT) == null) {
             updateAllSummaries()
         }
+        // 从「轮盘应用」「触发区域」页返回时配置可能已经变了，摘要要跟着刷新。
+        updateRadialAppsSummary()
+        updateRadialAreaSummary()
         sp.registerOnSharedPreferenceChangeListener(ncSettingsListener)
     }
 
