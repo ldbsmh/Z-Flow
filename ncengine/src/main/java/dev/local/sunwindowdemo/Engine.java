@@ -73,5 +73,17 @@ public final class Engine {
         return true;
     }
 
+    /**
+     * 宿主改写了引擎原生偏好（本应用 `corner` 偏好）后，通知 SystemUI 宿主重新拉取快照。
+     *
+     * 接收方是 SystemUI 里注册的运行时接收器（上游 `BackBridge.PACKAGE`），显式广播
+     * 必须定向到 com.android.systemui 才投得进去；接收方再按发送方 UID 校验必须是本应用。
+     * 带 share identity 是为了让接收方读到发送方身份。
+     */
+    public static void notifySettingsChanged(Context context){
+        context.sendBroadcast(new Intent(ConfigProvider.CHANGED).setPackage("com.android.systemui"),
+            null,android.app.BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle());
+    }
+
     public static String modulePackage(){return Wire.PKG;}
 }

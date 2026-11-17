@@ -19,6 +19,7 @@ import com.google.android.material.textfield.TextInputLayout
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.providers.WindowEngineSettings
 import io.relimus.zflow.service.ForegroundService
 import io.relimus.zflow.service.KeepAliveService
 import io.relimus.zflow.service.NcWindowBackend
@@ -325,15 +326,19 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
     }
 
     /**
-     * 小窗外观改动后同步给 NC 引擎。
+     * 设置改动后同步给 NC 引擎。
      *
-     * 引擎跑在 system_server，读不到本应用的 SP；这里把新值推过去，
-     * 变暗立刻生效，尺寸/迷你比例/贴边样式在下次开窗时应用。
+     * - 外观类（尺寸/迷你比例/贴边/变暗）走 SETTINGS 指令：变暗立刻生效，
+     *   尺寸类留给下次开窗；
+     * - 引擎原生开关（[WindowEngineSettings]）以 `corner` 偏好为准，镜像过去再
+     *   广播让 SystemUI 重读快照。
      */
     private val ncSettingsListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key != null && key in NC_SETTINGS_KEYS && isAdded) {
-                NcWindowBackend.reloadSettings(requireContext())
+            if (key == null || !isAdded) return@OnSharedPreferenceChangeListener
+            when (key) {
+                in WindowEngineSettings.ALL_KEYS -> WindowEngineSettings.sync(requireContext())
+                in NC_SETTINGS_KEYS -> NcWindowBackend.reloadSettings(requireContext())
             }
         }
 }

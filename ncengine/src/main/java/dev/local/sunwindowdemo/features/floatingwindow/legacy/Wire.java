@@ -135,12 +135,15 @@ final class Wire {
         sendRequest(context,request);
     }
     private static void sendRequest(Context context,Intent i){
+        // 宿主（Z-Flow）与 SystemUI 都会发起请求：配置项两边都要带。
+        // 原来只在 SystemUI 侧附带，宿主开窗时 endOnClose / keepEdgeAwake /
+        // landscapeShareWindow 永远落在引擎默认值上，设置页等于假开关。
+        Config config=new Config(context);
+        i.putExtra("landscapeShareWindow",config.enabled()&&config.landscapeShareWindow())
+            .putExtra("endOnClose",config.endOnClose()).putExtra("keepEdgeAwake",config.enabled()&&config.keepEdgeAwake())
+            .putExtra("windowDim",config.windowDim()).putExtra("autoMinimizeOnOpen",config.autoMinimizeOnOpen());
         if(BackBridge.PACKAGE.equals(context.getPackageName())){
-            Config config=new Config(context);
-            i.putExtra("hostReady",SystemUiHost.live!=null&&SystemUiHost.live.ready()).putExtra("lastTouch",SystemUiHost.lastTouch)
-                .putExtra("landscapeShareWindow",config.enabled()&&config.landscapeShareWindow())
-                .putExtra("endOnClose",config.endOnClose()).putExtra("keepEdgeAwake",config.enabled()&&config.keepEdgeAwake())
-                .putExtra("windowDim",config.windowDim()).putExtra("autoMinimizeOnOpen",config.autoMinimizeOnOpen());
+            i.putExtra("hostReady",SystemUiHost.live!=null&&SystemUiHost.live.ready()).putExtra("lastTouch",SystemUiHost.lastTouch);
         }
         Bundle b = new Bundle(); b.putBinder("lease", LEASE); if(listener!=null)b.putBinder("frameChannel",FRAMES); i.putExtras(b);
         context.sendBroadcast(i, null, BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle());

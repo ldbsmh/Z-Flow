@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import dev.local.sunwindowdemo.Engine
 import io.relimus.zflow.app.ZFlow
+import io.relimus.zflow.providers.WindowEngineSettings
 import io.relimus.zflow.xposed.hook.utils.XLog
 
 /**
@@ -83,6 +84,11 @@ object NcWindowBackend {
     ): Boolean {
         return try {
             syncEnabled(context)
+            if (!WindowEngineSettings.enabled(context)) {
+                // 引擎总开关关掉：不接管，交给调用方回退经典虚拟屏内核。
+                XLog.i("$TAG: engine disabled, fallback to legacy pkg=$packageName")
+                return false
+            }
             val limit = maxWindows(context)
             Engine.openApp(
                 context, packageName, taskId, miniMode, limit,
@@ -125,6 +131,10 @@ object NcWindowBackend {
     ): Boolean {
         return try {
             syncEnabled(context)
+            if (!WindowEngineSettings.enabled(context)) {
+                XLog.i("$TAG: engine disabled, fallback to legacy (notification) pkg=$packageName")
+                return false
+            }
             Engine.openNotification(
                 context, packageName, launch, fill,
                 windowSettings(context, packageName)
@@ -137,12 +147,24 @@ object NcWindowBackend {
         }
     }
 
-    /** Z-Flow 的小窗总开关打开后，引擎侧开关随之打开（首次安装时引擎默认关闭）。 */
+    /**
+     * 首次开窗时把引擎总开关投影到 PM 组件状态（system_server 启动时靠它决定是否安装后端）。
+     *
+     * 只在「设置页开关为开」时做，并且每个进程只做一次：`Engine.setEnabled` 写的是
+     * `corner.enabled`，用户手动关掉后不能被这里悄悄打开。
+     */
     private fun syncEnabled(context: Context) {
+        if (engineProjected) return
+        if (!WindowEngineSettings.enabled(context)) return
         try {
-            if (!Engine.enabled(context)) Engine.setEnabled(context, true)
+            Engine.setEnabled(context, true)
+            engineProjected = true
         } catch (t: Throwable) {
             XLog.w("$TAG: sync engine enabled failed: ${t.message}")
         }
     }
+
+    /** 本进程是否已经完成过一次开关投影。 */
+    @Volatile
+    private var engineProjected = false
 }

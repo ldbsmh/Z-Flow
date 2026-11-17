@@ -253,13 +253,49 @@ SystemUI 侧从「一个 `miniControls`」改成「按 taskId 复用的 `WindowC
 
 `popup_bubble_block` 属于通知气泡拦截，不在小窗链路上，也没有搬。
 
+### 引擎原生设置（`corner` 偏好镜像）
+
+NC 引擎自己有一套 `corner` 偏好（`Config.java`），SystemUI 宿主启动时通过
+`content://io.relimus.zflow.settings`（`ConfigProvider`）把整份拉进自己进程，之后
+**只有收到 `SETTINGS_CHANGED` 广播才会重读**。设置页不能只写 `app_settings`
+（引擎看不到），也不能只写 `corner`（Z-Flow 读不到），所以走镜像：
+
+```
+设置页 nc_* → app_settings（Preference 框架）
+  → SettingFragment 监听器 → WindowEngineSettings.sync()
+  → 写 corner 同名键 + Engine.notifySettingsChanged() 广播（定向 com.android.systemui）
+  → SystemUiHost.settingsReceiver（校验发送方 UID 是本应用）→ loadSettings() 重拉快照
+```
+
+镜像的 7 项（`WindowEngineSettings.MIRROR`，默认值与 `Config` 严格一致）：
+
+| 设置页键 | `corner` 键 | 作用 | 消费方 |
+|---|---|---|---|
+| `nc_engine_enabled`（默认开） | `enabled` | 引擎总开关：关掉后 Z-Flow 开窗回退经典内核，SystemUI 侧角落扇区与控制条同时停止 | 两边 |
+| `nc_auto_minimize`（默认开） | `autoMinimizeOnOpen` | 开新窗时上一个默认窗收成迷你，而不是直接关闭 | `Wire` 随 OPEN 下发 |
+| `nc_end_on_close`（默认关） | `endOnClose` | 关掉应用的最后一个窗口时 force-stop 该应用 | `Wire` 随 OPEN 下发 |
+| `nc_keep_edge_awake`（默认关） | `keepEdgeAwake` | 贴边迷你窗保活应用进程 | `Wire` 随 OPEN 下发 |
+| `nc_double_close`（默认关） | `doubleClose` | 双击空白处才关闭小窗（默认单击） | SystemUI `WindowControls` 每次点击现读 |
+| `nc_hide_window_recents`（默认关） | `hideRecents` | 小窗任务不进最近任务 | `Wire` 随 OPEN 下发 |
+| `nc_landscape_share_window`（默认开） | `landscapeShareWindow` | 横屏下分享目标以窗口打开 | SystemUI 分享门控 |
+
+小窗黑名单同时镜像一份给引擎的 `blocked`（`WindowEngineSettings.syncBlacklist`）：
+Room 里的每次增删改都会把包名集合写进 `corner.blocked` 并广播，黑名单应用在前台时
+角落扇区不响应。名单本身仍以 Room 为准，Z-Flow 侧继续拦在开窗前。
+
+没搬的原生项：角落扇区几何参数（热区/半径/图标/数量/模糊等，Z-Flow 用自己的轮盘，
+按引擎默认值运行）、快捷应用名单 `apps`/`targets`（扇区面板内可改）、
+`notificationWindow`（引擎没装通知接管 Hook，是死配置）、`longBackWindow`（引擎内
+零引用）。
+
 ## 已知缺口（待后续阶段）
 
 1. Z-Flow「运行规则」里的黑名单、横屏清单已接通（黑名单在 Z-Flow 侧拦截），
    但尺寸类设置只在**下一次开窗**时应用，已开的窗口不会就地重排。
 2. 引擎安装失败（例如 `SunWindowModule` 的 `startOtherServices` deopt 预检不过）时不会自动回退，
    表现为“点了没反应”，需要在设置里手动切回经典内核。
-3. NC 自带的角落扇区随总开关一起启用，尚未提供单独的 Z-Flow 开关。
+3. 引擎总开关已单独暴露（`nc_engine_enabled`）；角落扇区几何参数按引擎默认值运行，
+   未在设置页出现（用户决定不搬）。
 4. 真机未验证：`Wire` 协议、`WindowEngine` 的 WMS Hook、SystemUI 宿主在当前 ROM 上的可用性。
 
 ## 构建

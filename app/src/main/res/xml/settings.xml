@@ -60,6 +60,12 @@
                 android:entryValues="@array/window_engine_values"
                 android:defaultValue="nc"
                 app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="nc_engine_enabled"
+                android:title="@string/nc_engine_enabled_title"
+                android:summary="@string/nc_engine_enabled_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
             <Preference
                 android:key="trusted_callers"
                 app:title="@string/preference_trusted_callers"
@@ -160,6 +166,30 @@
                 android:max="5"
                 app:showSeekBarValue="true"/>
             <SwitchPreference
+                android:key="nc_auto_minimize"
+                android:title="@string/nc_auto_minimize_title"
+                android:summary="@string/nc_auto_minimize_summary"
+                android:defaultValue="true"
+                app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="nc_end_on_close"
+                android:title="@string/nc_end_on_close_title"
+                android:summary="@string/nc_end_on_close_summary"
+                android:defaultValue="false"
+                app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="nc_keep_edge_awake"
+                android:title="@string/nc_keep_edge_awake_title"
+                android:summary="@string/nc_keep_edge_awake_summary"
+                android:defaultValue="false"
+                app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="nc_double_close"
+                android:title="@string/nc_double_close_title"
+                android:summary="@string/nc_double_close_summary"
+                android:defaultValue="false"
+                app:iconSpaceReserved="false"/>
+            <SwitchPreference
                 android:key="manual_adjust_freeform_rotation"
                 android:title="@string/manual_adjust_freeform_rotation_title"
                 android:summary="@string/manual_adjust_freeform_rotation_summary"
@@ -183,6 +213,22 @@
                 android:key="landscape_apps"
                 android:title="@string/preference_landscape_apps"
                 android:summary="@string/preference_landscape_apps_summary"
+                app:iconSpaceReserved="false"/>
+        </PreferenceCategory>
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
+            android:title="@string/category_window_task">
+            <SwitchPreference
+                android:key="nc_hide_window_recents"
+                android:title="@string/nc_hide_window_recents_title"
+                android:summary="@string/nc_hide_window_recents_summary"
+                android:defaultValue="false"
+                app:iconSpaceReserved="false"/>
+            <SwitchPreference
+                android:key="nc_landscape_share_window"
+                android:title="@string/nc_landscape_share_title"
+                android:summary="@string/nc_landscape_share_summary"
+                android:defaultValue="true"
                 app:iconSpaceReserved="false"/>
         </PreferenceCategory>
         <PreferenceCategory
