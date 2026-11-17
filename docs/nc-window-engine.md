@@ -1,5 +1,8 @@
 # 小窗内核迁移：NativeComplements 引擎接入 Z-Flow
 
+> 功能接入状态（哪些已实现、哪些没有/不能实现）另见
+> [nc-integration-status.md](nc-integration-status.md)；本文是技术实现细节。
+
 本次改动把小窗的“实现方式”从 Z-Flow 原有的虚拟屏方案换成 NativeComplements 的方案：
 
 | | 原实现（legacy） | 新实现（nc） |
