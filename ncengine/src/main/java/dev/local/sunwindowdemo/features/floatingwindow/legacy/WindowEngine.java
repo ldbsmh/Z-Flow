@@ -1447,7 +1447,7 @@ final class WindowEngine {
         }
         s.resizing="RESIZE".equals(op);
         s.animationRev++;s.transitioning=false;s.radiusFactor=1;
-        if("CLOSE".equals(op))s.miniDragBase=null;
+        if("CLOSE".equals(op)){s.miniDragBase=null;s.edgeDragBase=null;s.edgeBarDragging=false;}
         if("DOCK".equals(op))endMiniDrag(s,false);
         String form=WindowControl.form(op);if(form!=null){changeForm(s,form);return;}
         Geometry.Placement p=s.placement;

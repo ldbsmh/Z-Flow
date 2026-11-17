@@ -46,8 +46,6 @@ final class WindowControls {
     private int edgeGesture;
     private boolean edgeBarDragging;
     private float edgeBarCenterX,edgeBarCenterY;
-    private View edgeHoldView;
-    private Runnable edgeHoldCallback;
     private int imeTop=Integer.MAX_VALUE;
     private WindowMetrics layoutMetrics;
     private final Rect dismissBounds=new Rect();
@@ -164,11 +162,8 @@ final class WindowControls {
                     // 不再是原来那条 4dp 白条。
                     float size=Math.min(getWidth(),getHeight());
                     if(size<=0)return;
-                    /*
-                     * 贴边隐藏时把手移出屏幕边缘；长按/内拖时恢复完整把手。
-                     */
-                    float shift=(edgeBarDragging||edgeGesture==1)?0:size*(edgeSide<0?-1:1);
-                    float left=(getWidth()-size)/2f+shift,top=(getHeight()-size)/2f;
+                    // 把手完整露出在屏幕内侧边缘（Z-Flow dockStyle 默认 100%）。
+                    float left=(getWidth()-size)/2f,top=(getHeight()-size)/2f;
                     edgePaint.setStyle(Paint.Style.FILL);
                     edgePaint.setColor(0xf2ffffff);
                     cv.drawRoundRect(left,top,left+size,top+size,size*.45f,size*.45f,edgePaint);
@@ -195,46 +190,42 @@ final class WindowControls {
                 float downX,downY,baseX,baseY,endX,endY,barBaseX,barBaseY;
                 boolean moving,edgeTouch,edgePressed,edgeMoving;
                 Geometry.Placement basePlacement;
-                View edgeView;
-                final Runnable edgeHold=()->{
-                    clearEdgeHold();
-                    if(!edgePressed||edgeMoving||!edgeHidden||transitioning||systemBlocked||!Objects.equals(boundToken,token))return;
-                    edgeMoving=true;edgeGesture=2;dragging=true;hideMenu();
-                    edgeView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                    scheduleMotion("EDGE_BAR_DRAG",0,barBaseX,barBaseY);
-                };
                 public boolean onTouch(View v,MotionEvent e){
-                    if(!Objects.equals(boundToken,token)||!"mini".equals(frame)||transitioning||systemBlocked){clearEdgeHold();edgePressed=false;return true;}
+                    if(!Objects.equals(boundToken,token)||!"mini".equals(frame)||transitioning||systemBlocked){edgePressed=false;return true;}
                     if(e.getActionMasked()==MotionEvent.ACTION_DOWN){
-                        clearEdgeHold();
-                        edgeTouch=edgeHidden;edgePressed=edgeTouch;edgeMoving=false;edgeView=v;
+                        edgeTouch=edgeHidden;edgePressed=edgeTouch;edgeMoving=false;
                         if(edgeTouch){
-                            downX=e.getRawX();downY=e.getRawY();baseX=endX=x;baseY=endY=y;
+                            downX=e.getRawX();downY=e.getRawY();
+                            baseX=endX=x;baseY=endY=y;
                             basePlacement=new Geometry.Placement(logicalW,logicalH,scale,x,y);
                             WindowManager.LayoutParams p=params.get(0);barBaseX=p.x+(edgeSide<0?dp(14):p.width-dp(14));barBaseY=p.y+p.height/2f;
-                            edgeHoldView=v;edgeHoldCallback=edgeHold;v.postDelayed(edgeHold,ViewConfiguration.getLongPressTimeout());return true;
+                            return true;
                         }
                     }
                     if(edgeTouch){
                         float dx=e.getRawX()-downX,dy=e.getRawY()-downY;
                         float slop=ViewConfiguration.get(c).getScaledTouchSlop();
-                        if(edgeMoving&&edgeGesture==0){clearEdgeHold();edgePressed=false;return true;}
                         if(e.getActionMasked()==MotionEvent.ACTION_MOVE){
-                            if(Math.hypot(dx,dy)>slop)clearEdgeHold();
-                            if(!edgeMoving&&dx*(edgeSide<0?1:-1)>slop){
-                                edgeMoving=true;edgeGesture=1;dragging=true;hideMenu();v.invalidate();
-                                hideHapticSide=Geometry.hideSide(basePlacement,baseX,displayW);
+                            /*
+                             * 贴边把手本身就是拖动对象：整段手势里只有这个图标在跟手，
+                             * 窗口保持贴边隐藏，不会被拉出来。松手时若图标已进入底部关闭区
+                             * 就关闭窗口，否则吸附到最近的边。
+                             */
+                            if(!edgeMoving&&Math.hypot(dx,dy)>slop){
+                                edgeMoving=true;edgeGesture=2;dragging=true;hideMenu();
+                                showDismiss();miniMagnet.reset();miniFrameTime=System.nanoTime();
                             }
                             if(edgeMoving){
-                                if(edgeGesture==2)scheduleMotion("EDGE_BAR_DRAG",0,barBaseX+dx,barBaseY+dy);
-                                else{endX=baseX+dx;endY=baseY+dy;hideFeedback(v,basePlacement,endX);scheduleMotion("EDGE_DRAG",0,endX,endY);}
+                                scheduleMotion("EDGE_BAR_DRAG",0,barBaseX+dx,barBaseY+dy);
+                                updateBarClose(barBaseY+dy);
                             }
                         }else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){
-                            clearEdgeHold();edgePressed=false;
                             if(edgeMoving){
-                                boolean up=e.getActionMasked()==MotionEvent.ACTION_UP,bar=edgeGesture==2;
-                                float px=bar?barBaseX+dx:baseX+dx,py=bar?barBaseY+dy:baseY+dy;
-                                stopEdgeDrag();send(up?(bar?"EDGE_BAR_DOCK":"EDGE_DOCK"):"EDGE_DRAG_CANCEL",0,px,py);
+                                boolean up=e.getActionMasked()==MotionEvent.ACTION_UP;
+                                boolean close=up&&miniMagnet.latched();
+                                float px=barBaseX+dx,py=barBaseY+dy;
+                                stopEdgeDrag(close);
+                                send(close?"CLOSE":up?"EDGE_BAR_DOCK":"EDGE_DRAG_CANCEL",0,px,py);
                             }else if(e.getActionMasked()==MotionEvent.ACTION_UP&&Math.hypot(dx,dy)<slop)send("RESTORE_MINI",0,0,0);
                         }
                         return true;
@@ -248,19 +239,18 @@ final class WindowControls {
                     if(moving&&miniDragBase==null)return true;
                     if(e.getActionMasked()==MotionEvent.ACTION_MOVE){
                         if(!moving&&Math.hypot(e.getRawX()-downX,e.getRawY()-downY)>ViewConfiguration.get(c).getScaledTouchSlop()){
-                            moving=true;dragging=true;MotionEvent cancel=MotionEvent.obtain(e);cancel.setAction(MotionEvent.ACTION_CANCEL);taps.onTouchEvent(cancel);cancel.recycle();hideMenu();showDismiss();
+                            moving=true;dragging=true;MotionEvent cancel=MotionEvent.obtain(e);cancel.setAction(MotionEvent.ACTION_CANCEL);taps.onTouchEvent(cancel);cancel.recycle();hideMenu();
+                            // 小窗本体拖动只负责移动：不显示关闭区、不渐隐、松手不关闭。
                             miniDragBase=basePlacement;miniMagnet.reset();miniFrameTime=System.nanoTime();hideHapticSide=0;
                         }
-                        if(moving){endX=clampMiniX(baseX+e.getRawX()-downX);endY=clampMiniY(baseY+e.getRawY()-downY);updateMiniDrag(v,e.getRawX(),e.getRawY(),endX,endY);}else taps.onTouchEvent(e);
+                        if(moving){endX=clampMiniX(baseX+e.getRawX()-downX);endY=clampMiniY(baseY+e.getRawY()-downY);updateMiniDrag(v,0,0,endX,endY);}else taps.onTouchEvent(e);
                         return true;
                     }
                     if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){
                         if(moving){
                             boolean up=e.getActionMasked()==MotionEvent.ACTION_UP;
-                            if(up){endX=clampMiniX(baseX+e.getRawX()-downX);endY=clampMiniY(baseY+e.getRawY()-downY);updateMiniDrag(v,e.getRawX(),e.getRawY(),endX,endY);}
-                            boolean close=up&&miniMagnet.latched();
-                            if(close){prepareMiniMotion();flushMotion();}
-                            stopMiniDrag();send(close?"CLOSE":up?"DOCK":"MINI_DRAG_CANCEL",0,endX,endY);
+                            if(up){endX=clampMiniX(baseX+e.getRawX()-downX);endY=clampMiniY(baseY+e.getRawY()-downY);updateMiniDrag(v,0,0,endX,endY);}
+                            stopMiniDrag();send(up?"DOCK":"MINI_DRAG_CANCEL",0,endX,endY);
                         }else taps.onTouchEvent(e);
                         return true;
                     }
@@ -316,39 +306,66 @@ final class WindowControls {
     private void postMotion(){if(!motionPosted){motionPosted=true;frames.postFrameCallback(motionFrame);}}
     private void motionFrame(long time){
         motionPosted=false;
-        if(miniDragBase!=null){miniMagnet.advance(time-miniFrameTime);miniFrameTime=time;prepareMiniMotion();}
+        boolean bar=edgeGesture==2&&miniDragBase==null;
+        if(bar){miniMagnet.advance(time-miniFrameTime);miniFrameTime=time;applyBarAlpha();}
+        if(miniDragBase!=null)prepareMiniMotion();
         flushMotion();
-        if(miniDragBase!=null&&miniMagnet.animating())postMotion();
+        if(bar&&miniMagnet.animating())postMotion();
     }
     private void scheduleMotion(String op,float value,float px,float py){
         motionOp=op;motionScale=value;motionX=px;motionY=py;postMotion();
     }
-    /** 关闭区不再吸附窗口，所以拖动必须自己保证窗口不跑到屏幕外。 */
+    /**
+     * 水平方向必须允许窗口越过屏幕边缘：引擎的贴边判定要求窗口移出 1/3 宽
+     * （{@link Geometry#hideSide(Geometry.Placement,float,int)}），若把 x 钳在
+     * [0, displayW-width] 内，判定永远为 0，松手只会吸附到边、贴边隐藏失效。
+     * 纵向仍然不允许出屏。
+     */
     private float clampMiniX(float value){
         if(miniDragBase==null)return value;
         float width=miniDragBase.width()*miniDragBase.scale();
-        return Math.max(0,Math.min(Math.max(0,displayW-width),value));
+        return Math.max(-width*.6f,Math.min(displayW-width*.4f,value));
     }
     private float clampMiniY(float value){
         if(miniDragBase==null)return value;
         float height=miniDragBase.height()*miniDragBase.scale();
         return Math.max(0,Math.min(Math.max(0,displayH-height),value));
     }
+    /** 拖动中的小窗只跟手移动：底部关闭区不再参与（关闭只从贴边把手发起）。 */
     private void updateMiniDrag(View v,float px,float py,float rawX,float rawY){
         miniDragX=rawX;miniDragY=rawY;
-        // Z-Flow：窗口底边滑进底部关闭区就开始淡出，越深越淡；没有要瞄准的按钮。
-        float closeTop=dismissBounds.isEmpty()?Float.MAX_VALUE:dismissBounds.top;
-        float span=Math.max(1,dismissBounds.isEmpty()?1:dismissBounds.height());
-        float windowBottom=rawY+miniDragBase.height()*miniDragBase.scale();
-        miniMagnet.follow((windowBottom-closeTop)/span);
-        highlight(v,miniMagnet.latched());
-        if(miniMagnet.latched())hideHapticSide=0;else hideFeedback(v,miniDragBase,rawX);
         postMotion();
     }
-    private void hideFeedback(View v,Geometry.Placement base,float rawX){
-        int side=Geometry.hideSide(base,rawX,displayW);
-        if(side!=0&&hideHapticSide==0)v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-        hideHapticSide=side;
+    /**
+     * 拖动贴边图标时更新底部关闭区进度：图标中心进入屏幕底部 15% 就开始渐隐，
+     * 过半即锁定为「松手关闭」。
+     */
+    private void updateBarClose(float centerY){
+        if(dismissBounds.isEmpty())return;
+        boolean was=miniMagnet.latched();
+        float bottom=centerY+dp(30);
+        miniMagnet.follow((bottom-dismissBounds.top)/Math.max(1,dismissBounds.height()));
+        if(miniMagnet.latched()!=was&&!views.isEmpty())
+            views.get(0).performHapticFeedback(HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE);
+        applyBarAlpha();
+        postMotion();
+    }
+    /**
+     * 渐隐曲线与引擎拖动窗口时完全一致（{@link MiniMagnet}）：淡到 0.15 的同时缩到 35%，
+     * 手感才对得上 Z-Flow——只淡不缩会显得「图标在原地变透明」。
+     */
+    private void applyBarAlpha(){
+        if(views.isEmpty())return;
+        float progress=miniMagnet.progress();
+        View bar=views.get(0);
+        bar.setAlpha(MiniMagnet.alphaFactor(progress));
+        float scale=MiniMagnet.scaleFactor(progress);
+        bar.setScaleX(scale);bar.setScaleY(scale);
+    }
+    private void resetBarVisual(){
+        if(views.isEmpty())return;
+        View bar=views.get(0);
+        bar.setAlpha(1);bar.setScaleX(1);bar.setScaleY(1);
     }
     private void prepareMiniMotion(){
         if(miniDragBase==null)return;
@@ -366,14 +383,15 @@ final class WindowControls {
         if(miniDragBase==null)return;
         stopMiniDrag();if(token!=null)Wire.control(c,"MINI_DRAG_CANCEL",token,taskId,0,0,0);
     }
-    private void clearEdgeHold(){
-        if(edgeHoldView!=null&&edgeHoldCallback!=null)edgeHoldView.removeCallbacks(edgeHoldCallback);
-        edgeHoldView=null;edgeHoldCallback=null;
+    /** @param keepFade 松手即关闭时保持渐隐，避免图标在窗口销毁前闪回不透明。 */
+    private void stopEdgeDrag(boolean keepFade){
+        clearMotion();edgeGesture=0;hideHapticSide=0;dragging=false;edgeBarDragging=false;
+        miniMagnet.reset();miniFrameTime=0;hideDismiss();
+        if(!keepFade)resetBarVisual();
     }
-    private void stopEdgeDrag(){clearEdgeHold();clearMotion();edgeGesture=0;hideHapticSide=0;dragging=false;edgeBarDragging=false;}
     private void cancelEdgeDrag(){
-        clearEdgeHold();if(edgeGesture==0)return;
-        stopEdgeDrag();if(token!=null)Wire.control(c,"EDGE_DRAG_CANCEL",token,taskId,0,0,0);
+        if(edgeGesture==0)return;
+        stopEdgeDrag(false);if(token!=null)Wire.control(c,"EDGE_DRAG_CANCEL",token,taskId,0,0,0);
     }
     private void flushMotion(){
         if(motionOp==null)return;String op=motionOp;motionOp=null;
@@ -646,7 +664,7 @@ final class WindowControls {
     void systemOverlay(boolean blocked){
         if(systemBlocked==blocked)return;systemBlocked=blocked;
         if(blocked){
-            clearEdgeHold();clearMotion();
+            clearMotion();
             if(edgeGesture!=0)cancelEdgeDrag();
             else if(miniDragBase!=null)cancelMiniDrag();
             else if(dragging&&token!=null)Wire.control(c,"NORMAL",token,taskId,0,0,0);
@@ -655,7 +673,7 @@ final class WindowControls {
     }
     /**
      * Z-Flow 的关闭方式：屏幕底部 15% 是关闭区，没有任何图标或按钮。
-     * 窗口底边越进这块区域越淡，松手即关闭。
+     * 贴边图标拖进这块区域就按越界比例渐隐，松手即关闭。
      */
     private static final float CLOSE_AREA_THRESHOLD=.85f;
     private void showDismiss(){
@@ -663,11 +681,6 @@ final class WindowControls {
         Rect bounds=metrics.getBounds();
         dismissBounds.set(bounds.left,Math.round(bounds.height()*CLOSE_AREA_THRESHOLD),bounds.right,bounds.bottom);
         dismissEntered=false;
-    }
-    private void highlight(View anchor,boolean entered){
-        if(entered&&!dismissEntered&&anchor!=null)
-            anchor.performHapticFeedback(HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE);
-        dismissEntered=entered;
     }
     private void hideDismiss(){
         dismissEntered=false;dismissBounds.setEmpty();
