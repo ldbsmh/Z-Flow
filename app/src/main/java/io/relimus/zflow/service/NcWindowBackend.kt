@@ -3,36 +3,20 @@ package io.relimus.zflow.service
 import android.content.Context
 import android.content.Intent
 import dev.local.sunwindowdemo.Engine
-import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.providers.WindowEngineSettings
 import io.relimus.zflow.xposed.hook.utils.XLog
 
 /**
- * 小窗后端选择：把 Z-Flow 的入口接到 NativeComplements 内核，或退回原有虚拟屏实现。
+ * 小窗后端：把 Z-Flow 的入口接到 NativeComplements 内核。
  *
- * 语义：
- * - `nc`（默认）：以真实 freeform 任务开窗，窗口控件、迷你窗、贴边停靠由
- *   ncengine 的 SystemUI 宿主负责；Z-Flow 只负责“开哪个应用”。
- * - `legacy`：原来的 VirtualDisplay + 自绘窗口方案，保留用于回退对比。
+ * 内核选择（NC / 经典虚拟屏）已随设置页精简移除：现在固定走 NC。经典虚拟屏保留为
+ * 引擎总开关关闭、或开窗调用抛异常时的内部兜底，不再对用户暴露，也不再读取外观设置。
  *
- * 该偏好只影响“开窗”这一步，入口本身（侧边栏、磁贴、通知、桌面长按）不变。
- *
- * 外观不随请求下发：引擎窗口支持长按调整大小，尺寸/迷你比例/贴边样式由引擎
- * 自己的默认值决定；Z-Flow 设置页里那几项只对经典虚拟屏内核生效。
+ * 该对象只负责“开哪个应用”，窗口控件、迷你窗、贴边停靠由 ncengine 的 SystemUI 宿主负责。
  */
 object NcWindowBackend {
 
-    const val PREF_KEY = "window_engine"
-    const val ENGINE_NC = "nc"
-    const val ENGINE_LEGACY = "legacy"
-
     private const val TAG = "NcWindowBackend"
-
-    fun selected(context: Context): String =
-        context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
-            .getString(PREF_KEY, ENGINE_NC) ?: ENGINE_NC
-
-    fun isNc(context: Context): Boolean = selected(context) == ENGINE_NC
 
     /**
      * 走新内核开窗。

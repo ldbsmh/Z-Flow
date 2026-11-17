@@ -38,14 +38,6 @@ class FreeformService : Service() {
         }
 
         val proxy = ZFlow.me.freeformManagerProxy
-        // 新内核不依赖 Z-Flow 在 system_server 的 AIDL 服务，只有回退旧路径时才检查连接。
-        if (!NcWindowBackend.isNc(this) && !proxy.isConnected) {
-            // system_server 侧尚未连上（Xposed 未激活或开机未完成），
-            // 直接丢弃请求，避免后续 NPE。
-            XLog.w("FreeformService: FreeformManager not connected, drop action=${intent.action}")
-            stopSelf()
-            return START_NOT_STICKY
-        }
 
         when (intent.action) {
             ACTION_START_INTENT -> handleStartIntent(intent, proxy)
@@ -101,16 +93,19 @@ class FreeformService : Service() {
             return
         }
 
-        if (NcWindowBackend.isNc(this)) {
-            // 新内核：交给 ncengine 以真实 freeform 任务开窗，其余尺寸/停靠由它自己管理。
-            val routed = if (pendingIntent != null) {
-                NcWindowBackend.openNotification(this, packageName, pendingIntent, null)
-            } else {
-                NcWindowBackend.openApp(this, packageName, miniMode, taskId)
-            }
-            if (routed) return
-            XLog.w("FreeformService: nc engine unavailable, fallback to legacy for $packageName")
+        // 内核固定为 NC：交给 ncengine 以真实 freeform 任务开窗，尺寸/停靠由它自己管理。
+        val routed = if (pendingIntent != null) {
+            NcWindowBackend.openNotification(this, packageName, pendingIntent, null)
+        } else {
+            NcWindowBackend.openApp(this, packageName, miniMode, taskId)
         }
+        if (routed) return
+        // 引擎不可用：只剩经典虚拟屏兜底，没有 system_server 侧服务就只能放弃。
+        if (!proxy.isConnected) {
+            XLog.w("FreeformService: nc engine unavailable, FreeformManager not connected, drop $packageName")
+            return
+        }
+        XLog.w("FreeformService: nc engine unavailable, fallback to legacy for $packageName")
 
         val sp = getSharedPreferences(ZFlow.APP_SETTINGS_NAME, MODE_PRIVATE)
         // DPI 由 system_server 中的 FreeformManager 强制跟随物理屏幕，

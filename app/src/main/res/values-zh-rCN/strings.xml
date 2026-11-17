@@ -2,7 +2,6 @@
     <string name="app_name">Z-Flow</string>
     <string name="warn">提示</string>
     <string name="done">确定</string>
-    <string name="cancel">取消</string>
 
     <string name="lorem_ipsum" >"a"</string>
     <string name="xposed_description">一个可以让应用程序以小窗模式运行的Xposed模块</string>
@@ -43,7 +42,6 @@
     <string name="about_version_title">版本</string>
     <string name="about_source_title">源代码</string>
     <string name="about_source_summary">GitHub 仓库</string>
-    <string name="summary_freeform_dpi">一般无需调整，小窗 DPI 跟随物理屏幕</string>
     <string name="quick_actions">快速操作</string>
     <string name="quick_action_permission">权限与激活</string>
     <string name="quick_action_sidebar_apps">侧边栏应用</string>
@@ -111,9 +109,6 @@
     <!--settings-->
     <string name="category_trigger">启动与触发</string>
     <string name="category_desktop_gesture">桌面与手势</string>
-    <string name="category_appearance">小窗外观与尺寸</string>
-    <string name="category_basic_size">基础尺寸</string>
-    <string name="category_visual_edge">视觉与边缘效果</string>
     <string name="category_rules">运行规则与交互</string>
     <string name="category_lifecycle">数量与生命周期</string>
     <string name="category_block">操作屏蔽</string>
@@ -127,21 +122,16 @@
     <string name="switch_hide_recent_summary">在Z-Flow中从多任务隐藏。划掉Z-Flow再重新进入即可生效</string>
     <string name="service_type_title">保活服务类型</string>
     <string name="service_type_summary">默认为无障碍。如果无障碍在你的设备上有问题，可以选择前台通知。切换到前台通知时，请确保无障碍处于关闭状态。如果无障碍在你的设备上运行正常，请不要选择前台通知</string>
-    <string name="preference_reset_overlay_setting">重置叠加层位置与大小</string>
-    <string name="preference_reset_overlay_setting_summary">重置包括记录的小窗位置和大小、侧边栏的位置。可用于以上两者跳出屏外或尺寸异常而无法控制的问题</string>
+    <string name="preference_reset_overlay_setting">重置侧边栏位置</string>
+    <string name="preference_reset_overlay_setting_summary">把记住的侧边栏纵向位置恢复默认。侧边栏跑到屏幕外或卡在异常位置时可用</string>
     <string name="compatible_title">兼容模式启动小窗（实验性）</string>
     <string name="compatible_summary">使用兼容模式启动小窗，该模式可以解决小窗内软件通知、全屏后等界面尺寸异常的问题。兼容模式小窗界面缩放比例下一版本支持。</string>
 
     <string name="category_freeform">小窗外观与行为</string>
-    <string name="setting_freeform_dpi_title">小窗内界面缩放</string>
     <string name="remember_position_title">记住悬浮小窗位置</string>
     <string name="remember_position_summary">记住上次悬浮时的位置</string>
     <string name="use_sui_refuse_to_fullscreen_title">使用Shizuku/Sui阻止应用跳出小窗到全屏(实验性)</string>
     <string name="use_sui_refuse_to_fullscreen_summary">暂时只支持Android 12+。该功能建议仅在没有Xposed或者Xposed阻止失败时启用。尝试使用Shizuku/Sui阻止小窗内的应用从小窗跳出到全屏。该功能仍在测试中，不保证阻止成功，并且会导致屏幕闪烁、卡顿等问题</string>
-    <string name="manual_adjust_freeform_rotation_title">手动调整小窗方向（实验性）</string>
-    <string name="manual_adjust_freeform_rotation_summary">开启后，允许通过双击底栏中部按钮来手动旋转小窗方向。因为设备的多样性，该功能未必达到预期，请理性看待</string>
-    <string name="ime_double_tap_retrigger_title">双击底栏中部重唤输入法</string>
-    <string name="ime_double_tap_retrigger_summary">小窗内点输入框后键盘没出来时，双击底栏中部按钮可重新唤起。关闭后双击只用于旋转小窗方向（需同时开启手动调整方向）</string>
 
     <string name="category_floating">侧边栏</string>
     <string name="switch_floating">全局侧边栏</string>
@@ -178,8 +168,6 @@
     <string name="reset_success">重置成功，部分设置重启Z-Flow后生效</string>
     <string name="require_start_accessibility">请开启无障碍服务后再试</string>
     <string name="require_stop_accessibility">请关闭无障碍服务后再试</string>
-    <string name="freeform_dpi_dialog_title">输入缩放值</string>
-    <string name="to_default">恢复默认</string>
 
     <!--QuickStartTileService-->
     <string name="choose_freeform_app">选择小窗应用</string>
@@ -249,9 +237,6 @@
 
     <!--task_view_menu_option-->
     <string name="recent_open_by_freeform">使用Z-Flow打开</string>
-    <string name="freeform_size_title">小窗大小</string>
-    <string name="freeform_size_land_title">横屏小窗大小</string>
-    <string name="freeform_float_view_size_title">小窗悬浮窗大小</string>
     <string name="nc_engine_enabled_title">NC 引擎总开关</string>
     <string name="nc_engine_enabled_summary">关闭后开窗交回经典虚拟屏内核，引擎的控制条同时停止。已经打开的小窗需要关掉重开</string>
     <string name="nc_auto_minimize_title">开新窗时上一个收成迷你窗</string>
@@ -267,9 +252,6 @@
     <string name="nc_hide_window_recents_summary">以小窗运行的任务不在桌面最近任务里出现。与「从最近任务隐藏 Z-Flow 自己」无关</string>
     <string name="nc_landscape_share_title">横屏分享开小窗</string>
     <string name="nc_landscape_share_summary">横屏下从分享面板选中的应用以窗口打开，而不是全屏</string>
-    <string name="freeform_dock_style_title">贴边把手露出比例</string>
-    <string name="freeform_dock_style_summary">小窗贴到屏幕边缘时露出的应用图标比例（28%～100%）</string>
-    <string name="freeform_dimming_amount_title">小窗背景变暗程度</string>
     <string name="category_sidebar">侧边栏</string>
     <string name="preference_freeform_blacklist_apps">小窗黑名单</string>
     <string name="preference_freeform_blacklist_apps_summary">黑名单中的应用不能以小窗模式打开</string>

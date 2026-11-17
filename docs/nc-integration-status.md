@@ -5,9 +5,11 @@
 
 ## 0. 背景速览
 
-Z-Flow 有两个可切换的小窗内核（设置 → 启动与触发 → **小窗内核**）：
+Z-Flow 的小窗内核**固定为 NC 引擎**（设置 → 启动与触发 → 桌面与手势 → NC 引擎总开关）。
+2026-11 精简时删掉了「小窗内核」选择器：经典虚拟屏内核只在引擎不可用/总开关关闭时
+作为内部兜底，不再有外观可调项，因此对应的设置页条目也一并删除了。
 
-| | 经典虚拟屏内核 | NC 引擎（NativeComplements，默认） |
+| | 经典虚拟屏（仅内部兜底） | NC 引擎（NativeComplements，默认） |
 |---|---|---|
 | 窗口本质 | 虚拟屏 + 应用内自绘窗口 | **真实 freeform 任务**（WMS 层接管） |
 | 运行位置 | Z-Flow 自己的进程 | system_server（窗口引擎）+ SystemUI（控件层） |
@@ -22,7 +24,8 @@ Z-Flow 有两个可切换的小窗内核（设置 → 启动与触发 → **小�
    `SETTINGS_CHANGED` 广播，SystemUI 宿主重拉快照。
 
 **外观（尺寸/迷你比例/变暗/贴边样式）不随请求下发**：引擎窗口支持长按调整大小，
-几何由引擎自己的默认值决定；Z-Flow 设置页里那几项只对经典虚拟屏内核生效。
+几何由引擎自己的默认值决定。原本对应这些键的设置页条目（含整块「小窗外观与尺寸」）
+已在本轮一并删除，避免“调了没反应”。
 
 ## 1. 已接入且真机验证通过 ✅
 
@@ -81,12 +84,19 @@ Z-Flow 有两个可切换的小窗内核（设置 → 启动与触发 → **小�
 
 小窗黑名单（Room）仍由 Z-Flow 侧 `isBlacklistedOrBlock()` 拦在开窗前，对两个内核一视同仁。
 
-### 3.2 只对经典虚拟屏内核生效的外观设置
+### 3.2 外观类设置：条目已删除
 
 `freeform_size` / `freeform_size_land` / `freeform_float_view_size` /
-`freeform_dimming_amount` / `freeform_dock_style` / `max_freeform_windows` /
-横屏应用名单 —— 这些设置页项保留（经典内核读它们），**NC 引擎不再消费**：
-引擎窗口支持长按调整大小，几何比例用引擎自己的默认值（竖屏 75%、横屏 90%、迷你 28%）。
+`freeform_dimming_amount` / `freeform_dock_style` / `freeform_scale` /
+`manual_adjust_freeform_rotation` / `ime_double_tap_retrigger`，连同
+`max_freeform_windows` 与「小窗内核」选择器——这批设置页条目已整体删除，
+整块「小窗外观与尺寸」页面也不再存在。
+
+原因：NC 引擎不消费它们（窗口长按即可调整大小，几何用引擎默认值：竖屏 75%、
+横屏 90%、迷你 28%、dim 20%、把手完全露出），留着就是“调了没反应”。
+经典内核作为兜底仍会读这些键，读不到就走默认值，不影响开窗。
+
+横屏应用名单（`landscape_apps`）保留：它决定“哪些应用以横屏小窗打开”，仍有意义。
 
 ## 4. 本轮精简：已删除的 NC 功能 ❌
 
@@ -95,7 +105,7 @@ Z-Flow 有两个可切换的小窗内核（设置 → 启动与触发 → **小�
 | 删除项 | 理由 |
 |---|---|
 | **角落扇形菜单全套**（FanView/HotspotView/CornerGesture/快捷操作面板） | 斜向滑动呼出的应用扇区与 Z-Flow 的轮盘（在 Z-Flow 项目的**另一个分支**实现）高度拟合；连同扇区专属的快捷操作（Wi-Fi/免打扰/截屏/录屏/亮度/音量/媒体控制，`WindowQuickHost` + `QuickActionCatalog`）、热区参数（`Config` 里 heat/distance/radius/icon/fanCount 等 10 项）、`LauncherGuard`（Pixel Launcher hook）一并移除 |
-| **外观设置 8 项接入**（`WindowSettings` Bundle 通道、`SETTINGS` 指令、`dockStyle`/`maxWindows` extra） | 引擎已有长按调整大小；尺寸/比例/变暗/贴边样式交回引擎默认值 |
+| **外观设置 8 项接入**（`WindowSettings` Bundle 通道、`SETTINGS` 指令、`dockStyle`/`maxWindows` extra），以及设置页里对应的 8 个条目 | 引擎已有长按调整大小；尺寸/比例/变暗/贴边样式交回引擎默认值，设置项留着也是假开关 |
 | **通知点击接管**（`NotificationWindow`，从未安装的死代码） | Z-Flow 自己的通知钩子（带白名单）已覆盖 |
 | **录屏 QS 磁贴适配**（`WindowTools`） | 只服务于扇区的「录屏」快捷操作 |
 | **长按返回手势死代码**（`LongBackGesture`/`BackSwipe`/`BackHandoffState`） | 引擎内零引用（上游管理器侧功能） |
@@ -114,16 +124,16 @@ viewport 一致性）、`WindowContinuation`（贴边保活）。
 | 功能 | 原因 / 备注 |
 |---|---|
 | 尺寸类设置的就地重排 | 已打开的窗口不跟随设置变化；如需支持要引擎加「按新几何重算当前会话」的遍历 |
-| 引擎安装失败的自动回退 | `SunWindowModule` 预检不过时表现为「点了没反应」，需手动切回经典内核 |
-| 数量上限的设置接入 | 引擎固定默认 2 个（`maxWindows` 字段保留，extra 通道已删）；`max_freeform_windows` 只对经典内核生效 |
-| `manual_adjust_freeform_rotation` | 引擎有旋转门控（`RotationGate`）但没有「手动调整」入口 |
+| 引擎安装失败的自动回退 | `SunWindowModule` 预检不过时开窗会静默走经典兜底；「小窗内核」选择器已删，没有手动切换入口 |
+| 数量上限的设置接入 | 引擎固定默认 2 个（`maxWindows` 字段保留，extra 通道已删）；`max_freeform_windows` 设置项已删除，经典内核回退时取默认 2 |
+| `manual_adjust_freeform_rotation` | 引擎有旋转门控（`RotationGate`）但没有「手动调整」入口，设置项已删除 |
 
 ## 6. 不能实现——引擎架构层面无对应能力 ❌
 
 | Z-Flow 设置 | 为什么做不到 |
 |---|---|
 | `freeform_scale`（DPI 缩放） | 引擎接管的是真实 task，DPI 由系统配置决定；旧实现自己也不生效 |
-| `ime_double_tap_retrigger` | 旧实现底栏的 IME 方案，NC 引擎没有底栏，IME 完全交给系统 |
+| `ime_double_tap_retrigger` | 旧实现底栏的 IME 方案，NC 引擎没有底栏，IME 完全交给系统；设置项已删除 |
 
 **与内核无关、不适用搬运的**（两内核行为相同）：`hide_from_recent`（隐藏的是
 Z-Flow 自己）、`popup_bubble_block`（通知气泡拦截）、`trusted_callers`、保活

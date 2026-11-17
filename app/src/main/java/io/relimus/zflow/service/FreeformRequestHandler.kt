@@ -308,16 +308,11 @@ object FreeformRequestHandler {
         }
 
         val proxy = FreeformManagerProxy
-        val ncBackend = NcWindowBackend.isNc(context)
         android.util.Log.i(
             "ZFlowMini",
             "create component=$componentName taskId=$taskId mini=$miniMode " +
-                "nc=$ncBackend proxyConnected=${proxy.isConnected}"
+                "proxyConnected=${proxy.isConnected}"
         )
-        if (!ncBackend && !proxy.isConnected) {
-            XLog.w("$TAG create: FreeformManager not connected (LSPosed 未激活或系统服务未就绪)")
-            return false
-        }
 
         // 说明：hook 侧只做“尽量过滤”，最终裁决在这里。
         // 这里必须真的 fail-closed，同时把原因写进 LSPosed 日志，
@@ -327,16 +322,19 @@ object FreeformRequestHandler {
             return false
         }
 
-        if (ncBackend) {
-            // 新内核：真实 freeform 任务 + SystemUI 控件层，不再创建 VirtualDisplay。
-            val routed = if (pendingIntent != null) {
-                NcWindowBackend.openNotification(context, packageName, pendingIntent, null)
-            } else {
-                NcWindowBackend.openApp(context, packageName, miniMode, taskId)
-            }
-            if (routed) return true
-            XLog.w("$TAG create: nc engine unavailable, falling back to legacy window for $packageName")
+        // 内核固定为 NC：真实 freeform 任务 + SystemUI 控件层，不创建 VirtualDisplay。
+        val routed = if (pendingIntent != null) {
+            NcWindowBackend.openNotification(context, packageName, pendingIntent, null)
+        } else {
+            NcWindowBackend.openApp(context, packageName, miniMode, taskId)
         }
+        if (routed) return true
+        // 引擎不可用（未安装模块 / 总开关关闭）：只剩经典虚拟屏兜底，需要 AIDL 服务在线。
+        if (!proxy.isConnected) {
+            XLog.w("$TAG create: nc engine unavailable and FreeformManager not connected")
+            return false
+        }
+        XLog.w("$TAG create: nc engine unavailable, falling back to legacy window for $packageName")
 
         val sp = context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
         // 与 system_server 侧一致：DPI 实际跟随物理屏幕，这里仅作占位传递。

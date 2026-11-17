@@ -6,16 +6,12 @@ import android.content.SharedPreferences
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
-import androidx.appcompat.widget.AppCompatEditText
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
-import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreference
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
-import com.google.android.material.textfield.TextInputLayout
 import io.relimus.zflow.BuildConfig
 import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
@@ -29,7 +25,7 @@ import io.relimus.zflow.ui.view.IntegerSimpleMenuPreference
 import io.relimus.zflow.utils.PermissionUtils
 
 /**
- * 设置页。顶层四分类：打开方式 / 小窗外观与行为 / 运行与高级 / 关于，
+ * 设置页。顶层四分类：启动与触发 / 运行规则与交互 / 通知与保活 / 高级与开发者，
  * 子页由 [FreeformSettingsActivity] 按 root_key 承载。
  */
 class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClickListener,
@@ -39,13 +35,12 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
 
     companion object {
         private const val KEY_TRIGGER = "pref_trigger_settings"
-        private const val KEY_APPEARANCE = "pref_appearance_settings"
         private const val KEY_RULES = "pref_rules_settings"
         private const val KEY_KEEPALIVE = "pref_keepalive_settings"
         private const val KEY_ADVANCED = "pref_advanced_settings"
 
         private val TOP_LEVEL_KEYS =
-            listOf(KEY_TRIGGER, KEY_APPEARANCE, KEY_RULES, KEY_KEEPALIVE, KEY_ADVANCED)
+            listOf(KEY_TRIGGER, KEY_RULES, KEY_KEEPALIVE, KEY_ADVANCED)
 
         private const val URL_OPEN_API = "https://github.com/ldbsmh/Z-Flow/blob/import/open_api_zh-Hans.md"
         private const val URL_SOURCE = "https://github.com/ldbsmh/Z-Flow"
@@ -70,14 +65,8 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             KEY_TRIGGER -> {
                 findPreference<SwitchPreference>("show_floating")!!.onPreferenceChangeListener = this
                 findPreference<Preference>("quick_floating_app")!!.onPreferenceClickListener = this
-                findPreference<Preference>("trusted_callers")?.onPreferenceClickListener = this
-            }
-
-            KEY_APPEARANCE -> {
-                findPreference<SeekBarPreference>("freeform_scale")?.apply {
-                    onPreferenceClickListener = this@SettingFragment
-                }
                 findPreference<Preference>("reset_overlay_setting")?.onPreferenceClickListener = this
+                findPreference<Preference>("trusted_callers")?.onPreferenceClickListener = this
             }
 
             KEY_RULES -> {
@@ -109,7 +98,6 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
 
     private fun updateAllSummaries() {
         updateTriggerSummary()
-        updateAppearanceSummary()
         updateRulesSummary()
         updateKeepAliveSummary()
         updateAdvancedSummary()
@@ -123,17 +111,10 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             "侧边栏：${if (sidebar) "开" else "关"}·$pos | 桌面长按：${if (desktop) "开" else "关"}"
     }
 
-    private fun updateAppearanceSummary() {
-        val size = sp.getInt("freeform_size", 75)
-        val scale = sp.getInt("freeform_scale", 50)
-        findPreference<Preference>(KEY_APPEARANCE)?.summary =
-            "大小：$size% | 缩放：$scale"
-    }
-
     private fun updateRulesSummary() {
-        val maxWin = sp.getInt("max_freeform_windows", 2)
+        val autoMin = sp.getBoolean("nc_auto_minimize", true)
         findPreference<Preference>(KEY_RULES)?.summary =
-            "小窗上限：$maxWin 个 | 黑名单与横屏名单见内页"
+            "开新窗时收起上一个：${if (autoMin) "开" else "关"} | 黑名单与横屏名单见内页"
     }
 
     private fun updateKeepAliveSummary() {
@@ -203,10 +184,6 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
                 Snackbar.make(requireView(), getString(R.string.reset_success), Snackbar.LENGTH_SHORT).show()
             }
 
-            key == "freeform_scale" -> {
-                showDpiDialog(preference as SeekBarPreference)
-            }
-
             key == "about_open_api" -> {
                 startActivity(Intent(Intent.ACTION_VIEW, URL_OPEN_API.toUri()))
             }
@@ -216,24 +193,6 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
             }
         }
         return true
-    }
-
-    private fun showDpiDialog(pref: SeekBarPreference) {
-        val editView = layoutInflater.inflate(R.layout.view_edit, null, false)
-        editView.findViewById<TextInputLayout>(R.id.til_freeform_dpi)
-        val editText = editView.findViewById<AppCompatEditText>(R.id.edit_freeform_dpi)
-        MaterialAlertDialogBuilder(requireContext()).apply {
-            setTitle(getString(R.string.freeform_dpi_dialog_title))
-            setView(editView)
-            setPositiveButton(getString(R.string.done)) { _, _ ->
-                editText.text?.toString()?.toIntOrNull()?.takeIf { it in 50..500 }?.let { pref.value = it }
-            }
-            setNegativeButton(getString(R.string.cancel)) { _, _ -> }
-            setNeutralButton(getString(R.string.to_default)) { _, _ ->
-                pref.value = 0
-            }
-            create().show()
-        }
     }
 
     override fun onPreferenceChange(preference: Preference, newValue: Any): Boolean {

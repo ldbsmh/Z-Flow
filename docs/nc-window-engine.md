@@ -38,7 +38,7 @@ Z-Flow/
 ```
 侧边栏 / 磁贴 / 通知 / 桌面长按
    → FreeformRequestHandler.create() 或 FreeformService
-   → NcWindowBackend（读 window_engine 偏好）
+   → NcWindowBackend（内核固定 NC；引擎不可用时内部回退经典）
    → Engine.openApp / openNotification
    → 广播 io.relimus.zflow.COMMAND（发给 android 包 = system_server）
    → ncengine WindowEngine（真实 freeform 任务）
@@ -148,10 +148,10 @@ ClassLoader，桌面里的类一个都找不到。
 
 ## 开关
 
-设置 → 启动与触发 → 桌面手势 → **小窗内核**
+设置 → 启动与触发 → 桌面与手势 → **NC 引擎总开关**（`nc_engine_enabled`）。
 
-- `NativeComplements 内核（真实 freeform 任务）`：默认值。
-- `经典虚拟屏内核（原实现）`：回退用，行为与改动前一致。
+内核选择（`window_engine`：NC / 经典虚拟屏）已随设置页精简删除，**固定走 NC**。
+总开关关掉时，开窗请求不再交给引擎，Z-Flow 内部回退经典虚拟屏（仅有默认值，无外观可调）。
 
 首次以新内核开窗时，会把引擎侧总开关（`corner.enabled`）同步为开启，
 否则 SystemUI 控件层不会绘制。
@@ -182,7 +182,7 @@ ClassLoader，桌面里的类一个都找不到。
 | 位置 | 原实现 | 现实现 |
 |---|---|---|
 | 贴边后的把手 | 屏幕边一条 4dp×48dp 白条（`WindowControls` 里手绘） | Z-Flow 的把手外观：60dp 白色圆角底衬（`#F2FFFFFF`，圆角近半）+ 居中应用图标（占 80%）。图标按 `package` 缓存，在 SystemUI 进程用 `PackageManager.getApplicationIcon` 加载；失败只记 `EDGE_ICON_UNAVAILABLE`，退化成纯白底衬，不影响点击/拖动/还原 |
-| 拖到底部关闭 | 复用 SystemUI 消息气泡的 `floating_dismiss_*` 圆形取消按钮，要把窗口拖进那个圆 | Z-Flow 的“滑到底部渐变消失”：关闭区是屏幕底部 15%，不画任何图标；窗口底边越进关闭区，`MiniMagnet` 进度越深，窗口渐隐（1→0.15）并缩到 35%，松手即关闭 |
+| 拖到底部关闭 | 复用 SystemUI 消息气泡的 `floating_dismiss_*` 圆形取消按钮，要把窗口拖进那个圆 | Z-Flow 的“滑到底部渐变消失”，且**只从贴边把手拖出的窗口**才生效：关闭区是屏幕底部 15%，不画任何图标；窗口底边越进关闭区，`MiniMagnet` 进度越深，窗口渐隐（1→0.15）并缩到 35%，松手即关闭。拖动迷你窗本体到底部没有任何功能 |
 
 `MiniMagnet` 从“圆形命中 + 二值”改成了“跟随一个连续目标值”：
 
@@ -193,15 +193,25 @@ miniMagnet.follow((窗口底边 - 关闭区顶部) / 关闭区高度);  // 0..1
 `progress()` 仍是 120ms 的平滑逼近，`latched()` 取 `progress >= 0.5`，所以“松手是否关闭”的
 阈值语义与原来的按钮命中一致，只是不再需要瞄准。
 
-拖动时窗口位置完全跟随手指，不再往关闭区中心吸附；因此补了 `clampMiniX/Y`，
-保证窗口不会被拖出屏幕。
+拖动时窗口位置完全跟随手指，不再往关闭区中心吸附。水平方向必须允许窗口越过屏幕边缘
+（`clampMiniX` 只保留右侧溢出上限，不设下限）：引擎的贴边判定要求窗口移出 1/3 宽
+（`Geometry.hideSide`），若把 x 钳在 `[0, displayW-width]`，判定永远不成立，贴边会退化成
+「吸附到边」。纵向仍由 `clampMiniY` 保证不出屏。
+
+**关闭只有一个入口**：按住贴边把手把窗口拖出来，拖进底部关闭区松手。
+把手拖动复用迷你窗拖动通道（`MINI_DRAG`，引擎在该状态下先解除 `edgeHidden`），
+所以窗口从边上跟手拉出、渐隐、松手关闭是一条连续手势。
+
+拖动迷你窗本体只负责移动：不显示关闭区、不启动 `MiniMagnet`、松手不关闭，
+松手仍按 `DOCK` 吸附到就近侧边。`updateMiniDrag(..., dismissible)` 的最后一个参数
+就是这条分界。
 
 ## 多个迷你窗与数量上限
 
 引擎原来只有「前台窗 + 一个挂起的迷你窗」两个位置（`Session active` / `Session pinned`），
 连开第二个应用时前一个会被关掉。现在 `pinned` 是列表，容量固定为引擎默认 2
-（`WindowEngine.maxWindows`；设置页的「最多同时小窗数量」只对经典内核生效）。
-超限时淘汰最旧的迷你窗，记 `MINI_EVICT`。
+（`WindowEngine.maxWindows`）。原来接设置项的「最多同时小窗数量」已在精简时删除，
+引擎不再读 `maxWindows` extra。超限时淘汰最旧的迷你窗，记 `MINI_EVICT`。
 
 `WindowEngine` 侧的关键约定：
 
@@ -227,22 +237,32 @@ SystemUI 侧从「一个 `miniControls`」改成「按 taskId 复用的 `WindowC
 设置页在 Z-Flow app 进程，引擎在 system_server。引擎不读对方的 SharedPreferences
 （部分 ROM 上会被 SELinux 拦）。对接分两类：
 
-### 外观设置：不再下发
+### 外观设置：设置项已整体删除
 
 引擎窗口支持长按调整大小，尺寸/迷你比例/变暗/贴边样式用引擎自己的默认值
-（竖屏 75%、横屏 90%、迷你 28%、dim 20%、把手完全露出）。Z-Flow 设置页里那几项
-（`freeform_size` / `freeform_size_land` / `freeform_float_view_size` /
-`freeform_dimming_amount` / `freeform_dock_style` / `max_freeform_windows` /
-横屏应用名单）只对经典虚拟屏内核生效。`WindowSettings` Bundle 通道、`SETTINGS`
-指令、`dockStyle`/`maxWindows` extra 已在 2026-11 精简时移除。
+（竖屏 75%、横屏 90%、迷你 28%、dim 20%、把手完全露出）。
 
-**没有搬的三项**（引擎确实没有对应能力，硬接就是假开关）：
+2026-11 精简时先把这些设置的下发通道删掉（`WindowSettings` Bundle、`SETTINGS` 指令、
+`dockStyle`/`maxWindows` extra），随后又把设置页里对应的条目一并删除——留着就是
+「调了没反应」。删掉的 8 项：
 
-- `freeform_scale`（DPI）：旧实现自己也写明「实际跟随物理屏幕」，引擎接管真实 task，DPI 由系统配置决定。
-- `manual_adjust_freeform_rotation`：NC 有旋转门控（`RotationGate`），但没有「手动调整」入口。
-- `ime_double_tap_retrigger`：这是旧实现底栏的方案，NC 没有底栏，IME 由系统处理。
+| 设置页键 | 原语义 |
+|---|---|
+| `freeform_size` | 小窗大小 |
+| `freeform_size_land` | 横屏小窗大小 |
+| `freeform_float_view_size` | 小窗悬浮窗大小 |
+| `freeform_dimming_amount` | 小窗背景变暗程度 |
+| `freeform_dock_style` | 贴边把手露出比例 |
+| `freeform_scale` | 小窗内界面缩放（DPI） |
+| `manual_adjust_freeform_rotation` | 手动调整小窗方向 |
+| `ime_double_tap_retrigger` | 双击底栏中部重唤输入法 |
 
-`popup_bubble_block` 属于通知气泡拦截，不在小窗链路上，也没有搬。
+连同整块「小窗外观与尺寸」页面、`window_engine`（内核选择）、
+`max_freeform_windows`（小窗数量上限）一起去掉。键仍在代码里以默认值兜底
+（`FreeformRequestHandler` / `FreeformService` 读不到就走默认），所以经典内核
+回退路径不会崩，只是没有可调项。
+
+`popup_bubble_block` 属于通知气泡拦截，不在小窗链路上，没有搬。
 
 ### 引擎原生设置（`corner` 偏好镜像）
 
@@ -288,10 +308,10 @@ NC 引擎自己有一套 `corner` 偏好（`Config.java`），SystemUI 宿主启
 
 ## 已知缺口（待后续阶段）
 
-1. 外观设置只对经典内核生效；NC 引擎用自身默认值（长按可调整大小），
-   已开的窗口不会就地重排。
-2. 引擎安装失败（例如 `SunWindowModule` 的 `startOtherServices` deopt 预检不过）时不会自动回退，
-   表现为“点了没反应”，需要在设置里手动切回经典内核。
+1. 外观不可调：NC 引擎用自身默认值（长按可调整大小），设置页没有对应入口。
+2. 引擎安装失败（例如 `SunWindowModule` 的 `startOtherServices` deopt 预检不过）时，
+   开窗会静默回退到经典虚拟屏（关掉「NC 引擎总开关」也是这条路径）；内核选择项已删除，
+   没有「切回经典」的手动开关。
 3. 引擎总开关已单独暴露（`nc_engine_enabled`）；角落扇区已整体删除
    （斜滑菜单由 Z-Flow 另一分支的轮盘承担）。
 4. 真机未验证：`Wire` 协议、`WindowEngine` 的 WMS Hook、SystemUI 宿主在当前 ROM 上的可用性。
