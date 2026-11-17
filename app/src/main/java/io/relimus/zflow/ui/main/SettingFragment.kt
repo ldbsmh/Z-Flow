@@ -21,6 +21,7 @@ import io.relimus.zflow.R
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.service.ForegroundService
 import io.relimus.zflow.service.KeepAliveService
+import io.relimus.zflow.service.NcWindowBackend
 import io.relimus.zflow.ui.choose_apps.ChooseAppsActivity
 import io.relimus.zflow.ui.choose_apps.ChooseAppsViewModel
 import io.relimus.zflow.ui.permission.PermissionActivity
@@ -48,6 +49,15 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
 
         private const val URL_OPEN_API = "https://github.com/ldbsmh/Z-Flow/blob/import/open_api_zh-Hans.md"
         private const val URL_SOURCE = "https://github.com/ldbsmh/Z-Flow"
+
+        /** 与 NC 引擎对应的外观项；其它设置项引擎没有对应能力，不在这里触发。 */
+        private val NC_SETTINGS_KEYS = setOf(
+            "freeform_size",
+            "freeform_size_land",
+            "freeform_float_view_size",
+            "freeform_dimming_amount",
+            "freeform_dock_style",
+        )
 
         fun newInstance(rootKey: String): SettingFragment {
             return SettingFragment().apply {
@@ -306,5 +316,24 @@ class SettingFragment : PreferenceFragmentCompat(), Preference.OnPreferenceClick
         if (arguments == null || arguments?.getString(ARG_PREFERENCE_ROOT) == null) {
             updateAllSummaries()
         }
+        sp.registerOnSharedPreferenceChangeListener(ncSettingsListener)
     }
+
+    override fun onPause() {
+        sp.unregisterOnSharedPreferenceChangeListener(ncSettingsListener)
+        super.onPause()
+    }
+
+    /**
+     * 小窗外观改动后同步给 NC 引擎。
+     *
+     * 引擎跑在 system_server，读不到本应用的 SP；这里把新值推过去，
+     * 变暗立刻生效，尺寸/迷你比例/贴边样式在下次开窗时应用。
+     */
+    private val ncSettingsListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key != null && key in NC_SETTINGS_KEYS && isAdded) {
+                NcWindowBackend.reloadSettings(requireContext())
+            }
+        }
 }

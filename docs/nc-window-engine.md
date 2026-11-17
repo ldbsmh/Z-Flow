@@ -220,10 +220,43 @@ SystemUI 侧从「一个 `miniControls`」改成「按 taskId 复用的 `WindowC
 贴边把手、IME 偏移、系统遮挡、`protectedRects` 都对全部实例聚合。旧引擎只发
 `pinnedFrame`，宿主仍兼容单个的情形。
 
+## 设置项对接（Z-Flow 设置 → NC 引擎）
+
+设置页在 Z-Flow app 进程，引擎在 system_server。引擎不读对方的 SharedPreferences
+（部分 ROM 上会被 SELinux 拦），**统一由客户端读好、随请求下发**：
+
+```
+设置页 → app_settings → NcWindowBackend.windowSettings() 打包 Bundle
+   → Engine.openApp(..., Bundle) / openNotification(..., Bundle)
+   → OPEN 的 windowSettings extra → WindowSettings.from(Bundle) → WindowEngine.settings
+```
+
+| Z-Flow 设置项 | 引擎落点 | 生效时机 |
+|---|---|---|
+| `freeform_size`（10~100，默认 75） | `Geometry.place()` 竖屏 scale | 下次开窗 |
+| `freeform_size_land`（10~100，默认 90） | `Geometry.place()` 横屏分支（以 90 为基准折算，默认值下与旧硬编码一致） | 下次开窗 |
+| `freeform_float_view_size`（10~50，默认 20） | `Geometry.miniTopRight()` 的 `small`（原为固定 .28） | 下次开窗 |
+| `freeform_dimming_amount`（0~100，默认 20） | `WindowEngine.windowDim` → `TaskDecoration.dimAmount()` | **立即**（`SETTINGS` 指令重刷） |
+| `freeform_dock_style`（28~100，默认 100） | 帧报文 `dockStyle` → `WindowControls` 把手露出比例 | 下一帧 |
+| `max_freeform_windows`（1~5，默认 2） | `WindowEngine.maxWindows` | 下次开窗 |
+| 横屏应用名单（`landscape_apps` SP） | `prepareGeometry()` 里强制 `s.landscape=true` | 下次开窗 |
+| 小窗黑名单（Room） | Z-Flow 侧 `isBlacklistedOrBlock()` 拦在开窗前，引擎不参与 | 每次开窗 |
+
+设置页改动后由 `SettingFragment` 的监听器推一条 `SETTINGS` 指令：变暗立刻重绘，
+尺寸/迷你比例/贴边样式不做就地重排（会让窗口当场跳动），留到下一次开窗。
+
+**没有搬的三项**（引擎确实没有对应能力，硬接就是假开关）：
+
+- `freeform_scale`（DPI）：旧实现自己也写明「实际跟随物理屏幕」，引擎接管真实 task，DPI 由系统配置决定。
+- `manual_adjust_freeform_rotation`：NC 有旋转门控（`RotationGate`），但没有「手动调整」入口。
+- `ime_double_tap_retrigger`：这是旧实现底栏的方案，NC 没有底栏，IME 由系统处理。
+
+`popup_bubble_block` 属于通知气泡拦截，不在小窗链路上，也没有搬。
+
 ## 已知缺口（待后续阶段）
 
-1. Z-Flow「小窗外观与尺寸 / 运行规则」里的尺寸比例、贴边样式、黑名单、横屏应用清单，
-   目前只对新内核之外的旧实现生效；新内核用自身的几何与策略。数量上限已接通（见上一节）。
+1. Z-Flow「运行规则」里的黑名单、横屏清单已接通（黑名单在 Z-Flow 侧拦截），
+   但尺寸类设置只在**下一次开窗**时应用，已开的窗口不会就地重排。
 2. 引擎安装失败（例如 `SunWindowModule` 的 `startOtherServices` deopt 预检不过）时不会自动回退，
    表现为“点了没反应”，需要在设置里手动切回经典内核。
 3. NC 自带的角落扇区随总开关一起启用，尚未提供单独的 Z-Flow 开关。

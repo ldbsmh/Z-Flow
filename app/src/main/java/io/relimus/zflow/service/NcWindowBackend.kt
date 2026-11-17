@@ -2,6 +2,7 @@ package io.relimus.zflow.service
 
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import dev.local.sunwindowdemo.Engine
 import io.relimus.zflow.app.ZFlow
 import io.relimus.zflow.xposed.hook.utils.XLog
@@ -42,6 +43,34 @@ object NcWindowBackend {
     fun isNc(context: Context): Boolean = selected(context) == ENGINE_NC
 
     /**
+     * Z-Flow「小窗外观与尺寸」里的几项，打包给引擎。
+     *
+     * 引擎跑在 system_server，直接读本应用目录在部分 ROM 上会被 SELinux 拦，
+     * 所以这里读到什么就随请求带过去；缺项由引擎按默认值补齐。
+     */
+    private fun windowSettings(context: Context, packageName: String): Bundle {
+        val sp = context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+        return Bundle().apply {
+            putInt("size", sp.getInt("freeform_size", 75))
+            putInt("sizeLand", sp.getInt("freeform_size_land", 90))
+            putInt("miniSize", sp.getInt("freeform_float_view_size", 20))
+            putInt("dim", sp.getInt("freeform_dimming_amount", 20))
+            putInt("dockStyle", sp.getInt("freeform_dock_style", 100))
+            putBoolean("landscape", isLandscapeApp(context, packageName))
+        }
+    }
+
+    /**
+     * 横屏名单存在 LandscapeAppsProvider 的独立 SP 里（键=包名，值=true）。
+     * 这里只取当前包的一个布尔值，不搬整份名单。
+     */
+    private fun isLandscapeApp(context: Context, packageName: String): Boolean =
+        context.getSharedPreferences(LANDSCAPE_PREFS, Context.MODE_PRIVATE)
+            .getBoolean(packageName, false)
+
+    private const val LANDSCAPE_PREFS = "landscape_apps"
+
+    /**
      * 走新内核开窗。
      *
      * @return true 表示请求已交给引擎；false 表示引擎不可用，调用方应回退旧路径。
@@ -55,7 +84,10 @@ object NcWindowBackend {
         return try {
             syncEnabled(context)
             val limit = maxWindows(context)
-            Engine.openApp(context, packageName, taskId, miniMode, limit)
+            Engine.openApp(
+                context, packageName, taskId, miniMode, limit,
+                windowSettings(context, packageName)
+            )
             XLog.i(
                 "$TAG: OPEN via nc engine pkg=$packageName task=$taskId mini=$miniMode max=$limit"
             )
@@ -73,6 +105,17 @@ object NcWindowBackend {
         }
     }
 
+    /**
+     * 设置页改了外观：让已开的小窗立刻应用变暗值。
+     *
+     * 尺寸、迷你比例、贴边样式都要重新算几何，强行应用会让窗口当场跳动，
+     * 所以那几项留给下一次开窗；变暗只是图层 alpha，可以立即生效。
+     */
+    fun reloadSettings(context: Context) {
+        runCatching { Engine.reloadSettings(context, windowSettings(context, "")) }
+            .onFailure { XLog.w("$TAG: reload settings failed: ${it.message}") }
+    }
+
     /** 通知整条 PendingIntent 开窗（保留着陆页）。 */
     fun openNotification(
         context: Context,
@@ -82,7 +125,10 @@ object NcWindowBackend {
     ): Boolean {
         return try {
             syncEnabled(context)
-            Engine.openNotification(context, packageName, launch, fill)
+            Engine.openNotification(
+                context, packageName, launch, fill,
+                windowSettings(context, packageName)
+            )
             XLog.i("$TAG: OPEN(notification) via nc engine pkg=$packageName")
             true
         } catch (t: Throwable) {

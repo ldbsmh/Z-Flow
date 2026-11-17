@@ -46,13 +46,30 @@ public final class Engine {
      *                   Z-Flow 的「最多同时小窗数量」就是通过它下发的。
      */
     public static boolean openApp(Context context,String packageName,int taskId,boolean mini,int maxWindows){
-        Wire.openApp(context,packageName,taskId,true,mini,maxWindows);
+        return openApp(context,packageName,taskId,mini,maxWindows,null);
+    }
+
+    /**
+     * @param windowSettings Z-Flow 的外观设置（尺寸、迷你比例、变暗、贴边样式、横屏），可为 null。
+     */
+    public static boolean openApp(Context context,String packageName,int taskId,boolean mini,int maxWindows,android.os.Bundle windowSettings){
+        Wire.openApp(context,packageName,taskId,true,mini,maxWindows,windowSettings);
         return true;
+    }
+
+    /** 设置页改了小窗外观：让引擎刷新能立刻生效的部分（变暗）。 */
+    public static void reloadSettings(Context context,android.os.Bundle windowSettings){
+        Wire.reloadSettings(context,windowSettings);
     }
 
     /** 通过通知的 PendingIntent 打开小窗，保留原始着陆 Activity。 */
     public static boolean openNotification(Context context,String packageName,PendingIntent launch,Intent fill){
-        Wire.openNotification(context,packageName,launch,fill,null);
+        return openNotification(context,packageName,launch,fill,null);
+    }
+
+    /** @param windowSettings Z-Flow 的外观设置，可为 null（引擎按默认值开窗）。 */
+    public static boolean openNotification(Context context,String packageName,PendingIntent launch,Intent fill,android.os.Bundle windowSettings){
+        Wire.openNotification(context,packageName,launch,fill,null,windowSettings);
         return true;
     }
 

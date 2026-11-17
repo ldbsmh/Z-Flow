@@ -149,6 +149,10 @@ final class WindowEngine {
     private volatile java.util.List<Session> pinned=java.util.List.of();
     /** 同时存在的小窗上限（含前台窗），由打开请求携带，默认 2 与旧行为一致。 */
     private volatile int maxWindows=2;
+    /** Z-Flow 的外观设置（尺寸、迷你比例、变暗、贴边样式、横屏名单），随 OPEN 更新。 */
+    private volatile WindowSettings settings=WindowSettings.defaults();
+    /** 客户端下发过变暗值后，SystemUI 的本地设置不再覆盖它。 */
+    private volatile boolean dimFromClient;
     private BackPreparation backPreparation;
     private record BackPreparation(Object task,String token,TaskVisibilityGuard mask,TaskCover cover,IBinder lease){}
     private boolean prepareBack(int id,String pkg,String token,android.graphics.RectF pose,float radius,android.view.SurfaceControl leash){
@@ -423,7 +427,7 @@ final class WindowEngine {
                             landscapeShareWindow=i.getBooleanExtra("landscapeShareWindow",false);
                             autoMinimizeOnOpen=i.getBooleanExtra("autoMinimizeOnOpen",true);
                             endOnClose=i.getBooleanExtra("endOnClose",false);keepEdgeAwake=i.getBooleanExtra("keepEdgeAwake",false);
-                            windowDim=Rules.clamp(i.getIntExtra("windowDim",Config.DEFAULT_WINDOW_DIM),0,100);
+                            windowDim=dimFromClient?windowDim:Rules.clamp(i.getIntExtra("windowDim",Config.DEFAULT_WINDOW_DIM),0,100);
                             handler.post(WindowEngine.this::updateContinuation);
                             uiTouch=i.getStringExtra("lastTouch");
                             if(extras.getBinder("frameChannel")!=null)frameSink=extras.getBinder("frameChannel");
@@ -494,6 +498,25 @@ final class WindowEngine {
                 report("STATUS",requestId);return;
             }
             if(i.getIntExtra("protocol",0)!=Wire.PROTOCOL) throw new IllegalStateException("请重启加载 0.2.0 后端");
+            if ("SETTINGS".equals(op)) {
+                // 只重刷变暗：改尺寸/迷你比例要重新算几何，留给下一次开窗，避免窗口当场跳动。
+                Bundle windowSettings=i.getBundleExtra("windowSettings");
+                if(windowSettings!=null){
+                    WindowSettings applied=WindowSettings.from(windowSettings);
+                    // 横屏名单是按包判断的，设置页这次没有目标包，保留已有值。
+                    settings=new WindowSettings(applied.size,applied.sizeLand,applied.miniSize,
+                        applied.dim,applied.dockStyle,settings.landscape);
+                    dimFromClient=true;windowDim=settings.dim;
+                    synchronized(lock){
+                        for(Session s:sessions)if(visible(s)&&s.decoration!=null){
+                            s.decoration.dimAmount(windowDim);
+                            try{renderFrame(s);}catch(Exception ignored){}
+                        }
+                    }
+                    log.accept("SETTINGS_APPLIED "+settings);
+                }
+                report("SETTINGS");return;
+            }
             if ("OTP_INPUT".equals(op)) {
                 if(suggestionInput!=null)suggestionInput.accept(i);
                 else{ResultReceiver receiver=i.getParcelableExtra("inputReply",ResultReceiver.class);if(receiver!=null)receiver.send(0,null);}
@@ -536,6 +559,13 @@ final class WindowEngine {
             // 只认这次请求的上限；没带就保持默认 2，与旧行为一致。
             int requestedMax=i.getIntExtra("maxWindows",0);
             if(requestedMax>=1&&requestedMax<=8)maxWindows=requestedMax;
+            // Z-Flow 的外观设置：尺寸、迷你比例、变暗、贴边样式、是否横屏。
+            Bundle windowSettings=i.getBundleExtra("windowSettings");
+            if(windowSettings!=null){
+                settings=WindowSettings.from(windowSettings);
+                dimFromClient=true;windowDim=settings.dim;
+                android.util.Log.i("SunWindowDemo5","OPEN_SETTINGS "+settings);
+            }
             IBinder lease = uiLease;
             if (lease == null || !lease.isBinderAlive()) throw new IllegalStateException("控制进程已退出");
             Session previous=active;java.util.List<Session> previousPinned=pinned;
@@ -1703,7 +1733,7 @@ final class WindowEngine {
         float margin=s.placementMargin;
         Geometry.Placement end=normalForIme(s);
         if("mini".equals(target)) {
-            end=WindowControl.miniTarget(start,s.miniPlacement,s.defaultScale,controlSafe(safe,margin),s.miniLarge);
+            end=WindowControl.miniTarget(start,s.miniPlacement,s.defaultScale,controlSafe(safe,margin),s.miniLarge,settings.miniSize);
             end=cascadeMini(s,end);
             s.miniPlacement=end;
         }
@@ -1729,7 +1759,7 @@ final class WindowEngine {
             Rect safe=safeArea(a.call(s.task,"getDisplayContent"),false);
             float margin=s.placementMargin;
             s.miniLarge=!s.miniLarge;s.animationRev++;s.radiusFactor=1;
-            Geometry.Placement end=Geometry.resizeMini(start,s.defaultScale,safe.left,safe.top,safe.right,safe.bottom,margin,s.miniLarge);
+            Geometry.Placement end=Geometry.resizeMini(start,s.defaultScale,safe.left,safe.top,safe.right,safe.bottom,margin,s.miniLarge,settings.miniSize);
             s.miniPlacement=end;animate(s,start,end,false,0,0);
         }
     }
@@ -1970,10 +2000,13 @@ final class WindowEngine {
             Rect safe = safeArea(display);
             Rect mini = safeArea(display,false);
             int margin = Math.round(a.config(display, false).densityDpi / 160f * (displayBounds.width()>displayBounds.height()?4:12));
+            WindowSettings view=settings;
+            // 「横屏应用名单」：进小窗就按横屏布局，等价于旧实现的强制横屏。
+            if(view.landscape)s.landscape=true;
             Geometry.Placement p = Geometry.place(s.logicalShort, s.landscape,
-                safe.left, safe.top, safe.right, safe.bottom, margin);
+                safe.left, safe.top, safe.right, safe.bottom, margin, view.size, view.sizeLand);
             s.defaultScale=p.scale();s.normalPlacement=p;
-            s.miniPlacement=Geometry.miniTopRight(p,p.scale(),mini.left,mini.top,mini.right,mini.bottom,margin,s.miniLarge);
+            s.miniPlacement=Geometry.miniTopRight(p,p.scale(),mini.left,mini.top,mini.right,mini.bottom,margin,s.miniLarge,view.miniSize);
             s.placement="mini".equals(s.frame)?s.miniPlacement:p;
             s.displayW=displayBounds.width();s.displayH=displayBounds.height();s.displayRotation=a.integer(display,"getRotation");
             s.safeBounds=new Rect(safe);s.miniBounds=mini;s.placementMargin=margin;
@@ -2028,7 +2061,7 @@ final class WindowEngine {
                     }
                     else if(mini!=null)s.miniPlacement=Geometry.remapMini(mini,s.normalPlacement,s.defaultScale,
                         oldMiniSafe.left,oldMiniSafe.top,oldMiniSafe.right,oldMiniSafe.bottom,oldMargin,
-                        safe.left,safe.top,safe.right,safe.bottom,s.placementMargin,s.miniLarge);
+                        safe.left,safe.top,safe.right,safe.bottom,s.placementMargin,s.miniLarge,settings.miniSize);
                     s.placement="mini".equals(s.frame)?s.miniPlacement:s.normalPlacement;
                     if(s.placement==null)s.placement=previous;
                     if(s.edgeHidden)s.placement=Geometry.offscreen(s.miniPlacement,s.edgeSide,0,s.displayW,s.placementMargin);
@@ -3486,6 +3519,8 @@ final class WindowEngine {
             .putExtra("transitionHandle",s.transitionHandle).putExtra("presented",s.presented&&!s.rotation.active()).putExtra("inputPending",entryInputPending(s)).putExtra("nativeHandle",true)
             .putExtra("barAlpha",s.barAlpha).putExtra("barColor",s.decoration==null?0xfff0f2f2:s.decoration.color()).putExtra("miniLarge",s.miniLarge)
             .putExtra("edgeHidden",s.edgeHidden).putExtra("edgeSide",s.edgeSide)
+            // 贴边把手露出比例（Z-Flow freeform_dock_style）：SystemUI 用它决定露出多少。
+            .putExtra("dockStyle",settings.dockStyle)
             .putExtra("edgeBarDragging",s.edgeBarDragging).putExtra("edgeBarCenterX",s.edgeBarCenterX).putExtra("edgeBarCenterY",s.edgeBarCenterY)
             .putExtra("edgeCenterY",s.miniPlacement==null?p.y()+p.height()*p.scale()/2:s.miniPlacement.y()+s.miniPlacement.height()*s.miniPlacement.scale()/2)
             .putExtra("muted",audio!=null&&audio.isMuted(s.uid));
