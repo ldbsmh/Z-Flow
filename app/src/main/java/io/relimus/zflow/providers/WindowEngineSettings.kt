@@ -17,7 +17,8 @@ import io.relimus.zflow.xposed.hook.utils.XLog
  * 所以这里做“镜像”：设置页写 `app_settings`（Preference 框架要求），再把同一个值
  * 写进 `corner` 并发广播。键名与引擎 `Config` 完全一致，引擎侧读取逻辑不用改。
  *
- * 搬运范围：只搬引擎里真正生效、且 Z-Flow 没有对应能力的 7 项。
+ * 搬运范围：只搬引擎里真正生效、且 Z-Flow 没有对应能力的项——6 个行为开关
+ * （含总开关）加 1 个数值项（贴边把手露出比例）。
  * 没搬的——角落扇区几何参数（Z-Flow 用自己的轮盘）、快捷应用名单（扇区面板内可改）、
  * 通知接管（引擎没安装该 Hook，实际是死配置）。
  */
@@ -44,6 +45,9 @@ object WindowEngineSettings {
     /** 横屏下分享目标以窗口打开。 */
     const val KEY_LANDSCAPE_SHARE = "nc_landscape_share_window"
 
+    /** 贴边把手露出比例（28~100，百分比）。引擎据此决定把手在屏幕里露出多宽。 */
+    const val KEY_DOCK_STYLE = "freeform_dock_style"
+
     /** 需要镜像的键；设置页的 SP 监听据此判断是否要同步。 */
     val ALL_KEYS: Set<String> = setOf(
         KEY_ENGINE_ENABLED,
@@ -53,6 +57,7 @@ object WindowEngineSettings {
         KEY_DOUBLE_CLOSE,
         KEY_HIDE_WINDOW_RECENTS,
         KEY_LANDSCAPE_SHARE,
+        KEY_DOCK_STYLE,
     )
 
     /** 引擎读取的偏好文件名（`Config.HOST_PREFERENCES`，宿主集成后落在本应用目录）。 */
@@ -71,6 +76,11 @@ object WindowEngineSettings {
         Triple(KEY_LANDSCAPE_SHARE, "landscapeShareWindow", true),
     )
 
+    /** 整型项：贴边把手露出比例（百分比）。 */
+    private val MIRROR_INT = arrayOf(
+        Triple(KEY_DOCK_STYLE, "dockStyle", 100),
+    )
+
     fun enabled(context: Context): Boolean =
         appSettings(context).getBoolean(KEY_ENGINE_ENABLED, true)
 
@@ -84,6 +94,7 @@ object WindowEngineSettings {
         val settings = appSettings(context)
         val edit = context.getSharedPreferences(CORNER_PREFS, Context.MODE_PRIVATE).edit()
         for ((key, engineKey, def) in MIRROR) edit.putBoolean(engineKey, settings.getBoolean(key, def))
+        for ((key, engineKey, def) in MIRROR_INT) edit.putInt(engineKey, settings.getInt(key, def))
         edit.apply()
         notifyChanged(context)
     }

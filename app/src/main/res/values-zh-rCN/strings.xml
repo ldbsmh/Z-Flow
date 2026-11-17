@@ -118,6 +118,9 @@
     <string name="category_diagnostics">系统与诊断</string>
     <string name="category_advanced">高级与开发者</string>
     <string name="category_lists">应用名单</string>
+    <string name="category_edge">贴边</string>
+    <string name="freeform_dock_style_title">贴边把手露出比例</string>
+    <string name="freeform_dock_style_summary">小窗贴到屏幕边缘时，应用图标露在屏幕里的比例（28%～100%）。越小越不碍眼，但越难点中</string>
     <string name="switch_hide_recent">从最近任务隐藏</string>
     <string name="switch_hide_recent_summary">在Z-Flow中从多任务隐藏。划掉Z-Flow再重新进入即可生效</string>
     <string name="service_type_title">保活服务类型</string>

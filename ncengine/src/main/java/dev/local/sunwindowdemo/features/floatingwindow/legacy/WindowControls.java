@@ -60,6 +60,8 @@ final class WindowControls {
     private boolean miniLarge,muted,edgeHidden;
     private int edgeSide;
     private float edgeCenterY;
+    /** 贴边把手露出比例（0.28~1），layout 时从引擎设置刷新。 */
+    private float dockReveal=1f;
     /** Clear each touch-only buffer explicitly; it must never become a visible backdrop. */
     private class ClearView extends FrameLayout {
         private boolean rejectedStream;
@@ -160,10 +162,15 @@ final class WindowControls {
                     if(!edgeHidden||edgeGesture==1)return;
                     // Z-Flow 的贴边把手：白色圆角底衬（#F2FFFFFF、圆角近半）+ 应用图标，
                     // 不再是原来那条 4dp 白条。
-                    float size=Math.min(getWidth(),getHeight());
+                    float size=dp(60);
                     if(size<=0)return;
-                    // 把手完整露出在屏幕内侧边缘（Z-Flow dockStyle 默认 100%）。
-                    float left=(getWidth()-size)/2f,top=(getHeight()-size)/2f;
+                    /*
+                     * 露出比例（贴边把手露出比例，28%~100%）：窗口宽度只有 reveal*size，
+                     * 把手方块贴着屏幕外侧摆放，被窗口裁掉的那截就是滑出屏幕的部分。
+                     * 左边缘把方块往左推，右边缘靠窗口宽度自然裁切。
+                     */
+                    float reveal=(edgeBarDragging||edgeGesture==2)?1f:dockReveal;
+                    float left=edgeSide<0?-(1f-reveal)*size:0f,top=(getHeight()-size)/2f;
                     edgePaint.setStyle(Paint.Style.FILL);
                     edgePaint.setColor(0xf2ffffff);
                     cv.drawRoundRect(left,top,left+size,top+size,size*.45f,size*.45f,edgePaint);
@@ -546,7 +553,13 @@ final class WindowControls {
             for(int n=1;n<views.size();n++)views.get(n).setVisibility(View.GONE);
             if(edgeHidden){
                 Insets insets=landscape?Insets.NONE:layoutMetrics.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars());
-                int width=dp(60),height=dp(60);
+                int size=dp(60),height=size;
+                /*
+                 * 贴边把手露出比例只影响把手在屏幕里占的宽度：
+                 * 窗口宽 reveal*size，绘制时方块贴着屏幕外侧，左侧被裁掉的就是出屏那截。
+                 */
+                dockReveal=Math.min(1f,Math.max(.28f,new Config(c).dockStyle()/100f));
+                int width=(edgeBarDragging||edgeGesture==2)?size:Math.max(dp(16),Math.round(size*dockReveal));
                 if(edgeBarDragging)rect(0,edgeBarCenterX-width/2f,edgeBarCenterY-height/2f,width,height);
                 else rect(0,edgeSide<0?insets.left:d.width()-insets.right-width,
                     Math.max(insets.top,Math.min(edgeCenterY-height/2,d.height()-insets.bottom-height)),width,height);
@@ -694,4 +707,6 @@ final class WindowControls {
     void hide(){cancelEdgeDrag();cancelMiniDrag();clearMotion();hideViews();frame="";token=null;dragging=false;changed();}
     void close(){send("CLOSE",0,0,0);hide();}
     void imeTop(int top){if(imeTop==top)return;imeTop=top;if(!views.isEmpty()&&!transitioning&&!dragging)layout();}
+    /** 设置变更后重新摆放把手：露出比例可能变了，不必等引擎再发一帧。 */
+    void relayout(){if(!views.isEmpty()&&!transitioning&&!dragging&&!systemBlocked)layout();}
 }

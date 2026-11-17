@@ -84,17 +84,20 @@ Z-Flow 的小窗内核**固定为 NC 引擎**（设置 → 启动与触发 → �
 
 小窗黑名单（Room）仍由 Z-Flow 侧 `isBlacklistedOrBlock()` 拦在开窗前，对两个内核一视同仁。
 
-### 3.2 外观类设置：条目已删除
+### 3.2 外观类设置：只剩贴边把手露出比例
 
-`freeform_size` / `freeform_size_land` / `freeform_float_view_size` /
-`freeform_dimming_amount` / `freeform_dock_style` / `freeform_scale` /
-`manual_adjust_freeform_rotation` / `ime_double_tap_retrigger`，连同
-`max_freeform_windows` 与「小窗内核」选择器——这批设置页条目已整体删除，
-整块「小窗外观与尺寸」页面也不再存在。
+| 键 | 状态 |
+|---|---|
+| `freeform_dock_style`（贴边把手露出比例，28%~100%） | **保留并已接通**：镜像到 `corner.dockStyle`，`WindowControls` 按比例决定把手露出多宽、窗口宽度同步收缩 |
+| `freeform_size` / `freeform_size_land` / `freeform_float_view_size` | 已删除（引擎不消费，长按即可调整大小） |
+| `freeform_dimming_amount` | 已删除（dim 固定 20%） |
+| `freeform_scale`（DPI） | 已删除（引擎接管真实 task，DPI 由系统决定） |
+| `manual_adjust_freeform_rotation` | 已删除（引擎没有“手动调整”入口） |
+| `ime_double_tap_retrigger` | 已删除（NC 没有底栏，IME 交给系统） |
+| `max_freeform_windows` / `window_engine` | 已删除（引擎固定 2 窗、固定走 NC） |
 
-原因：NC 引擎不消费它们（窗口长按即可调整大小，几何用引擎默认值：竖屏 75%、
-横屏 90%、迷你 28%、dim 20%、把手完全露出），留着就是“调了没反应”。
-经典内核作为兜底仍会读这些键，读不到就走默认值，不影响开窗。
+整块「小窗外观与尺寸」页面已撤掉，`freeform_dock_style` 挪到「运行规则与交互 → 贴边」。
+删掉的键在代码里以默认值兜底，经典内核回退路径不会崩。
 
 横屏应用名单（`landscape_apps`）保留：它决定“哪些应用以横屏小窗打开”，仍有意义。
 

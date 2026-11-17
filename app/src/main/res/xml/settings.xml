@@ -111,6 +111,19 @@
         </PreferenceCategory>
         <PreferenceCategory
             android:layout="@layout/preference_category_title"
+            android:title="@string/category_edge">
+            <SeekBarPreference
+                android:key="freeform_dock_style"
+                android:title="@string/freeform_dock_style_title"
+                android:summary="@string/freeform_dock_style_summary"
+                app:iconSpaceReserved="false"
+                app:defaultValue="100"
+                app:min="28"
+                android:max="100"
+                app:showSeekBarValue="true"/>
+        </PreferenceCategory>
+        <PreferenceCategory
+            android:layout="@layout/preference_category_title"
             android:title="@string/category_lists">
             <Preference
                 android:key="freeform_blacklist_apps"

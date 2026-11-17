@@ -70,6 +70,9 @@
     <string name="category_diagnostics">System &amp; diagnostics</string>
     <string name="category_advanced">Advanced</string>
     <string name="category_lists">App lists</string>
+    <string name="category_edge">Edge docking</string>
+    <string name="freeform_dock_style_title">Edge handle reveal ratio</string>
+    <string name="freeform_dock_style_summary">How much of the app icon stays visible when the window docks to the screen edge (28%-100%). Smaller hides the window better</string>
     <string name="switch_hide_recent">Hide from recent tasks</string>
     <string name="switch_hide_recent_summary">Hide from multitasking in Z-Flow. Cross out the Z-Flow and then re-enter to take effect</string>
     <string name="preference_reset_overlay_setting">Reset sidebar position</string>

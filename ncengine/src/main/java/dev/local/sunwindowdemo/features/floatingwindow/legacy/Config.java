@@ -36,4 +36,6 @@ public final class Config {
     boolean doubleClose() { return prefs.getBoolean("doubleClose", false); }
     boolean landscapeShareWindow() { return prefs.getBoolean("landscapeShareWindow", true); }
     int windowDim() { return number("windowDim",DEFAULT_WINDOW_DIM,0,100); }
+    /** 贴边把手露出比例（百分比）。28% 只露一条边，100% 完整露出图标。 */
+    int dockStyle() { return number("dockStyle",100,28,100); }
 }

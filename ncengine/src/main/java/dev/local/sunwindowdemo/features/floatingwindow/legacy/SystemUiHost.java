@@ -87,6 +87,9 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
                 hideControls();
             }
         }
+        // 快照刚更新：露出比例等只影响摆位的设置要就地重排，不必等引擎再发一帧。
+        if(controls!=null)controls.relayout();
+        for(WindowControls c:minis.values())c.relayout();
         refresh();Wire.send(this,"STATUS");
     }
     private final Runnable reload=this::reloadSettings;

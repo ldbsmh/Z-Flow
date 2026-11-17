@@ -181,7 +181,7 @@ ClassLoader，桌面里的类一个都找不到。
 
 | 位置 | 原实现 | 现实现 |
 |---|---|---|
-| 贴边后的把手 | 屏幕边一条 4dp×48dp 白条（`WindowControls` 里手绘） | Z-Flow 的把手外观：60dp 白色圆角底衬（`#F2FFFFFF`，圆角近半）+ 居中应用图标（占 80%）。图标按 `package` 缓存，在 SystemUI 进程用 `PackageManager.getApplicationIcon` 加载；失败只记 `EDGE_ICON_UNAVAILABLE`，退化成纯白底衬，不影响点击/拖动/还原 |
+| 贴边后的把手 | 屏幕边一条 4dp×48dp 白条（`WindowControls` 里手绘） | Z-Flow 的把手外观：60dp 白色圆角底衬（`#F2FFFFFF`，圆角近半）+ 居中应用图标（占 80%）；按 `freeform_dock_style`（28%~100%）部分滑出屏幕，露出一条。图标按 `package` 缓存，在 SystemUI 进程用 `PackageManager.getApplicationIcon` 加载；失败只记 `EDGE_ICON_UNAVAILABLE`，退化成纯白底衬，不影响点击/拖动/还原 |
 | 拖到底部关闭 | 复用 SystemUI 消息气泡的 `floating_dismiss_*` 圆形取消按钮，要把窗口拖进那个圆 | Z-Flow 的“滑到底部渐变消失”，且**只从贴边把手拖出的窗口**才生效：关闭区是屏幕底部 15%，不画任何图标；窗口底边越进关闭区，`MiniMagnet` 进度越深，窗口渐隐（1→0.15）并缩到 35%，松手即关闭。拖动迷你窗本体到底部没有任何功能 |
 
 `MiniMagnet` 从“圆形命中 + 二值”改成了“跟随一个连续目标值”：
@@ -237,14 +237,32 @@ SystemUI 侧从「一个 `miniControls`」改成「按 taskId 复用的 `WindowC
 设置页在 Z-Flow app 进程，引擎在 system_server。引擎不读对方的 SharedPreferences
 （部分 ROM 上会被 SELinux 拦）。对接分两类：
 
-### 外观设置：设置项已整体删除
+### 外观设置：只剩「贴边把手露出比例」
 
 引擎窗口支持长按调整大小，尺寸/迷你比例/变暗/贴边样式用引擎自己的默认值
-（竖屏 75%、横屏 90%、迷你 28%、dim 20%、把手完全露出）。
+（竖屏 75%、横屏 90%、迷你 28%、dim 20%）。
 
-2026-11 精简时先把这些设置的下发通道删掉（`WindowSettings` Bundle、`SETTINGS` 指令、
-`dockStyle`/`maxWindows` extra），随后又把设置页里对应的条目一并删除——留着就是
-「调了没反应」。删掉的 8 项：
+唯一保留并可调的是**贴边把手露出比例**（`freeform_dock_style`，28%~100%，默认 100）：
+贴边后把手按比例露出，其余部分滑出屏幕。实现分两半——
+
+```
+设置页 SeekBar → app_settings.freeform_dock_style
+  → WindowEngineSettings.sync() → corner.dockStyle（int 镜像）+ SETTINGS_CHANGED
+  → SystemUiHost.reloadSettings() → 快照写入后 controls.relayout()
+  → WindowControls.layout()：把手窗口宽度 = 60dp × reveal、贴住屏幕外侧
+  → WindowControls.onDraw：把手方块左缘 = -(1-reveal)×60dp（左边缘）/ 0（右边缘），
+    被窗口裁掉的正是出屏那截；拖动把手期间强制 reveal=1，完整跟手
+```
+
+窗口宽度跟着比例缩，所以受保护区（`protectedRects`）也只覆盖真正露出来的那条，
+不会在图标旁边留一块点不到的空白。
+
+其余外观项（`freeform_size` / `freeform_size_land` / `freeform_float_view_size` /
+`freeform_dimming_amount` / `freeform_scale` / `manual_adjust_freeform_rotation` /
+`ime_double_tap_retrigger`）与整块「小窗外观与尺寸」页面、`window_engine`（内核选择）、
+`max_freeform_windows`（小窗数量上限）仍已删除——引擎不消费它们，留着就是「调了没反应」。
+这些键在代码里以默认值兜底（`FreeformRequestHandler` / `FreeformService` 读不到就用默认），
+经典内核回退路径不会崩，只是没有可调项。
 
 | 设置页键 | 原语义 |
 |---|---|
