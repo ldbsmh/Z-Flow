@@ -22,7 +22,18 @@ object NcWindowBackend {
     const val ENGINE_NC = "nc"
     const val ENGINE_LEGACY = "legacy"
 
+    /** 与「最多同时小窗数量」设置项共用同一个键（settings.xml / 旧窗口实现都读它）。 */
+    private const val PREF_MAX_FREE_FORM_WINDOWS = "max_freeform_windows"
+    private const val DEFAULT_MAX_FREE_FORM_WINDOWS = 2
+    private const val MAX_FREE_FORM_WINDOWS_UPPER = 5
+
     private const val TAG = "NcWindowBackend"
+
+    /** 引擎侧的并发窗口上限：这里是唯一读取点，避免两个进程各自解释同一个设置。 */
+    fun maxWindows(context: Context): Int =
+        context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
+            .getInt(PREF_MAX_FREE_FORM_WINDOWS, DEFAULT_MAX_FREE_FORM_WINDOWS)
+            .coerceIn(1, MAX_FREE_FORM_WINDOWS_UPPER)
 
     fun selected(context: Context): String =
         context.getSharedPreferences(ZFlow.APP_SETTINGS_NAME, Context.MODE_PRIVATE)
@@ -43,13 +54,17 @@ object NcWindowBackend {
     ): Boolean {
         return try {
             syncEnabled(context)
-            Engine.openApp(context, packageName, taskId, miniMode)
+            val limit = maxWindows(context)
+            Engine.openApp(context, packageName, taskId, miniMode, limit)
             XLog.i(
-                "$TAG: OPEN via nc engine pkg=$packageName task=$taskId mini=$miniMode"
+                "$TAG: OPEN via nc engine pkg=$packageName task=$taskId mini=$miniMode max=$limit"
             )
             // logcat 也能看到这一行：`adb logcat -s ZFlowMini`。
             // LSPosed 日志只有装模块的人看得见，排查「卡片上滑没反应」时两端都留个锚点。
-            android.util.Log.i("ZFlowMini", "open pkg=$packageName task=$taskId mini=$miniMode")
+            android.util.Log.i(
+                "ZFlowMini",
+                "open pkg=$packageName task=$taskId mini=$miniMode max=$limit"
+            )
             true
         } catch (t: Throwable) {
             XLog.e("$TAG: nc engine open failed for $packageName", t)

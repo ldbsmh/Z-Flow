@@ -38,7 +38,15 @@ public final class Engine {
      * @param mini   true 表示打开后立即进入迷你窗形态（Z-Flow 的「小窗」语义）。
      */
     public static boolean openApp(Context context,String packageName,int taskId,boolean mini){
-        Wire.openApp(context,packageName,taskId,true,mini);
+        return openApp(context,packageName,taskId,mini,0);
+    }
+
+    /**
+     * @param maxWindows 同时存在的小窗上限（1~5）；0 表示引擎默认值（2）。
+     *                   Z-Flow 的「最多同时小窗数量」就是通过它下发的。
+     */
+    public static boolean openApp(Context context,String packageName,int taskId,boolean mini,int maxWindows){
+        Wire.openApp(context,packageName,taskId,true,mini,maxWindows);
         return true;
     }
 

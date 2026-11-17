@@ -104,6 +104,8 @@ adb logcat -s ZFlowMini SunWindowDemo5
 # SunWindowDemo5 OPEN_TASK_FROM_RECENTS task=123 pkg=...  ← 从 recent 认领成功
 # SunWindowDemo5 OPEN_TASK_REJECTED ...                   ← 任务号和包名对不上，拒绝
 # SunWindowDemo5 MINI_SETTLED task=123 bar=0.0 ...        ← 迷你形态收尾完成（应为 bar=0.0）
+# SunWindowDemo5 MINI_CASCADE task=124 x=... y=...        ← 第二个迷你窗已错开位置
+# SunWindowDemo5 MINI_EVICT task=123 limit=2              ← 超出数量上限，最旧的小窗被收起
 ```
 
 `MINI_SETTLED` 里的 `bar` 不是 0.0，就等于 dim 层还在，表现是整屏发暗。
@@ -184,10 +186,44 @@ miniMagnet.follow((窗口底边 - 关闭区顶部) / 关闭区高度);  // 0..1
 拖动时窗口位置完全跟随手指，不再往关闭区中心吸附；因此补了 `clampMiniX/Y`，
 保证窗口不会被拖出屏幕。
 
+## 多个迷你窗与数量上限
+
+引擎原来只有「前台窗 + 一个挂起的迷你窗」两个位置（`Session active` / `Session pinned`），
+连开第二个应用时前一个会被关掉。现在 `pinned` 是列表，容量由 Z-Flow 的
+「最多同时小窗数量」控制（`max_freeform_windows`，1~5，默认 2）。
+
+数据通路只有一条，避免两个进程各自解释同一个设置：
+
+```
+Z-Flow 设置(SeekBar) → app_settings.max_freeform_windows
+   → NcWindowBackend.maxWindows()          每次开窗现读，改设置立刻生效
+   → Engine.openApp(..., maxWindows) → Wire  → OPEN 的 maxWindows extra
+   → WindowEngine.maxWindows                超出时淘汰最旧的迷你窗
+```
+
+`WindowEngine` 侧的关键约定：
+
+| 行为 | 实现 |
+|---|---|
+| 可见窗口 | `visible(s) = s == active 或 pinned.contains(s)` |
+| 新迷你窗 | `retainPinned()`：追加到列表末尾（末尾 = 最近使用），超限时 `finishGroup` 最旧的一个，记 `MINI_EVICT` |
+| 迷你窗展开 | `EXPAND_PINNED`：前台若是另一个迷你窗就留在 `pinned` 继续挂着，只有默认窗才让位 |
+| 关闭窗口 | `finishGroup` 时若关的是前台，让最早挂着的迷你窗接替；同一任务组的其它迷你窗一并清理 |
+| 任务退出 | `forget()` 先把会话从 `pinned` 摘掉，否则控制条会留在屏幕上 |
+
+出生位置也要错开：所有迷你窗默认都放在 `miniTopRight()` 的同一个点，多个会完全重叠。
+`cascadeMini()` 在首次布局（和每次收成迷你）时检测与已挂迷你窗的重叠，优先向下堆叠，
+碰到安全区底部就换左边一列；用户拖动过的窗口不会被自动挪位。
+
+SystemUI 侧从「一个 `miniControls`」改成「按 taskId 复用的 `WindowControls` 池」：
+报文 `pinnedFrames`（`ParcelableArrayList<Intent>`）逐个更新，不在列表里的只 `hide()`；
+贴边把手、IME 偏移、系统遮挡、`protectedRects` 都对全部实例聚合。旧引擎只发
+`pinnedFrame`，宿主仍兼容单个的情形。
+
 ## 已知缺口（待后续阶段）
 
-1. Z-Flow「小窗外观与尺寸 / 运行规则」里的尺寸比例、贴边样式、数量上限 1~5、黑名单、
-   横屏应用清单，目前只对新内核之外的旧实现生效；新内核用自身的几何与策略。
+1. Z-Flow「小窗外观与尺寸 / 运行规则」里的尺寸比例、贴边样式、黑名单、横屏应用清单，
+   目前只对新内核之外的旧实现生效；新内核用自身的几何与策略。数量上限已接通（见上一节）。
 2. 引擎安装失败（例如 `SunWindowModule` 的 `startOtherServices` deopt 预检不过）时不会自动回退，
    表现为“点了没反应”，需要在设置里手动切回经典内核。
 3. NC 自带的角落扇区随总开关一起启用，尚未提供单独的 Z-Flow 开关。

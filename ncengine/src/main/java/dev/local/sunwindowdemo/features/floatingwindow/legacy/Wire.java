@@ -87,10 +87,18 @@ final class Wire {
      *               因此不需要客户端自己算时机再补一条指令。
      */
     static void openApp(Context context,String pkg,int taskId,boolean wakeStep,boolean mini){
+        openApp(context,pkg,taskId,wakeStep,mini,0);
+    }
+    /**
+     * @param maxWindows 同时存在的小窗上限（含前台窗）；0 表示沿用引擎默认值。
+     *                   由 Z-Flow 的「最多同时小窗数量」设置下发。
+     */
+    static void openApp(Context context,String pkg,int taskId,boolean wakeStep,boolean mini,int maxWindows){
         Intent i=new Intent(COMMAND).setPackage("android").putExtra("protocol",PROTOCOL).putExtra("op","OPEN")
             .putExtra("package",pkg).putExtra("taskId",taskId).putExtra("token",token())
             .putExtra("wakeStep",wakeStep).putExtra("hideRecents",new Config(context).hideRecents());
         if(mini)i.putExtra("mini",true);
+        if(maxWindows>=1)i.putExtra("maxWindows",maxWindows);
         sendRequest(context,i);
     }
     static void openNotification(Context context,String pkg,PendingIntent launch,Intent fill,ResultReceiver reply){

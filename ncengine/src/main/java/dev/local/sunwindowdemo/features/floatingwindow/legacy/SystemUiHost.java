@@ -101,7 +101,8 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
     private android.window.OnBackInvokedDispatcher openWaitDispatcher;
     private final android.window.OnBackInvokedCallback openWaitBack=this::cancelOpenWait;
     private void syncControlsOcclusion(){
-        if(controls!=null&&miniControls!=null)miniControls.normalOcclusion(controls.contentOcclusion());
+        if(controls==null)return;
+        for(WindowControls c:minis.values())c.normalOcclusion(controls.contentOcclusion());
     }
     void controlsChanged(){main.post(()->{syncControlsOcclusion();publish(false);});}
     private int publishedWidth,publishedHeight;
@@ -141,10 +142,24 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
             if(target!=null){if(target.isEmpty())showPanel();else launch(target,true);}
         }
     }
+    /** 迷你窗帧列表：新协议是 pinnedFrames，旧引擎只发 pinnedFrame，两者都认。 */
+    private java.util.ArrayList<Intent> framesOf(Intent i){
+        java.util.ArrayList<Intent> frames="active".equals(backendState)
+            ?i.getParcelableArrayListExtra("pinnedFrames",Intent.class):null;
+        if(frames!=null)return frames;
+        java.util.ArrayList<Intent> one=new java.util.ArrayList<>(1);
+        if("active".equals(backendState)){
+            Intent single=i.getParcelableExtra("pinnedFrame",Intent.class);
+            if(single!=null)one.add(single);
+        }
+        return one;
+    }
     void cancelCornerInput(){main.post(()->{hideFan();removeHot();});}
     private boolean publishedEnabled;
     private boolean publishedDrop,publishedImmersive;
-    private int activeTask=-1,pinnedTask=-1,publishedHidden=-2;
+    private int activeTask=-1,publishedHidden=-2;
+    /** 所有挂着的迷你窗任务号，用于跳过浮动窗口找真正的前台应用。 */
+    private final java.util.Set<Integer> pinnedTasks=new java.util.HashSet<>();
     private final android.os.Binder dropChannel=new android.os.Binder(){
         @Override protected boolean onTransact(int code,android.os.Parcel data,android.os.Parcel reply,int flags) throws android.os.RemoteException {
             if(code<android.os.IBinder.FIRST_CALL_TRANSACTION||code>android.os.IBinder.FIRST_CALL_TRANSACTION+3)return super.onTransact(code,data,reply,flags);
@@ -169,8 +184,35 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
     private View openWait;
     private ImageView openWaitIcon;
     private final OpenWaitState openWaitState=new OpenWaitState();
-    private WindowControls controls,miniControls;
-    private void hideControls(){if(controls!=null)controls.hide();if(miniControls!=null)miniControls.hide();}
+    private WindowControls controls;
+    /** 每个迷你窗一个控制条，按 taskId 复用；引擎允许多个迷你窗并存。 */
+    private final java.util.Map<Integer,WindowControls> minis=new java.util.LinkedHashMap<>();
+    private WindowControls miniFor(int taskId){
+        WindowControls c=minis.get(taskId);
+        if(c==null){c=new WindowControls(this);minis.put(taskId,c);}
+        return c;
+    }
+    private void hideControls(){
+        if(controls!=null)controls.hide();
+        for(WindowControls c:minis.values())c.hide();
+    }
+    /**
+     * 报文里没有的迷你窗要收起，实例留着复用（下一个迷你窗常常还是同一个应用）。
+     *
+     * 注意不能调 close()：那是“关闭小窗”指令，会把用户窗口真关掉。
+     * 窗口本身已经被 hide() 移除，这里只是控制实例数量，避免 taskId 不断变化时无限增长。
+     */
+    private static final int MAX_MINI_CONTROLS=8;
+    private void retainMinis(java.util.Set<Integer> live){
+        for(java.util.Map.Entry<Integer,WindowControls> e:new java.util.ArrayList<>(minis.entrySet()))
+            if(!live.contains(e.getKey()))e.getValue().hide();
+        while(minis.size()>MAX_MINI_CONTROLS){
+            Integer drop=null;
+            for(Integer id:minis.keySet())if(!live.contains(id)){drop=id;break;}
+            if(drop==null)break;
+            minis.remove(drop);
+        }
+    }
     private boolean normalOccupied;
     private boolean dropAvailable(){return WindowHostPolicy.defaultSlot(backendState,normalOccupied);}
     private volatile HostExtras extras;
@@ -215,16 +257,23 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
         if(i.hasExtra("foreground")){foreground=i.getStringExtra("foreground");keyboard=i.getBooleanExtra("imeVisible",false);systemFocus=i.getBooleanExtra("systemOverlay",false);
             systemOverlayTitle=i.getStringExtra("systemOverlayTitle");
             suggestionImeTop=i.getIntExtra("imeTop",Integer.MAX_VALUE);
-            updateOverlayPriority();controls.imeTop(suggestionImeTop);miniControls.imeTop(suggestionImeTop);refresh();}
+            updateOverlayPriority();controls.imeTop(suggestionImeTop);
+            for(WindowControls c:minis.values())c.imeTop(suggestionImeTop);refresh();}
         if(i.hasExtra("immersive"))immersive=i.getBooleanExtra("immersive",false);
         activeTask="active".equals(backendState)?i.getIntExtra("taskId",-1):-1;
-        Intent pinnedFrame="active".equals(backendState)?i.getParcelableExtra("pinnedFrame",Intent.class):null;
-        pinnedTask=pinnedFrame==null?-1:pinnedFrame.getIntExtra("taskId",-1);
+        java.util.ArrayList<Intent> pinnedFrames=framesOf(i);
+        pinnedTasks.clear();
+        for(Intent frame:pinnedFrames){int id=frame.getIntExtra("taskId",-1);if(id>0)pinnedTasks.add(id);}
         publish(false);
         try{if(!config.enabled()||!getSystemService(android.os.PowerManager.class).isInteractive()||getSystemService(KeyguardManager.class).isKeyguardLocked())hideControls();else {controls.update(i);
-            Intent mini=i.getParcelableExtra("pinnedFrame",Intent.class);
             syncControlsOcclusion();
-            if(mini==null)miniControls.hide();else miniControls.update(mini);
+            java.util.Set<Integer> live=new java.util.HashSet<>();
+            for(Intent frame:pinnedFrames){
+                int id=frame.getIntExtra("taskId",-1);
+                if(id<=0)continue;
+                live.add(id);miniFor(id).update(frame);
+            }
+            retainMinis(live);
             syncControlsOcclusion();
         }}catch(RuntimeException e){hideControls();android.util.Log.e("NativeComplements","overlay controls failed",e);}
         if(i.getStringExtra("event")!=null&&(i.getStringExtra("event").endsWith("FAILED")||"BLOCKED".equals(i.getStringExtra("event"))))Toast.makeText(this,WindowPolicy.failureMessage(i.getStringExtra("report")),Toast.LENGTH_SHORT).show();
@@ -251,7 +300,7 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
         cleaned=false;connected=true;live=this;
         Config.hostPreferences=getSharedPreferences(Config.HOST_PREFERENCES,Context.MODE_PRIVATE);
         config=new Config(this);wm=getSystemService(WindowManager.class);
-        controls=new WindowControls(this);miniControls=new WindowControls(this);
+        controls=new WindowControls(this);
         extras=ProductFeatures.hostExtras(this);
         extras.startCompanions();
         quick=new WindowQuickHost(this,()->{hidePanel();hideFan();},()->{hidePanel();hideFan();floatCurrent(0,true);});
@@ -292,7 +341,7 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
         }
         updateCompanionEnvironment();
         if(controls!=null)controls.systemOverlay(screenshotVisible||systemFocus);
-        if(miniControls!=null)miniControls.systemOverlay(screenshotVisible||systemFocus);
+        for(WindowControls c:minis.values())c.systemOverlay(screenshotVisible||systemFocus);
     }
     private void updateCompanionEnvironment(){
         if(extras==null)return;
@@ -417,9 +466,15 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
             ?new CornerGesture.Area(cornerBounds.width(),cornerBounds.height(),dp(config.heat()),dp(config.distance()),ViewConfiguration.getLongPressTimeout()):null;
 
         int[] handles=controls==null?new int[0]:controls.protectedRects();
-        int[] miniHandles=miniControls==null?new int[0]:miniControls.protectedRects();
-        int primaryLength=handles.length;handles=java.util.Arrays.copyOf(handles,primaryLength+miniHandles.length);
-        System.arraycopy(miniHandles,0,handles,primaryLength,miniHandles.length);
+        // 每个迷你窗都有自己的贴边把手，全都要算进受保护区域，否则手势会抢走它的触摸。
+        java.util.ArrayList<int[]> miniHandles=new java.util.ArrayList<>();
+        int miniLength=0;
+        for(WindowControls c:minis.values()){int[] r=c.protectedRects();if(r.length==0)continue;miniHandles.add(r);miniLength+=r.length;}
+        if(miniLength>0){
+            int primaryLength=handles.length;handles=java.util.Arrays.copyOf(handles,primaryLength+miniLength);
+            int offset=primaryLength;
+            for(int[] r:miniHandles){System.arraycopy(r,0,handles,offset,r.length);offset+=r.length;}
+        }
         rects=java.util.Arrays.copyOf(rects,count);
         if(extras!=null){
             int[] protectedAreas=java.util.Arrays.copyOf(rects,count+handles.length);
@@ -559,7 +614,7 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
             // Skip both floating window tasks to get the real fullscreen foreground app
             for(var task:tasks){
                 if(task.topActivity==null)continue;
-                if(task.taskId>0&&(task.taskId==activeTask||task.taskId==pinnedTask))continue; // Skip floating windows
+                if(task.taskId>0&&(task.taskId==activeTask||pinnedTasks.contains(task.taskId)))continue; // Skip floating windows
                 return task.topActivity.getPackageName();
             }
             return null;
@@ -623,5 +678,5 @@ public final class SystemUiHost extends ContextWrapper implements ComponentCallb
     }
     @Override public void onConfigurationChanged(Configuration c){cancelOpenWait();hideFan();hidePanel();removeHot();refresh();Wire.send(this,"STATUS");}
     @Override public void onLowMemory(){}
-    private void cleanup(){if(cleaned)return;dev.local.sunwindowdemo.features.iconlayers.IconAssets.removeOnReload(iconsReloaded);cancelOpenWait();if(extras!=null)extras.closeBarrage();if(quick!=null){quick.close();quick=null;}if(extras!=null)extras.close();settingsWorker.shutdownNow();try{getApplicationContext().unregisterComponentCallbacks(this);}catch(RuntimeException ignored){}for(BroadcastReceiver receiver:new BroadcastReceiver[]{settingsReceiver,queryReceiver,backendReceiver,screenReceiver,packageReceiver})try{unregisterReceiver(receiver);}catch(RuntimeException ignored){}if(controls!=null){controls.close();}if(miniControls!=null)miniControls.close();Wire.listen(null);cleaned=true;connected=false;if(live==this)live=null;main.removeCallbacksAndMessages(null);hideFan();hidePanel();removeHot();publish(true);if(config!=null)config.prefs.unregisterOnSharedPreferenceChangeListener(prefListener);}
+    private void cleanup(){if(cleaned)return;dev.local.sunwindowdemo.features.iconlayers.IconAssets.removeOnReload(iconsReloaded);cancelOpenWait();if(extras!=null)extras.closeBarrage();if(quick!=null){quick.close();quick=null;}if(extras!=null)extras.close();settingsWorker.shutdownNow();try{getApplicationContext().unregisterComponentCallbacks(this);}catch(RuntimeException ignored){}for(BroadcastReceiver receiver:new BroadcastReceiver[]{settingsReceiver,queryReceiver,backendReceiver,screenReceiver,packageReceiver})try{unregisterReceiver(receiver);}catch(RuntimeException ignored){}if(controls!=null){controls.close();}for(WindowControls c:minis.values())c.close();minis.clear();Wire.listen(null);cleaned=true;connected=false;if(live==this)live=null;main.removeCallbacksAndMessages(null);hideFan();hidePanel();removeHot();publish(true);if(config!=null)config.prefs.unregisterOnSharedPreferenceChangeListener(prefListener);}
 }

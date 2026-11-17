@@ -51,7 +51,7 @@ final class WindowEngine {
     private boolean continuationReady;
     void continuationReady(){continuationReady=true;}
     record ShareLaunch(Object request,ActivityOptions options,IBinder lease,Object sourceTask,boolean nativeFullscreen) {}
-    private record ShareStarted(Session target,Session displaced,Session previous,Session previousPinned) {}
+    private record ShareStarted(Session target,Session displaced,Session previous,java.util.List<Session> previousPinned) {}
     private record ShareReused(Session target) {}
     final ThreadLocal<ShareLaunch> shareLaunch=new ThreadLocal<>();
     /** fullscreen: the topmost visible, unmanaged fullscreen app task captured before this start.
@@ -138,7 +138,17 @@ final class WindowEngine {
         String op=i.getStringExtra("op");
         command(i);
     }
-    private volatile Session active,pinned;
+    private volatile Session active;
+    /**
+     * 同时挂起的迷你窗，按“最近使用”排序（末尾最新）。
+     *
+     * 以前这里只有一个 pinned，等于引擎只能“一个前台 + 一个挂着的迷你窗”；
+     * 卡片上滑连开第二个应用时，前一个会被 finish 掉。Z-Flow 的
+     * max_freeform_windows 允许 1~5 个，所以换成列表，容量由 [maxWindows] 约束。
+     */
+    private volatile java.util.List<Session> pinned=java.util.List.of();
+    /** 同时存在的小窗上限（含前台窗），由打开请求携带，默认 2 与旧行为一致。 */
+    private volatile int maxWindows=2;
     private BackPreparation backPreparation;
     private record BackPreparation(Object task,String token,TaskVisibilityGuard mask,TaskCover cover,IBinder lease){}
     private boolean prepareBack(int id,String pkg,String token,android.graphics.RectF pose,float radius,android.view.SurfaceControl leash){
@@ -209,7 +219,39 @@ final class WindowEngine {
             log.accept("BACK_PREPARATION_RELEASED");
         }
     }
-    private boolean visible(Session s){return s!=null&&(s==active||s==pinned);}
+    private boolean visible(Session s){return s!=null&&(s==active||pinned.contains(s));}
+    private boolean isPinned(Session s){return s!=null&&pinned.contains(s);}
+    private Session firstPinned(){java.util.List<Session> l=pinned;return l.isEmpty()?null:l.get(0);}
+    /** 追加/刷新一个挂起的迷你窗；同一会话重复调用只更新顺序。 */
+    private void addPinned(Session s){
+        if(s==null)return;
+        java.util.ArrayList<Session> next=new java.util.ArrayList<>(pinned);
+        next.remove(s);next.add(s);
+        pinned=java.util.List.copyOf(next);
+    }
+    private void removePinned(Session s){
+        if(s==null||!pinned.contains(s))return;
+        java.util.ArrayList<Session> next=new java.util.ArrayList<>(pinned);next.remove(s);
+        pinned=java.util.List.copyOf(next);
+    }
+    private void clearPinned(){pinned=java.util.List.of();}
+    /** 加入后按上限淘汰最旧的迷你窗（Z-Flow 语义：超出时自动关闭最早的小窗）。 */
+    private void retainPinned(Session s,String why){
+        addPinned(s);
+        evictPinned(s,why);
+    }
+    /** 超出上限时淘汰最旧的迷你窗，[keep] 一定不会被淘汰。 */
+    private void evictPinned(Session keep,String why){
+        int limit=Math.max(1,maxWindows);
+        while(pinned.size()+(active!=null?1:0)>limit){
+            Session oldest=null;
+            for(Session p:pinned)if(p!=keep){oldest=p;break;}
+            if(oldest==null)break;
+            removePinned(oldest);
+            log.accept("MINI_EVICT task="+oldest.taskId+" limit="+limit);
+            finishGroup(oldest,false,why);
+        }
+    }
     private boolean normalOccupied(){return active!=null&&!active.restoring&&"normal".equals(active.frame);}
     private boolean entryInputPending(Session s){
         return visible(s)&&!s.restoring&&!s.closing&&!s.fullTransition&&!s.screenSuspended&&!s.prioritySuspended&&!s.rotation.active()
@@ -490,9 +532,13 @@ final class WindowEngine {
             if(i.getBooleanExtra("mini",false))android.util.Log.i("SunWindowDemo5",
                 "OPEN_MINI task="+i.getIntExtra("taskId",-1)+" pkg="+pkg);
             Bundle extras = i.getExtras();
+            // Z-Flow 的「最多同时小窗数量」随请求下发（1~5）。引擎不读对方 SP，
+            // 只认这次请求的上限；没带就保持默认 2，与旧行为一致。
+            int requestedMax=i.getIntExtra("maxWindows",0);
+            if(requestedMax>=1&&requestedMax<=8)maxWindows=requestedMax;
             IBinder lease = uiLease;
             if (lease == null || !lease.isBinderAlive()) throw new IllegalStateException("控制进程已退出");
-            Session previous=active,previousPinned=pinned;
+            Session previous=active;java.util.List<Session> previousPinned=pinned;
             Session displaced=normalOccupied()?active:null;
             rememberOrientation(previous);
             Session s;
@@ -534,16 +580,21 @@ final class WindowEngine {
                         boolean startMini=i.getBooleanExtra("mini",false);
                         if(startMini)s.frame="mini";
                         prepareGeometry(s); // Bounds hook must know the canvas before switching mode.
+                        if(startMini){
+                            // 出生即迷你的窗口要避开已经挂着的迷你窗，否则完全重叠。
+                            s.placement=cascadeMini(s,s.placement);s.miniPlacement=s.placement;
+                        }
                         s.decoration=new TaskDecoration(a);
                         if(startMini)s.decoration.disableDim();
                         s.entering=true;s.transitioning=true;s.opacity=0;s.barAlpha=0;
-                        if(previous!=null){
-                            if(displaced==null)pinned=previous;
-                            else {previous.parked=true;previous.opacity=0;a.opacity(previous.task,0);
-                                a.call(previous.task,"setFocusable",new Class<?>[]{boolean.class},false);
-                                if(previous.decoration!=null)previous.decoration.hide(previous.task);}
+                        if(previous!=null&&displaced!=null){
+                            previous.parked=true;previous.opacity=0;a.opacity(previous.task,0);
+                            a.call(previous.task,"setFocusable",new Class<?>[]{boolean.class},false);
+                            if(previous.decoration!=null)previous.decoration.hide(previous.task);
                         }
                         active = s;
+                        // 前台窗已被新窗口取代，旧的保持迷你形态挂着；超过上限时淘汰最旧的。
+                        if(previous!=null&&displaced==null&&previous!=s)retainPinned(previous,"超出小窗上限");
                         frameReport("ENTRY_TOUCH_GUARD");
                         a.call(a.field(s.task,"mTransitionController"),"setNoAnimation",new Class<?>[]{a.wc},s.task);
                         BackPreparation prepared=backPreparation;
@@ -892,8 +943,8 @@ final class WindowEngine {
         s.entryFade=true;
         s.launchFlow=new LaunchCoverFlow(SystemClock.elapsedRealtime());
         try{bindAndSave(s,launch.lease);}catch(Exception error){releaseToFullscreen(task);throw error;}
-        Session previous=active,previousPinned=pinned,displaced=normalOccupied()?previous:null;
-        if(displaced==null){if(previous!=null)pinned=previous;active=null;}
+        Session previous=active;java.util.List<Session> previousPinned=pinned;Session displaced=normalOccupied()?previous:null;
+        if(displaced==null){if(previous!=null)addPinned(previous);active=null;}
         try{
             ++openGeneration;trace.arm(pkg,openGeneration);
             maskAndActivate(s,task,null);
@@ -989,7 +1040,7 @@ final class WindowEngine {
             log.accept("SHARE_WINDOW_NATIVE_FALLBACK task="+a.field(task,"mTaskId"));
         }}catch(Exception error){log.accept("SHARE_WINDOW_FALLBACK_FAILED "+FrameworkAccess.reason(error));}
     }
-    private void rollbackDefault(Session failed,Session previous,Session previousPinned)throws Exception{
+    private void rollbackDefault(Session failed,Session previous,java.util.List<Session> previousPinned)throws Exception{
         active=previous;pinned=previousPinned;
         if(previous==null)return;
         previous.parked=false;previous.opacity=1;previous.entering=false;previous.transitioning=false;
@@ -1188,17 +1239,20 @@ final class WindowEngine {
             }else{
                 Session previous=active;
                 Session displaced=normalOccupied()&&previous!=next&&!previous.token.equals(next.token)?previous:null;
-                if(pinned!=null&&pinned!=next&&pinned.token.equals(next.token)){
-                    pinned.parked=true;pinned.animationRev++;pinned.opacity=0;
-                    a.call(pinned.task,"setFocusable",new Class<?>[]{boolean.class},false);
-                    if(pinned.decoration!=null)pinned.decoration.hide(pinned.task);
-                    renderFrame(pinned);pinned=null;
+                // 同一任务组里另一个窗口被叫到前台时，它自己的迷你窗要让位，
+                // 但不能顺手清掉其它应用的迷你窗。
+                for(Session other:new java.util.ArrayList<>(pinned)){
+                    if(other==next||!other.token.equals(next.token))continue;
+                    other.parked=true;other.animationRev++;other.opacity=0;
+                    a.call(other.task,"setFocusable",new Class<?>[]{boolean.class},false);
+                    if(other.decoration!=null)other.decoration.hide(other.task);
+                    renderFrame(other);removePinned(other);
                 }
-                if(next==pinned)pinned=null;
+                removePinned(next);
                 if(previous!=null&&previous!=next&&"mini".equals(previous.frame)&&!previous.token.equals(next.token)){
-                    pinned=previous;active=null;
+                    active=null;retainPinned(previous,"超出小窗上限");
                 }
-                Session previousPinned=pinned;
+                java.util.List<Session> previousPinned=pinned;
                 try{activate(next,next.placement);settleNewDefault(displaced,next);}
                 catch(Exception error){rollbackDefault(next,previous,previousPinned);next.parked=true;next.opacity=0;renderFrame(next);throw error;}
             }
@@ -1599,25 +1653,38 @@ final class WindowEngine {
             }
         });
     }
+    /** 是否已经有别的、仍然活着的迷你窗（决定新默认窗要不要把旧窗留着）。 */
+    private boolean anyLiveMiniBesides(Session except){
+        for(Session p:pinned){
+            if(p==except)continue;
+            try{if(live(p)&&"mini".equals(p.frame))return true;}catch(Exception ignored){}
+        }
+        return false;
+    }
     // A destination replaces its occupant; the source never swaps the other slot.
     private void settleNewDefault(Session previous,Session next)throws Exception{
         if(previous==null||previous==next||previous.token.equals(next.token))return;
         WindowControl.Previous decision=WindowControl.previous(true,true,false,previous.frame,autoMinimizeOnOpen,
-            !"mini".equals(previous.frame)&&pinned!=null&&pinned!=previous&&live(pinned)&&"mini".equals(pinned.frame));
+            !"mini".equals(previous.frame)&&anyLiveMiniBesides(previous));
         if(decision==WindowControl.Previous.RETAIN_MINI){
-            previous.parked=false;previous.opacity=1;pinned=previous;renderFrame(previous);return;
+            previous.parked=false;previous.opacity=1;addPinned(previous);renderFrame(previous);return;
         }
         if(decision==WindowControl.Previous.MINIMIZE){
-            if(pinned!=null&&pinned!=previous)finishGroup(pinned,false,"清理失效迷你窗");
             endCover(previous);
             previous.parked=false;previous.opacity=1;previous.entering=false;previous.closing=false;
-            pinned=previous;state(previous,"mini");
+            addPinned(previous);state(previous,"mini");
         }else finishGroup(previous,false,"替换默认窗");
     }
     private Session occupySlot(Session s,String target){
-        return switch(WindowControl.slot(target,s==active,s==pinned)){
-            case EXPAND_PINNED -> {Session displaced=active;active=s;pinned=null;yield displaced;}
-            case MINIMIZE_ACTIVE -> {Session displaced=pinned;pinned=null;yield displaced;}
+        return switch(WindowControl.slot(target,s==active,isPinned(s))){
+            // 迷你窗被提到前台：前台若是另一个迷你窗，它继续挂着；只有默认窗才让位。
+            case EXPAND_PINNED -> {
+                Session displaced=active;active=s;removePinned(s);
+                if(displaced!=null&&displaced!=s&&"mini".equals(displaced.frame)){addPinned(displaced);yield null;}
+                yield displaced;
+            }
+            // active 收成迷你窗只是多挂一个，不需要让出别人的位置。
+            case MINIMIZE_ACTIVE -> null;
             case KEEP -> null;
         };
     }
@@ -1637,6 +1704,7 @@ final class WindowEngine {
         Geometry.Placement end=normalForIme(s);
         if("mini".equals(target)) {
             end=WindowControl.miniTarget(start,s.miniPlacement,s.defaultScale,controlSafe(safe,margin),s.miniLarge);
+            end=cascadeMini(s,end);
             s.miniPlacement=end;
         }
         // Change focus after the surface morph; avoid starting a competing native transition first.
@@ -1996,6 +2064,42 @@ final class WindowEngine {
     }
 
     private static RectF visualBounds(Geometry.Placement p){return new RectF(p.x(),p.y(),p.x()+p.width()*p.scale(),p.y()+p.height()*p.scale());}
+    /**
+     * 多个迷你窗都出生在右上角的同一个位置，必须错开。
+     *
+     * 优先向下堆叠，碰到安全区底部就换到左边一列。只处理“出生即迷你”的新窗口；
+     * 用户自己拖动过之后的窗口不再被自动挪位。
+     */
+    private Geometry.Placement cascadeMini(Session s,Geometry.Placement base){
+        Rect b=s.miniBounds;
+        if(base==null||b==null)return base;
+        java.util.List<RectF> used=new java.util.ArrayList<>();
+        for(Session other:pinned){
+            if(other==s||other.placement==null)continue;
+            used.add(visualBounds(other.placement));
+        }
+        if(used.isEmpty())return base;
+        float margin=s.placementMargin;
+        float w=base.width()*base.scale(),h=base.height()*base.scale();
+        float gap=Math.max(margin,8f);
+        float left=b.left+margin,top=b.top+margin,right=b.right-margin,bottom=b.bottom-margin;
+        float x=base.x(),y=base.y();
+        RectF probe=new RectF();
+        for(int attempt=0;attempt<32;attempt++){
+            probe.set(x,y,x+w,y+h);
+            boolean clash=false;
+            for(RectF r:used)if(RectF.intersects(probe,r)){clash=true;break;}
+            if(!clash)break;
+            y+=h+gap;
+            if(y+h>bottom){y=top;x-=w+gap;if(x<left)break;}
+        }
+        if(x==base.x()&&y==base.y())return base;
+        Geometry.Placement moved=new Geometry.Placement(base.width(),base.height(),base.scale(),
+            Math.max(left,Math.min(x,right-w)),Math.max(top,Math.min(y,bottom-h)));
+        log.accept("MINI_CASCADE task="+s.taskId+" x="+Math.round(moved.x())+" y="+Math.round(moved.y()));
+        return moved;
+    }
+
     private long exitCover(Session s){
         if(s.cover!=null&&s.cover.exiting())return 0;
         if(s.placement==null||s.prioritySuspended||s.screenSuspended)return 0;
@@ -3108,6 +3212,8 @@ final class WindowEngine {
         return java.util.List.copyOf(result);
     }
     private void forget(Session s)throws Exception{
+        // 已经退出的会话不能继续挂在迷你窗列表里，否则控制条会留在屏幕上。
+        removePinned(s);
         java.util.ArrayList<Session> next=new java.util.ArrayList<>(sessions);next.remove(s);
         writeJournal(next);sessions=java.util.List.copyOf(next);
         handler.post(WindowEngine.this::updateContinuation);
@@ -3264,8 +3370,13 @@ final class WindowEngine {
         for(Session s:sessions)if(s.token.equals(selected.token))group.add(s);
         group.remove(selected);group.add(selected);
         try{synchronized(lock){
-            if(active!=null&&active.token.equals(selected.token)){active=pinned;pinned=null;}
-            if(pinned!=null&&pinned.token.equals(selected.token))pinned=null;
+            // 被关掉的窗口若占着前台位，让最早挂着的迷你窗接替；只清理同一任务组的其它迷你窗。
+            if(active!=null&&active.token.equals(selected.token)){
+                Session promote=null;
+                for(Session p:pinned)if(!p.token.equals(selected.token)){promote=p;break;}
+                active=promote;removePinned(promote);
+            }
+            for(Session p:new java.util.ArrayList<>(pinned))if(p.token.equals(selected.token))removePinned(p);
             for(Session s:group){
                 rememberOrientation(s);
                 s.restoreForeground=foreground&&s==selected;s.restoring=true;s.animationRev++;
@@ -3330,7 +3441,7 @@ final class WindowEngine {
                         a.opacity(s.task,0);
                     }
                 }
-                sessions=java.util.List.copyOf(ordered);recovering=true;active=null;pinned=null;recoveryRetryState.begin();
+                sessions=java.util.List.copyOf(ordered);recovering=true;active=null;clearPinned();recoveryRetryState.begin();
             }
             if(sessions.isEmpty()){
                 recovering=false;pendingRecovery=null;recoveryRetryState.resetWaits();journal.delete();notifyRecents();note("RESTORED："+why);return;
@@ -3383,11 +3494,17 @@ final class WindowEngine {
     }
     private void fillVisibleFrames(Intent result){
         result.putExtra("normalOccupied",normalOccupied());
-        Session mini=pinned;
-        if(mini!=null&&!mini.restoring){
+        // 多个迷你窗同时挂着时，每个都要有自己的控制条；SystemUI 侧按 taskId 复用窗口。
+        java.util.ArrayList<Intent> frames=new java.util.ArrayList<>();
+        for(Session mini:pinned){
+            if(mini.restoring)continue;
             Intent frame=new Intent().putExtra("protocol",Wire.PROTOCOL).putExtra("state","active")
-                .putExtra("sequence",frameSequence);fillFrame(frame,mini);result.putExtra("pinnedFrame",frame);
+                .putExtra("sequence",frameSequence);fillFrame(frame,mini);
+            frames.add(frame);
         }
+        result.putParcelableArrayListExtra("pinnedFrames",frames);
+        // 旧宿主只认单个 pinnedFrame：保留第一个，避免升级时序里控制条整体消失。
+        if(!frames.isEmpty())result.putExtra("pinnedFrame",frames.get(0));
     }
     private void frameReport(String event){
         Intent i=new Intent(Wire.RESULT).putExtra("protocol",Wire.PROTOCOL).putExtra("event",event)
